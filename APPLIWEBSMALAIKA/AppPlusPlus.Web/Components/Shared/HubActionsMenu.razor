@@ -1,0 +1,119 @@
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+@using Microsoft.JSInterop
+
+<div class="aw-dd aw-actions-menu hub-actions-menu @(_open ? "aw-dd--open" : null)">
+    <button class="aw-btn aw-btn--ghost @CssClass"
+            type="button"
+            @ref="_triggerRef"
+            aria-haspopup="menu"
+            aria-expanded="@_open"
+            title="@(string.IsNullOrEmpty(Label) ? "Plus d'actions" : Label)"
+            @onclick="ToggleAsync"
+            @onclick:stopPropagation="true">
+        @if (string.IsNullOrEmpty(Label))
+        {
+            <i class="bi bi-three-dots-vertical"></i>
+        }
+        else
+        {
+            <i class="bi bi-three-dots-vertical"></i> @Label
+        }
+    </button>
+
+    @if (_open)
+    {
+        <div @ref="_backdropRef" class="aw-float-backdrop"></div>
+        <ul @ref="_panelRef"
+            class="aw-actions-menu__panel aw-float-panel dropdown-menu show"
+            role="menu"
+            @onclick="OnMenuClick"
+            @onclick:stopPropagation="true">
+            @ChildContent
+        </ul>
+    }
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = "Actions";
+    [Parameter] public string? CssClass { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    bool _open;
+    bool _placePending;
+    int? _watchId;
+    DotNetObjectReference<HubActionsMenu>? _overlayRef;
+    ElementReference _triggerRef;
+    ElementReference _panelRef;
+    ElementReference _backdropRef;
+
+    async Task ToggleAsync()
+    {
+        if (_open)
+        {
+            await CloseAsync();
+            return;
+        }
+        _open = true;
+        _placePending = true;
+    }
+
+    void Close() => _ = CloseAsync();
+
+    async Task CloseAsync()
+    {
+        if (!_open) return;
+        await StopWatchAsync();
+        _open = false;
+        _placePending = false;
+    }
+
+    void OnMenuClick() => Close();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_placePending || !_open) return;
+        _placePending = false;
+        await StartWatchAsync();
+    }
+
+    async Task StartWatchAsync()
+    {
+        await StopWatchAsync();
+        try
+        {
+            _overlayRef ??= DotNetObjectReference.Create(this);
+            _watchId = await JS.InvokeAsync<int>("awOverlay.watch", _triggerRef, _panelRef, new
+            {
+                align = "end",
+                minWidth = 200,
+                maxWidth = 280,
+                maxHeight = 360,
+                estimatedHeight = 200,
+                gap = 4
+            }, _backdropRef, _overlayRef);
+        }
+        catch { /* ignore */ }
+    }
+
+    async Task StopWatchAsync()
+    {
+        if (_watchId is null) return;
+        var id = _watchId.Value;
+        _watchId = null;
+        try
+        {
+            await JS.InvokeVoidAsync("awOverlay.unwatch", id);
+        }
+        catch { /* ignore */ }
+    }
+
+    [JSInvokable]
+    public Task OnOverlayDismiss() => CloseAsync();
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopWatchAsync();
+        _overlayRef?.Dispose();
+    }
+}

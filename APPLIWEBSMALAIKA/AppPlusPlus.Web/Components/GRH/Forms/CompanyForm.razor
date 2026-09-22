@@ -1,0 +1,160 @@
+@page "/grh/societes/form"
+@page "/grh/societes/form/{Id:int}"
+@rendermode InteractiveServer
+@inject ICompanyService  CompanyService
+@inject ISnackbar        Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>@AppSettings.AppName — @(_isEdit ? "Modifier société" : "Nouvelle société")</PageTitle>
+
+@if (!_loaded)
+{
+    <div class="aw-page">
+        <div class="aw-loading" style="min-height:200px;">
+            <span class="aw-spinner" role="status" aria-hidden="true"></span>
+            <span>Chargement…</span>
+        </div>
+    </div>
+}
+else
+{
+    <div class="aw-page">
+        <div class="aw-form aw-form--wide">
+            <header class="aw-form__head">
+                <div>
+                    <p class="aw-form__eyebrow">GRH · Organisation</p>
+                    <h1 class="aw-form__title">@(_isEdit ? "Modifier la société" : "Nouvelle société")</h1>
+                </div>
+                <div class="aw-form__actions">
+                    <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                        <i class="bi bi-arrow-left"></i> Annuler
+                    </button>
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="SaveAsync" disabled="@_saving">
+                        <i class="bi bi-check-lg"></i> @(_saving ? "Enregistrement…" : "Enregistrer")
+                    </button>
+                </div>
+            </header>
+            <div class="aw-form__body">
+                <div class="aw-form__grid">
+                    <div class="aw-field">
+                        <label class="aw-field__label">Code <span class="text-danger">*</span></label>
+                        <input class="aw-input" @bind="_form.CompanyCode" placeholder="SOC001" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Raison sociale <span class="text-danger">*</span></label>
+                        <input class="aw-input" @bind="_form.CompanyName" placeholder="Nom de la société" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Ville</label>
+                        <input class="aw-input" @bind="_form.City" placeholder="Tunis" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Téléphone</label>
+                        <input class="aw-input" @bind="_form.Phone" placeholder="+216 XX XXX XXX" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Email</label>
+                        <input class="aw-input" type="email" @bind="_form.Email" placeholder="contact@société.com" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Pays</label>
+                        <input class="aw-input" @bind="_form.Country" placeholder="Tunisie" />
+                    </div>
+                    <div class="aw-field aw-form__span-2">
+                        <label class="aw-field__label">Adresse</label>
+                        <textarea class="form-control" rows="2" style="height:auto;min-height:4rem;" @bind="_form.Address"
+                                  placeholder="Adresse complète"></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    bool _loaded;
+    bool _saving;
+    bool _isEdit => Id > 0;
+
+    CompanyFormData _form = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (_isEdit)
+        {
+            try
+            {
+                var company = await CompanyService.GetCompanyAsync(Id);
+                _form = new CompanyFormData
+                {
+                    CompanyCode = company.CompanyCode,
+                    CompanyName = company.CompanyName,
+                    City        = company.City,
+                    Phone       = company.Phone,
+                    Email       = company.Email,
+                    Country     = company.Country,
+                    Address     = company.Address
+                };
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Erreur : {ex.Message}", Severity.Error);
+                Nav.NavigateTo("/grh?tab=0");
+            }
+        }
+        _loaded = true;
+    }
+
+    async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_form.CompanyCode)) { Snackbar.Add("Le code est obligatoire.", Severity.Warning); return; }
+        if (string.IsNullOrWhiteSpace(_form.CompanyName)) { Snackbar.Add("La raison sociale est obligatoire.", Severity.Warning); return; }
+
+        _saving = true;
+        try
+        {
+            if (_isEdit)
+            {
+                var company = await CompanyService.GetCompanyAsync(Id);
+                company.CompanyCode = _form.CompanyCode.Trim();
+                company.CompanyName = _form.CompanyName.Trim();
+                company.City        = _form.City;
+                company.Phone       = _form.Phone;
+                company.Email       = _form.Email;
+                company.Country     = _form.Country;
+                company.Address     = _form.Address;
+                await CompanyService.UpdateCompanyAsync(company);
+                Snackbar.Add("Société mise à jour.", Severity.Success);
+            }
+            else
+            {
+                var company = await CompanyService.CreateCompanyAsync(_form.CompanyCode.Trim(), _form.CompanyName.Trim());
+                company.City    = _form.City;
+                company.Phone   = _form.Phone;
+                company.Email   = _form.Email;
+                company.Country = _form.Country;
+                company.Address = _form.Address;
+                await CompanyService.UpdateCompanyAsync(company);
+                Snackbar.Add("Société créée.", Severity.Success);
+            }
+            Nav.NavigateTo("/grh?tab=0");
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    void Cancel() => Nav.NavigateTo("/grh?tab=0");
+
+    class CompanyFormData
+    {
+        public string  CompanyCode { get; set; } = "";
+        public string  CompanyName { get; set; } = "";
+        public string? City        { get; set; }
+        public string? Phone       { get; set; }
+        public string? Email       { get; set; }
+        public string? Country     { get; set; }
+        public string? Address     { get; set; }
+    }
+}

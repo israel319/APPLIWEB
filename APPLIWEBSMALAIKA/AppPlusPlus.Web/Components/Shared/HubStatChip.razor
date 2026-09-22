@@ -1,0 +1,58 @@
+@if (Clickable)
+{
+    <button type="button"
+            class="hub-stat-chip hub-stat-chip--@Variant @(Active ? "hub-stat-chip--active" : "")"
+            title="@Title"
+            @onclick="HandleClick">
+        <span class="hub-stat-chip__label">@Label</span>
+        @if (ValueContent != null || !string.IsNullOrEmpty(Value))
+        {
+            <span class="hub-stat-chip__value">
+                @if (ValueContent != null)
+                {
+                    @ValueContent
+                }
+                else
+                {
+                    @Value
+                }
+            </span>
+        }
+    </button>
+}
+else
+{
+    <span class="hub-stat-chip hub-stat-chip--@Variant hub-stat-chip--static" title="@Title">
+        <span class="hub-stat-chip__label">@Label</span>
+        @if (ValueContent != null || !string.IsNullOrEmpty(Value))
+        {
+            <span class="hub-stat-chip__value">
+                @if (ValueContent != null)
+                {
+                    @ValueContent
+                }
+                else
+                {
+                    @Value
+                }
+            </span>
+        }
+    </span>
+}
+
+@code {
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public RenderFragment? ValueContent { get; set; }
+    [Parameter] public string Variant { get; set; } = "neutral";
+    [Parameter] public bool Clickable { get; set; }
+    [Parameter] public bool Active { get; set; }
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public EventCallback OnSelected { get; set; }
+
+    async Task HandleClick()
+    {
+        if (OnSelected.HasDelegate)
+            await OnSelected.InvokeAsync();
+    }
+}

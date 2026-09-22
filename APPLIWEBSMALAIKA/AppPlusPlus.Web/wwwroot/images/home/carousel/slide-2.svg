@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="480" viewBox="0 0 800 480" role="img" aria-label="Univers filles">
+  <rect width="800" height="480" fill="#be185d"/>
+  <rect x="64" y="72" width="672" height="336" fill="#fdf2f8"/>
+  <circle cx="200" cy="240" r="88" fill="#db2777"/>
+  <circle cx="400" cy="240" r="88" fill="#f9a8d4"/>
+  <circle cx="600" cy="240" r="88" fill="#db2777"/>
+  <text x="400" y="420" text-anchor="middle" fill="#831843" font-family="Segoe UI, sans-serif" font-size="26" font-weight="700">Collection Filles</text>
+</svg>

@@ -1,0 +1,93 @@
+@using AppPlusPlus.Domain.Entities.GRH.Employee
+@using AppPlusPlus.Domain.Entities.GRH.Absence
+@using MudBlazor
+
+<MudDialog>
+    <DialogContent>
+        <div class="lov-form-header">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-calendar-x text-primary"></i>
+                <h5>Nouvelle absence</h5>
+            </div>
+        </div>
+        <div class="lov-form-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Employé <span class="text-danger">*</span></label>
+                    <select class="form-select" @bind="Form.EmployeeId">
+                        <option value="0">— Sélectionner —</option>
+                        @foreach (var e in Employees)
+                        {
+                            <option value="@e.Id">@e.LastName @e.FirstName</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Type d'absence <span class="text-danger">*</span></label>
+                    <select class="form-select" @bind="Form.AbsenceTypeId">
+                        <option value="0">— Sélectionner —</option>
+                        @foreach (var at in AbsenceTypes)
+                        {
+                            <option value="@at.Id">@at.AbsenceTypeName</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <AwDateField Label="Date" Value="Form.AbsenceDate"
+                                 ValueChanged="@(v => { if (v.HasValue) Form.AbsenceDate = v.Value; })" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Durée (heures) <span class="text-danger">*</span></label>
+                    <input class="form-control" type="number" @bind="Form.Duration" min="1" max="24" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label fw-semibold">Motif <span class="text-muted">(optionnel)</span></label>
+                    <input class="form-control" @bind="Form.Reason" placeholder="Motif de l'absence" />
+                </div>
+            </div>
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger mt-2 py-2 px-3 small mb-0">@_error</div>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="d-flex gap-2 px-1">
+            <button type="button" class="btn btn-outline-secondary" @onclick="Cancel">
+                <i class="bi bi-x-lg me-1"></i>Annuler
+            </button>
+            <button type="button" class="btn btn-primary" @onclick="Submit">
+                <i class="bi bi-check-lg me-1"></i>Enregistrer
+            </button>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter] public AbsenceFormData Form { get; set; } = new();
+    [Parameter] public List<Employee> Employees { get; set; } = new();
+    [Parameter] public List<AbsenceType> AbsenceTypes { get; set; } = new();
+
+    string _error = "";
+
+    void Cancel() => MudDialog.Cancel();
+
+    void Submit()
+    {
+        if (Form.EmployeeId == 0)   { _error = "Veuillez sélectionner un employé."; return; }
+        if (Form.AbsenceTypeId == 0) { _error = "Veuillez sélectionner un type d'absence."; return; }
+        if (Form.Duration < 1)       { _error = "La durée doit être d'au moins 1 heure."; return; }
+        MudDialog.Close(DialogResult.Ok(Form));
+    }
+
+    public class AbsenceFormData
+    {
+        public int      EmployeeId    { get; set; }
+        public int      AbsenceTypeId { get; set; }
+        public DateTime AbsenceDate   { get; set; } = DateTime.Today;
+        public int      Duration      { get; set; } = 8;
+        public string?  Reason        { get; set; }
+    }
+}

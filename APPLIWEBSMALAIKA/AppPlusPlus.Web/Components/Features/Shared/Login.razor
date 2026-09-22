@@ -1,0 +1,28 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@layout PublicLayout
+@inject NavigationManager Navigation
+
+@code {
+    protected override void OnInitialized()
+    {
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query);
+
+        var target = "/auth/connexion?mode=staff";
+        if (query.ContainsKey("error"))
+            target += "&staff=1&error=1";
+        if (query.ContainsKey("session"))
+            target += "&session=1";
+        if (query.TryGetValue("returnUrl", out var returnValue)
+            || query.TryGetValue("ReturnUrl", out returnValue))
+        {
+            var candidate = returnValue.ToString();
+            if (!string.IsNullOrWhiteSpace(candidate) && candidate.StartsWith('/')
+                && !string.Equals(candidate, "/Error", StringComparison.OrdinalIgnoreCase))
+                target += $"&returnUrl={Uri.EscapeDataString(candidate)}";
+        }
+
+        Navigation.NavigateTo(target, replace: true);
+    }
+}

@@ -1,0 +1,191 @@
+@page "/grh/payroll"
+@using AppPlusPlus.Application.Services.GRH
+@using AppPlusPlus.Application.DTOs.GRH.Payroll
+@using MudBlazor
+@inject IPayrollService PayrollService
+@inject ISnackbar Snackbar
+
+<PageTitle>@AppSettings.AppName — Paie</PageTitle>
+
+<div class="aw-page aw-page--workspace">
+    <div class="aw-workspace">
+        <header class="aw-object-head">
+            <div class="aw-object-head__identity">
+                <p class="aw-object-head__eyebrow">Module GRH</p>
+                <h1 class="aw-object-head__title">Gestion de la paie</h1>
+                <p class="aw-object-head__desc">Périodes, bulletins et totaux</p>
+            </div>
+        </header>
+
+        <div class="aw-workspace__body">
+            <div class="aw-actionbar">
+                <div class="aw-actionbar__filters">
+                    <MudNumericField @bind-Value="selectedYear" Label="Année" Min="2020" Max="2030"
+                                     Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:120px;" />
+                    <MudNumericField @bind-Value="selectedMonth" Label="Mois" Min="1" Max="12"
+                                     Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:100px;" />
+                </div>
+                <div class="aw-actionbar__actions">
+                    <button type="button" class="aw-btn aw-btn--ghost" @onclick="LoadPayrollData">
+                        <i class="bi bi-arrow-clockwise"></i> Charger
+                    </button>
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="CreateNewPayroll">
+                        <i class="bi bi-plus-lg"></i> Nouvelle paie
+                    </button>
+                </div>
+            </div>
+
+            @if (isLoading)
+            {
+                <div class="aw-table-region">
+                    <div class="aw-loading">
+                        <span class="aw-spinner" role="status" aria-hidden="true"></span>
+                        <span>Chargement de la paie…</span>
+                    </div>
+                </div>
+            }
+            else
+            {
+                @if (currentPayroll != null)
+                {
+                    <MudGrid Class="mb-4">
+                        <MudItem xs="12" sm="6" md="3">
+                            <MudCard>
+                                <MudCardContent>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Employés</MudText>
+                                    <MudText Typo="Typo.h5">@currentPayroll.EmployeeCount</MudText>
+                                </MudCardContent>
+                            </MudCard>
+                        </MudItem>
+                        <MudItem xs="12" sm="6" md="3">
+                            <MudCard>
+                                <MudCardContent>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Salaires Bruts</MudText>
+                                    <MudText Typo="Typo.h5">@currentPayroll.TotalGrossSalary.ToString("F2")</MudText>
+                                </MudCardContent>
+                            </MudCard>
+                        </MudItem>
+                        <MudItem xs="12" sm="6" md="3">
+                            <MudCard>
+                                <MudCardContent>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Déductions</MudText>
+                                    <MudText Typo="Typo.h5">@currentPayroll.TotalDeductions.ToString("F2")</MudText>
+                                </MudCardContent>
+                            </MudCard>
+                        </MudItem>
+                        <MudItem xs="12" sm="6" md="3">
+                            <MudCard>
+                                <MudCardContent>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Salaires Nets</MudText>
+                                    <MudText Typo="Typo.h5">@currentPayroll.TotalNetSalary.ToString("F2")</MudText>
+                                </MudCardContent>
+                            </MudCard>
+                        </MudItem>
+                    </MudGrid>
+                }
+
+                @if (payrollRuns.Count > 0)
+                {
+                    <div class="aw-table-region">
+                        <MudDataGrid Items="@payrollRuns" Hover="true" Bordered="false" Dense="true"
+                                     Striped="true" Elevation="0">
+                            <Columns>
+                                <PropertyColumn Property="x => x.PayrollNumber" Title="Numéro" />
+                                <PropertyColumn Property="x => x.Year" Title="Année" />
+                                <PropertyColumn Property="x => x.Month" Title="Mois" />
+                                <PropertyColumn Property="x => x.Status" Title="Statut">
+                                    <CellTemplate>
+                                        <MudChip Size="Size.Small" Label="true"
+                                                 Color="@GetStatusColor(context.Item.Status)">
+                                            @context.Item.Status
+                                        </MudChip>
+                                    </CellTemplate>
+                                </PropertyColumn>
+                                <PropertyColumn Property="x => x.TotalGrossSalary" Title="Brut" />
+                                <PropertyColumn Property="x => x.TotalNetSalary" Title="Net" />
+                                <TemplateColumn CellClass="d-flex gap-2" Title="Actions">
+                                    <CellTemplate>
+                                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Visibility"
+                                                      Color="Color.Info" />
+                                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Print"
+                                                      Color="Color.Primary" />
+                                    </CellTemplate>
+                                </TemplateColumn>
+                            </Columns>
+                        </MudDataGrid>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-cash-stack"></i>
+                            <p>Aucune paie trouvée pour cette période.</p>
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private int selectedYear = DateTime.Now.Year;
+    private int selectedMonth = DateTime.Now.Month;
+    private List<PayrollRunReadDto> payrollRuns = new();
+    private PayrollRunReadDto? currentPayroll;
+    private bool isLoading = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadPayrollData();
+    }
+
+    private async Task LoadPayrollData()
+    {
+        try
+        {
+            isLoading = true;
+            var runs = await PayrollService.GetPayrollsByYearAndMonthAsync(selectedYear, selectedMonth);
+            payrollRuns = runs.Select(run => new PayrollRunReadDto
+            {
+                Id = run.Id,
+                PayrollNumber = run.PayrollNumber,
+                Year = run.Year,
+                Month = run.Month,
+                PayPeriodStartDate = run.PayPeriodStart,
+                PayPeriodEndDate = run.PayPeriodEnd,
+                Status = run.Status.ToString(),
+                EmployeeCount = run.NumberOfEmployees,
+                TotalGrossSalary = run.TotalGrossSalary,
+                TotalDeductions = run.TotalDeductions,
+                TotalNetSalary = run.TotalNetSalary,
+                CreatedAt = run.CreatedAt
+            }).ToList();
+            currentPayroll = payrollRuns.FirstOrDefault();
+            isLoading = false;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Erreur: {ex.Message}", Severity.Error);
+            isLoading = false;
+        }
+    }
+
+    private void CreateNewPayroll()
+    {
+        // TODO: Ouvrir un dialog pour créer une nouvelle paie
+    }
+
+    private Color GetStatusColor(string status)
+    {
+        return status?.ToLower() switch
+        {
+            "draft" => Color.Default,
+            "prepared" => Color.Warning,
+            "approved" => Color.Success,
+            "paid" => Color.Info,
+            _ => Color.Default
+        };
+    }
+}

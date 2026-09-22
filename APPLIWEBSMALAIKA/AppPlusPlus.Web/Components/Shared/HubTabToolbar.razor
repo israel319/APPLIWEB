@@ -1,0 +1,52 @@
+<div class="hub-tab-panel-header">
+    @if (!string.IsNullOrEmpty(ChipText) || !string.IsNullOrEmpty(Hint) || ToolbarMeta != null || Actions != null)
+    {
+        <div class="hub-tab-toolbar">
+            <div class="hub-tab-toolbar__meta">
+                @if (!string.IsNullOrEmpty(ChipText))
+                {
+                    <span class="hub-period-chip">
+                        @if (!string.IsNullOrEmpty(ChipIcon))
+                        {
+                            <i class="bi @ChipIcon"></i>
+                        }
+                        @ChipText
+                    </span>
+                }
+                @if (!string.IsNullOrEmpty(Hint))
+                {
+                    <span class="hub-tab-hint">@Hint</span>
+                }
+                @ToolbarMeta
+            </div>
+            @if (Actions != null)
+            {
+                <div class="hub-tab-toolbar__actions">
+                    @Actions
+                </div>
+            }
+        </div>
+    }
+    @if (Strip != null)
+    {
+        <div class="hub-tab-panel-header__strip">
+            @Strip
+        </div>
+    }
+    @if (Filters != null)
+    {
+        <div class="hub-tab-panel-header__filters">
+            @Filters
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string? ChipIcon { get; set; }
+    [Parameter] public string? ChipText { get; set; }
+    [Parameter] public string? Hint { get; set; }
+    [Parameter] public RenderFragment? ToolbarMeta { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+    [Parameter] public RenderFragment? Strip { get; set; }
+    [Parameter] public RenderFragment? Filters { get; set; }
+}

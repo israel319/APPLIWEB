@@ -1,0 +1,13 @@
+﻿@page "/not-found"
+@attribute [AllowAnonymous]
+@layout PublicLayout
+
+<PageTitle>Page introuvable — @AppSettings.AppName</PageTitle>
+
+<div class="landing-auth">
+    <div class="landing-auth-card text-center">
+        <h1 class="landing-auth-title h4">Page introuvable</h1>
+        <p class="landing-auth-sub mb-4">Le contenu demandé n'existe pas ou a été déplacé.</p>
+        <a href="/catalogue" data-enhance-nav="false" class="landing-btn landing-btn--primary landing-btn--block">Retour au catalogue</a>
+    </div>
+</div>

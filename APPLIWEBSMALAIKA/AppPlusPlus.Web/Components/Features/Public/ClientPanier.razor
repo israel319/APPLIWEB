@@ -1,0 +1,498 @@
+@page "/client/panier"
+@attribute [AllowAnonymous]
+@layout PublicLayout
+@rendermode PublicRenderMode.Instance
+@using System.Security.Claims
+@using AppPlusPlus.Application.DTOs.Commandes
+@using AppPlusPlus.Domain.Entities.Commandes
+@using AppPlusPlus.Web.Services
+@inject IClientCartService Cart
+@inject ICommandeService CommandeService
+@inject ICatalogueService CatalogueService
+@inject IPublicCatalogPricingService CatalogPricing
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+@implements IDisposable
+
+<PageTitle>@(_activeTab == ClientTab.Commandes ? "Mes commandes" : "Mon panier") — @PublicBrand.ProductName</PageTitle>
+
+<div class="landing-panier landing-panier--malaika">
+    <div class="ali-container landing-panier-inner">
+        <div class="ali-panier-sheet">
+        <header class="landing-panier-topbar">
+            <a href="/#catalogue" class="landing-panier-back" aria-label="Retour à l'accueil — catalogue">
+                <i class="bi bi-chevron-left" aria-hidden="true"></i>
+            </a>
+            <div class="landing-panier-topbar__center">
+                <div class="landing-panier-topbar__title-row">
+                    <h1 class="landing-panier-title">
+                        @(_activeTab == ClientTab.Commandes ? "Mes commandes" : "Mon panier")
+                    </h1>
+                    @if (_activeTab == ClientTab.Panier && Cart.TotalQuantity > 0)
+                    {
+                        <span class="landing-panier-count" aria-label="@($"{Cart.TotalQuantity} articles")">@Cart.TotalQuantity</span>
+                    }
+                </div>
+                @if (_activeTab == ClientTab.Panier && Cart.TotalQuantity > 0)
+                {
+                    <p class="landing-panier-topbar__meta">
+                        @Cart.TotalQuantity article@(Cart.TotalQuantity > 1 ? "s" : "")
+                    </p>
+                }
+                else if (_activeTab == ClientTab.Commandes && _orders.Count > 0)
+                {
+                    <p class="landing-panier-topbar__meta">
+                        @_orders.Count commande@(_orders.Count > 1 ? "s" : "")
+                    </p>
+                }
+            </div>
+            @if (_activeTab == ClientTab.Panier && Cart.Items.Any())
+            {
+                <button type="button"
+                        class="landing-panier-topbar__clear"
+                        @onclick="ClearCartAsync"
+                        aria-label="Vider le panier"
+                        title="Vider le panier">
+                    <i class="bi bi-trash3" aria-hidden="true"></i>
+                </button>
+            }
+            else
+            {
+                <span class="landing-panier-topbar__spacer" aria-hidden="true"></span>
+            }
+        </header>
+
+        @if (_isClient)
+        {
+            <nav class="landing-panier-tabs" aria-label="Sections commande">
+                <button type="button"
+                        class="landing-panier-tab @(_activeTab == ClientTab.Panier ? "landing-panier-tab--active" : "")"
+                        @onclick="@(() => SetTab(ClientTab.Panier))">
+                    Panier
+                    @if (Cart.TotalQuantity > 0)
+                    {
+                        <span class="landing-panier-tab__badge">@Cart.TotalQuantity</span>
+                    }
+                </button>
+                <button type="button"
+                        class="landing-panier-tab @(_activeTab == ClientTab.Commandes ? "landing-panier-tab--active" : "")"
+                        @onclick="@(() => SetTab(ClientTab.Commandes))">
+                    Mes commandes
+                    @if (_orders.Count > 0)
+                    {
+                        <span class="landing-panier-tab__badge">@_orders.Count</span>
+                    }
+                </button>
+            </nav>
+        }
+
+        @if (_successOrderId > 0)
+        {
+            <div class="alert alert-success py-2 mb-2">
+                <i class="bi bi-check-circle me-1"></i>
+                Commande N° @_successOrderId enregistrée. Suivez son avancement ci-dessous.
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <div class="alert alert-danger py-2 mb-2">@_errorMessage</div>
+        }
+
+        @if (_activeTab == ClientTab.Commandes && _isClient)
+        {
+            @if (_ordersLoading)
+            {
+                <PublicPageSkeleton Variant="rows" Count="4" />
+            }
+            else if (!_orders.Any())
+            {
+                <div class="landing-panier-empty">
+                    <i class="bi bi-receipt"></i>
+                    <p>Vous n'avez pas encore passé de commande.</p>
+                    <a href="/#catalogue" class="landing-btn landing-btn--solid landing-btn--block">Voir le catalogue</a>
+                </div>
+            }
+            else
+            {
+                <div class="landing-cmd-list">
+                    @foreach (var order in _orders)
+                    {
+                        var expanded = _expandedOrderId == order.CommandeId;
+                        <article class="landing-cmd-card">
+                            <button type="button"
+                                    class="landing-cmd-card__head"
+                                    aria-expanded="@expanded"
+                                    @onclick="@(() => ToggleOrder(order.CommandeId))">
+                                <div class="landing-cmd-card__head-main">
+                                    <span class="landing-cmd-card__num">Commande N° @order.CommandeId</span>
+                                    <span class="landing-cmd-card__date">@FormatOrderDate(order.CreationDate)</span>
+                                </div>
+                                <span class="landing-cmd-status @order.StatusCssClass">@order.StatusLabel</span>
+                                <i class="bi bi-chevron-@(expanded ? "up" : "down") landing-cmd-card__chevron"></i>
+                            </button>
+
+                            <div class="landing-cmd-card__summary">
+                                <span>@order.Lines.Count article@(order.Lines.Count > 1 ? "s" : "")</span>
+                                <strong>@CurrencyFormat.Cdf(order.MontantTotalFc, "N0")</strong>
+                            </div>
+
+                            <div class="landing-cmd-delivery">
+                                <div class="landing-cmd-delivery__label">
+                                    <span>Livraison</span>
+                                    <span>@($"{order.TotalQtyDelivered:N0} / {order.TotalQtyOrdered:N0}")</span>
+                                </div>
+                                <div class="landing-cmd-delivery__bar">
+                                    <span class="landing-cmd-delivery__fill" style="width:@($"{order.DeliveryProgressPercent}%")"></span>
+                                </div>
+                            </div>
+
+                            @if (expanded)
+                            {
+                                <div class="landing-cmd-card__body">
+                                    <h3 class="landing-cmd-section-title">Articles commandés</h3>
+                                    <ul class="landing-cmd-lines">
+                                        @foreach (var line in order.Lines)
+                                        {
+                                            <li class="landing-cmd-line">
+                                                <div class="landing-cmd-line__main">
+                                                    <span class="landing-cmd-line__name">@line.ArticleName</span>
+                                                    <span class="landing-cmd-line__price">@CurrencyFormat.Cdf(line.LineTotalFc, "N0")</span>
+                                                </div>
+                                                <div class="landing-cmd-line__meta">
+                                                    Qté @($"{line.QteLivree:N0}") / @($"{line.Qte:N0}") livrée@(line.Qte > 1 ? "s" : "")
+                                                </div>
+                                            </li>
+                                        }
+                                    </ul>
+
+                                    <h3 class="landing-cmd-section-title">Livraisons</h3>
+                                    @if (order.Livraisons.Any())
+                                    {
+                                        <ul class="landing-cmd-livraisons">
+                                            @foreach (var liv in order.Livraisons)
+                                            {
+                                                <li class="landing-cmd-livraison">
+                                                    <i class="bi bi-truck"></i>
+                                                    <div class="landing-cmd-livraison__body">
+                                                        <strong>@liv.StatusLabel</strong>
+                                                        <span>@FormatOrderDate(liv.Date) · @liv.Porteur</span>
+                                                    </div>
+                                                </li>
+                                            }
+                                        </ul>
+                                    }
+                                    else
+                                    {
+                                        <p class="landing-cmd-no-livraison">
+                                            Votre commande est enregistrée. La livraison sera planifiée prochainement.
+                                        </p>
+                                    }
+
+                                    @if (order.Status >= 3 && order.MontantRest <= 0)
+                                    {
+                                        <p class="landing-cmd-paid-note">
+                                            <i class="bi bi-check-circle-fill me-1"></i>
+                                            Commande facturée et soldée.
+                                        </p>
+                                    }
+                                    else if (order.MontantRest > 0 && order.Status >= 2)
+                                    {
+                                        <p class="landing-cmd-balance-note">
+                                            Solde restant : @CurrencyFormat.Cdf(order.MontantRest, "N0")
+                                        </p>
+                                    }
+                                </div>
+                            }
+                        </article>
+                    }
+
+                    <div class="landing-cmd-footer">
+                        <a href="/#catalogue" class="landing-btn landing-btn--solid landing-btn--block">Commander à nouveau</a>
+                    </div>
+                </div>
+            }
+        }
+        else if (!Cart.Items.Any())
+        {
+            <div class="landing-panier-empty">
+                <i class="bi bi-cart3"></i>
+                <p>Votre panier est vide.</p>
+                @if (_isClient && _orders.Count > 0)
+                {
+                    <button type="button" class="landing-btn landing-btn--outline landing-btn--block mb-2" @onclick="@(() => SetTab(ClientTab.Commandes))">
+                        Voir mes @_orders.Count commande@(_orders.Count > 1 ? "s" : "")
+                    </button>
+                }
+                <a href="/#catalogue" class="landing-btn landing-btn--solid landing-btn--block">Voir le catalogue</a>
+            </div>
+        }
+        else
+        {
+            <div class="landing-panier-card">
+                @foreach (var line in Cart.Items.OrderBy(l => l.Description))
+                {
+                    <div class="landing-panier-line">
+                        <button type="button"
+                                class="landing-panier-line__remove"
+                                aria-label="@($"Retirer {line.Description}")"
+                                title="Retirer"
+                                @onclick="@(() => RemoveLine(line.ArticleId))">
+                            <i class="bi bi-x-lg" aria-hidden="true"></i>
+                        </button>
+                        @if (!string.IsNullOrWhiteSpace(line.ImageArticle))
+                        {
+                            <img src="@line.ImageArticle" alt="" class="landing-panier-line__thumb" loading="lazy" decoding="async" />
+                        }
+                        else
+                        {
+                            <div class="landing-panier-line__thumb landing-panier-line__thumb--empty">
+                                <i class="bi bi-box-seam"></i>
+                            </div>
+                        }
+
+                        <div class="landing-panier-line__body">
+                            <div class="landing-panier-line__row">
+                                <strong class="landing-panier-line__name">@line.Description</strong>
+                                <span class="landing-panier-line__total">@CatalogPricing.FormatLineTotal(line.Pu, line.IdMonais, line.Qty)</span>
+                            </div>
+                            <div class="landing-panier-line__row landing-panier-line__row--sub">
+                                <span class="landing-panier-line__unit">@CatalogPricing.FormatUnit(line.Pu, line.IdMonais) × @line.Qty</span>
+                                <div class="landing-panier-line__qty">
+                                    <button type="button" class="landing-panier-qty-btn" aria-label="Diminuer" @onclick="@(() => ChangeQty(line.ArticleId, -1))">−</button>
+                                    <span class="landing-panier-line__qty-val">@line.Qty</span>
+                                    <button type="button" class="landing-panier-qty-btn" aria-label="Augmenter" @onclick="@(() => ChangeQty(line.ArticleId, 1))">+</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            @if (_isClient && !string.IsNullOrWhiteSpace(_clientName))
+            {
+                <div class="landing-panier-client landing-panier-client--connected">
+                    <div class="landing-panier-client__row">
+                        <i class="bi bi-person-check" aria-hidden="true"></i>
+                        <span class="landing-panier-client__name">@_clientName</span>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_clientContact))
+                    {
+                        <div class="landing-panier-client__row landing-panier-client__row--phone">
+                            <i class="bi bi-phone" aria-hidden="true"></i>
+                            <span>@_clientContact</span>
+                        </div>
+                    }
+                    <p class="landing-panier-client__actions">
+                        <a href="/client/compte">Vérifier mon numéro</a>
+                        ·
+                        <a href="/auth/client/logout">Changer</a>
+                    </p>
+                </div>
+            }
+
+            <div class="landing-panier-checkout">
+                <div class="landing-panier-total">
+                    <span>Total (@Cart.TotalQuantity art.)</span>
+                    <strong>@CatalogPricing.FormatOrderTotal(
+                        Cart.Items.Select(l => (l.Pu, l.IdMonais, (decimal)l.Qty)))</strong>
+                </div>
+
+                <button type="button"
+                        class="landing-btn landing-btn--solid landing-btn--block landing-panier-submit"
+                        disabled="@_submitting"
+                        @onclick="CommanderAsync">
+                    @if (_submitting)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1"></span>
+                    }
+                    <i class="bi bi-cart-check me-1"></i>
+                    @(_isClient ? "Valider la commande" : "Commander")
+                </button>
+
+                @if (!_isClient)
+                {
+                    <p class="landing-panier-hint">Connectez-vous pour valider votre commande.</p>
+                    <p class="landing-panier-signup">
+                        <a href="@ConnexionUrl">Se connecter</a>
+                        ·
+                        <a href="@InscriptionUrl">Créer un compte</a>
+                    </p>
+                }
+            </div>
+        }
+        </div>
+    </div>
+</div>
+
+@code {
+    enum ClientTab { Panier, Commandes }
+
+    bool _submitting;
+    bool _isClient;
+    bool _ordersLoading;
+    int _customerId;
+    string _clientName = "";
+    string _clientContact = "";
+    string? _errorMessage;
+    int _successOrderId;
+    ClientTab _activeTab = ClientTab.Panier;
+    int? _expandedOrderId;
+    List<ClientCommandeSummaryDto> _orders = new();
+
+    string ConnexionUrl => $"/auth/connexion?returnUrl={Uri.EscapeDataString("/client/panier")}";
+    string InscriptionUrl => $"/client/inscription?returnUrl={Uri.EscapeDataString("/client/panier")}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Cart.Changed += OnCartChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _initialized)
+            return;
+
+        _initialized = true;
+        try
+        {
+            await CatalogPricing.EnsureLoadedAsync();
+            await RefreshAuthAsync();
+            await Cart.InitializeAsync();
+            await Cart.RefreshPricesFromCatalogAsync(CatalogueService);
+            if (_isClient && _customerId > 0)
+                await LoadOrdersAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch
+        {
+            // Panier localStorage indisponible : ignorer.
+        }
+    }
+
+    bool _initialized;
+
+    async Task RefreshAuthAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var role = auth.User.FindFirst(ClaimTypes.Role)?.Value;
+        _isClient = AppFunctions.IsClientRole(role);
+        _clientName = auth.User.FindFirst(ClaimTypes.Name)?.Value ?? "";
+        _clientContact = auth.User.FindFirst(ClientAuth.ContactClaim)?.Value ?? "";
+
+        var customerIdClaim = auth.User.FindFirst(ClientAuth.CustomerIdClaim)?.Value;
+        _customerId = int.TryParse(customerIdClaim, out var id) ? id : 0;
+    }
+
+    async Task LoadOrdersAsync()
+    {
+        if (_customerId <= 0)
+        {
+            _orders = new();
+            return;
+        }
+
+        _ordersLoading = true;
+        try
+        {
+            _orders = await CommandeService.GetClientCommandesAsync(_customerId);
+            if (!Cart.Items.Any() && _orders.Count > 0 && _successOrderId <= 0)
+                _activeTab = ClientTab.Commandes;
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _ordersLoading = false;
+        }
+    }
+
+    void SetTab(ClientTab tab)
+    {
+        _activeTab = tab;
+        if (tab == ClientTab.Commandes && _successOrderId > 0)
+            _successOrderId = 0;
+    }
+
+    void ToggleOrder(int commandeId) =>
+        _expandedOrderId = _expandedOrderId == commandeId ? null : commandeId;
+
+    void OnCartChanged() => InvokeAsync(StateHasChanged);
+
+    async Task ChangeQty(string articleId, int delta) =>
+        await Cart.ChangeQuantityAsync(articleId, delta);
+
+    async Task RemoveLine(string articleId) =>
+        await Cart.RemoveArticleAsync(articleId);
+
+    async Task ClearCartAsync() => await Cart.ClearAsync();
+
+    async Task CommanderAsync()
+    {
+        if (!Cart.Items.Any())
+            return;
+
+        if (!_isClient)
+        {
+            Navigation.NavigateTo(ConnexionUrl);
+            return;
+        }
+
+        if (_customerId <= 0)
+        {
+            Navigation.NavigateTo(ConnexionUrl);
+            return;
+        }
+
+        _submitting = true;
+        _errorMessage = null;
+        try
+        {
+            var commande = new Commande
+            {
+                CustomerId = _customerId,
+                CommandeDescription = "Commande en ligne",
+                MontantTotal = 0,
+                MontantPaye = 0,
+                MontantRest = 0,
+                Status = 0,
+                UserLogin = "WEB",
+                CreationDate = DateTime.Now
+            };
+
+            var details = Cart.Items.Select(l => new CommandeDetail
+            {
+                ArticleId = l.ArticleId,
+                Qte = l.Qty,
+                Pu = l.Pu,
+                MoneyId = l.IdMonais,
+                QteRest = l.Qty,
+                QtePrise = 0,
+                Status = 0
+            }).ToList();
+
+            await CommandeService.SaveCommandeAsync(commande, details);
+            _successOrderId = commande.CommandeId;
+            await Cart.ClearAsync();
+            _activeTab = ClientTab.Commandes;
+            await LoadOrdersAsync();
+            _expandedOrderId = commande.CommandeId;
+        }
+        catch (Exception ex)
+        {
+            _successOrderId = 0;
+            _errorMessage = ex.InnerException?.Message ?? ex.Message;
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    static string FormatOrderDate(DateTime? date) =>
+        date?.ToString("dd/MM/yyyy HH:mm") ?? "—";
+
+    public void Dispose() => Cart.Changed -= OnCartChanged;
+}

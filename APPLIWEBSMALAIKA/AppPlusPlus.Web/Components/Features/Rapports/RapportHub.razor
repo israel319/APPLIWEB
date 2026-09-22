@@ -1,0 +1,2562 @@
+@page "/rapports"
+@using MudBlazor
+@rendermode InteractiveServer
+@implements IDisposable
+@inject IRapportQueryService RapportQuery
+@inject ILocalisationService LocalisationService
+@inject IFinanceService FinanceService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+@inject IJSRuntime JS
+@inject MudBlazor.IDialogService DialogService
+@inject ISnackbar Snackbar
+@using System.Security.Claims
+@using AppPlusPlus.Application.Services.Finance
+@using AppPlusPlus.Application.Services.Rapports
+@using AppPlusPlus.Application.DTOs.Rapports
+@using AppPlusPlus.Domain.Entities.Finance
+
+<ModuleGuard ModuleCode="rapports" ModuleName="Rapports & Analyses">
+
+<PageTitle>@AppSettings.AppName — Rapports</PageTitle>
+
+@if (!_loaded)
+{
+    <div class="aw-page">
+        <AwSkeleton Variant="page" Rows="7" />
+    </div>
+}
+else if (!_canRapportsRead)
+{
+    <div class="aw-page">
+        <div class="aw-shell" style="max-width:720px;margin:1.5rem auto;">
+            <div class="aw-empty">
+                <i class="bi bi-lock"></i>
+                <p><strong>Accès refusé</strong><br />Votre rôle ne possède pas les droits d'accès au module Rapports.</p>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="aw-page aw-page--workspace">
+        <div class="aw-workspace">
+            <header class="aw-object-head">
+                <div class="aw-object-head__identity">
+                    <p class="aw-object-head__eyebrow">Module rapports</p>
+                    <h1 class="aw-object-head__title">Rapports &amp; Analyses</h1>
+                    <p class="aw-object-head__desc">@GetRapportSectionDescription()</p>
+                </div>
+            </header>
+
+            <nav class="aw-railnav" aria-label="Sections rapports" role="tablist">
+                <button type="button" role="tab" aria-selected="@(_tab == 0)"
+                        class="aw-railnav__item @(_tab == 0 ? "aw-railnav__item--active" : "")"
+                        title="Bilan et historique d'activité"
+                        @onclick="@(async () => await OnTabChange(0))">
+                    <i class="bi bi-activity" aria-hidden="true"></i>
+                    Activité
+                </button>
+                <button type="button" role="tab" aria-selected="@(_tab == 1)"
+                        class="aw-railnav__item @(_tab == 1 ? "aw-railnav__item--active" : "")"
+                        title="Ventes par lignes et factures"
+                        @onclick="@(async () => await OnTabChange(1))">
+                    <i class="bi bi-graph-up-arrow" aria-hidden="true"></i>
+                    Ventes
+                </button>
+                <button type="button" role="tab" aria-selected="@(_tab == 2)"
+                        class="aw-railnav__item @(_tab == 2 ? "aw-railnav__item--active" : "")"
+                        title="Commandes, marges et mouvements"
+                        @onclick="@(async () => await OnTabChange(2))">
+                    <i class="bi bi-truck" aria-hidden="true"></i>
+                    Achats &amp; Appro
+                </button>
+                <button type="button" role="tab" aria-selected="@(_tab == 3)"
+                        class="aw-railnav__item @(_tab == 3 ? "aw-railnav__item--active" : "")"
+                        title="Inventaire stock"
+                        @onclick="@(async () => await OnTabChange(3))">
+                    <i class="bi bi-box-seam" aria-hidden="true"></i>
+                    Stock
+                </button>
+            </nav>
+
+            <div class="aw-workspace__body">
+
+            @* ══════════════════ ACTIVITÉ ══════════════════ *@
+            @if (_tab == 0)
+            {
+                <nav class="aw-modnav" aria-label="Vues activité" role="tablist">
+                    <button type="button" role="tab" aria-selected="@(_activiteView == "bilan")"
+                            class="aw-modnav__item @(_activiteView == "bilan" ? "aw-modnav__item--active" : "")"
+                            @onclick='@(async () => await OnActiviteViewChanged("bilan"))'>
+                        <i class="bi bi-graph-up" aria-hidden="true"></i>
+                        <span>Bilan</span>
+                    </button>
+                    <button type="button" role="tab" aria-selected="@(_activiteView == "historique")"
+                            class="aw-modnav__item @(_activiteView == "historique" ? "aw-modnav__item--active" : "")"
+                            @onclick='@(async () => await OnActiviteViewChanged("historique"))'>
+                        <i class="bi bi-clock-history" aria-hidden="true"></i>
+                        <span>Historique</span>
+                    </button>
+                </nav>
+
+                @if (_activiteView == "bilan")
+                {
+                    var bilanPageItems = PageOf(_bilanFiltered, _bilanPage, _bilanPageSize).ToList();
+
+                    @if (_bilanRows.Any() || _bilanLoading)
+                    {
+                        <section class="aw-overview" aria-label="Vue d'ensemble bilan">
+                            <div class="aw-overview__top">
+                                <div class="aw-overview__intro">
+                                    <h2 class="aw-overview__title">@_bilanTitre</h2>
+                                    <p class="aw-overview__lead">Synthèse des ventes, approvisionnements et bénéfice sur la période.</p>
+                                </div>
+                                <div class="@($"aw-overview__cover {(_bilanBenefice >= 0 ? "aw-overview__cover--brand" : "aw-overview__cover--danger")}")">
+                                    <span class="aw-overview__cover-value"><CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Business" Amount="_bilanBenefice" /></span>
+                                    <span class="aw-overview__cover-label">bénéfice</span>
+                                </div>
+                            </div>
+                            <div class="aw-overview__metrics">
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-receipt"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">Factures</span>
+                                        <span class="aw-overview__metric-value">@_bilanNbFactures</span>
+                                    </div>
+                                </article>
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-graph-up-arrow"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">Ventes</span>
+                                        <span class="aw-overview__metric-value"><CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Business" Amount="_bilanTotalVentes" /></span>
+                                    </div>
+                                </article>
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-truck"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">Appros</span>
+                                        <span class="aw-overview__metric-value"><CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Business" Amount="_bilanTotalAppros" /></span>
+                                    </div>
+                                </article>
+                            </div>
+                        </section>
+                    }
+
+                    <div class="aw-actionbar">
+                        <div class="aw-actionbar__search">
+                            <i class="bi bi-search" aria-hidden="true"></i>
+                            <input type="search"
+                                   placeholder="Rechercher (réf., description, utilisateur…)"
+                                   aria-label="Rechercher dans le bilan"
+                                   @bind="_bilanSearch"
+                                   @bind:event="oninput"
+                                   @bind:after="ApplyBilanFilter" />
+                        </div>
+                        <div class="aw-actionbar__filters">
+                            <AwSearchSelect AriaLabel="Période bilan"
+                                            Placeholder="Période"
+                                            Searchable="false"
+                                            Value="@_bilanPeriode"
+                                            ValueChanged="OnBilanPeriodeSelectChanged"
+                                            Options="@_bilanPeriodeOptions" />
+                            <AwDateRange AriaLabel="Date du bilan"
+                                         SingleDay="@(_bilanPeriode == "jour")"
+                                         ApplyOnSelect="@(_bilanPeriode == "jour")"
+                                         PersistKey="rapports.bilan"
+                                         From="_bilanFrom"
+                                         To="_bilanTo"
+                                         FromChanged="OnBilanFromChanged"
+                                         ToChanged="OnBilanToChanged"
+                                         Changed="LoadBilan" />
+                            <AwSearchSelect AriaLabel="Utilisateur"
+                                            Placeholder="Utilisateur"
+                                            Searchable="true"
+                                            Value="@(_bilanUserFilter ?? "")"
+                                            ValueChanged="OnBilanUserFilterChanged"
+                                            Options="@ToFilterOptions(_bilanRows.Select(r => r.Utilisateur), "Utilisateur : tous")" />
+                            <AwSearchSelect AriaLabel="Type"
+                                            Placeholder="Type"
+                                            Searchable="false"
+                                            Value="@(_bilanTypeFilter ?? "")"
+                                            ValueChanged="OnBilanTypeFilterChanged"
+                                            Options="@ToFilterOptions(_bilanRows.Select(r => r.Type), "Type : tous")" />
+                        </div>
+                        <div class="aw-actionbar__actions">
+                            <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="LoadBilan">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                            <HubActionsMenu>
+                                <li><button type="button" class="dropdown-item" @onclick="@ExportBilanExcel" disabled="@(!_bilanRows.Any())"><i class="bi bi-file-earmark-excel me-2"></i>Exporter Excel</button></li>
+                                <li><button type="button" class="dropdown-item" @onclick="@(() => JS.InvokeVoidAsync("printReport"))"><i class="bi bi-printer me-2"></i>Imprimer</button></li>
+                                <li><button type="button" class="dropdown-item" @onclick="@SendBilanEmail" disabled="@(!_bilanRows.Any())"><i class="bi bi-envelope me-2"></i>Envoyer par email</button></li>
+                            </HubActionsMenu>
+                        </div>
+                    </div>
+
+                    @if (_bilanLoading)
+                    {
+                        <div class="aw-table-region">
+                            <AwSkeleton Variant="table" Rows="5" />
+                        </div>
+                    }
+                    else if (!bilanPageItems.Any())
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-empty">
+                                <i class="bi bi-activity"></i>
+                                <p>Aucune ligne d'activité pour ces filtres.</p>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Type</th>
+                                            <th>Réf.</th>
+                                            <th>Description</th>
+                                            <th class="aw-table__num">Qté</th>
+                                            <th class="aw-table__num">Montant</th>
+                                            <th>Utilisateur</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var r in bilanPageItems)
+                                        {
+                                            var typeBadge = r.Type switch
+                                            {
+                                                "Vente" => "aw-badge--brand",
+                                                "Appro" => "aw-badge--accent",
+                                                "Transfert" => "aw-badge--accent",
+                                                _ => "aw-badge--muted"
+                                            };
+                                            <tr>
+                                                <td>@r.Date.ToString("dd/MM/yyyy")</td>
+                                                <td><span class="aw-badge @typeBadge">@r.Type</span></td>
+                                                <td><span class="aw-table__meta">@r.Reference</span></td>
+                                                <td><span class="aw-table__title">@r.Description</span></td>
+                                                <td class="aw-table__num">@r.Qte.ToString("N0")</td>
+                                                <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.Business" Amount="r.Montant" /></td>
+                                                <td>@r.Utilisateur</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            <AwPager TotalCount="_bilanFiltered.Count"
+                                     Page="_bilanPage"
+                                     PageSize="_bilanPageSize"
+                                     ItemLabel="ligne"
+                                     PageChanged="SetBilanPage"
+                                     PageSizeChanged="SetBilanPageSize" />
+                            <div class="d-flex justify-content-end mt-2 gap-3">
+                                <small class="aw-table__meta">@_bilanFiltered.Count lignes</small>
+                                <small class="fw-bold" style="color:var(--aw-brand);">Total : <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Business" Amount="_bilanFiltered.Sum(r => r.Montant)" /></small>
+                            </div>
+                        </div>
+                    }
+                }
+
+                @if (_activiteView == "historique")
+                {
+                    var histoPageItems = PageOf(_histoFiltered, _histoPage, _histoPageSize).ToList();
+                    var histoVentes = _histoFiltered.Count(r => r.Type == "Vente");
+                    var histoAppros = _histoFiltered.Count(r => r.Type == "Appro");
+
+                    @if (_histoData.Any() || _histoLoading)
+                    {
+                        <section class="aw-overview" aria-label="Vue d'ensemble historique">
+                            <div class="aw-overview__top">
+                                <div class="aw-overview__intro">
+                                    <h2 class="aw-overview__title">Historique d'activité</h2>
+                                    <p class="aw-overview__lead">Chronologie des ventes et approvisionnements avec statut.</p>
+                                </div>
+                                <div class="aw-overview__cover aw-overview__cover--brand">
+                                    <span class="aw-overview__cover-value">@_histoFiltered.Count</span>
+                                    <span class="aw-overview__cover-label">opération(s)</span>
+                                </div>
+                            </div>
+                            <div class="aw-overview__metrics">
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-cart-check"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">Ventes</span>
+                                        <span class="aw-overview__metric-value">@histoVentes</span>
+                                    </div>
+                                </article>
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-box-arrow-in-down"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">Appros</span>
+                                        <span class="aw-overview__metric-value">@histoAppros</span>
+                                    </div>
+                                </article>
+                            </div>
+                        </section>
+                    }
+
+                    <div class="aw-actionbar">
+                        <div class="aw-actionbar__search">
+                            <i class="bi bi-search" aria-hidden="true"></i>
+                            <input type="search"
+                                   placeholder="Rechercher (réf., description, utilisateur…)"
+                                   aria-label="Rechercher dans l'historique"
+                                   @bind="_histoSearch"
+                                   @bind:event="oninput"
+                                   @bind:after="ApplyHistoriqueFilter" />
+                        </div>
+                        <div class="aw-actionbar__filters">
+                            <AwDateRange AriaLabel="Période historique"
+                                         PersistKey="rapports.historique"
+                                         From="_histoFrom"
+                                         To="_histoTo"
+                                         FromChanged="OnHistoFromChanged"
+                                         ToChanged="OnHistoToChanged"
+                                         Changed="LoadHistorique" />
+                            <AwSearchSelect AriaLabel="Utilisateur"
+                                            Placeholder="Utilisateur"
+                                            Searchable="true"
+                                            Value="@(_histoUserFilter ?? "")"
+                                            ValueChanged="OnHistoUserFilterChanged"
+                                            Options="@ToFilterOptions(_histoData.Select(r => r.Utilisateur), "Utilisateur : tous")" />
+                            <AwSearchSelect AriaLabel="Type"
+                                            Placeholder="Type"
+                                            Searchable="false"
+                                            Value="@(_histoTypeFilter ?? "")"
+                                            ValueChanged="OnHistoTypeFilterChanged"
+                                            Options="@GetHistoTypeFilterOptions()" />
+                        </div>
+                        <div class="aw-actionbar__actions">
+                            <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="LoadHistorique">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                            <HubActionsMenu>
+                                <li><button type="button" class="dropdown-item" @onclick="@ExportHistoExcel" disabled="@(!_histoFiltered.Any())"><i class="bi bi-file-earmark-excel me-2"></i>Exporter Excel</button></li>
+                                <li><button type="button" class="dropdown-item" @onclick="@(() => JS.InvokeVoidAsync("printReport"))"><i class="bi bi-printer me-2"></i>Imprimer</button></li>
+                            </HubActionsMenu>
+                        </div>
+                    </div>
+
+                    @if (_histoLoading)
+                    {
+                        <div class="aw-table-region">
+                            <AwSkeleton Variant="table" Rows="5" />
+                        </div>
+                    }
+                    else if (!histoPageItems.Any())
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-empty">
+                                <i class="bi bi-clock-history"></i>
+                                <p>Aucun historique pour ces filtres.</p>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Type</th>
+                                            <th>Réf.</th>
+                                            <th>Description</th>
+                                            <th class="aw-table__num">Montant</th>
+                                            <th>Statut</th>
+                                            <th>Utilisateur</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var r in histoPageItems)
+                                        {
+                                            var histoTypeBadge = r.Type switch
+                                            {
+                                                "Vente" => "aw-badge--brand",
+                                                "Appro" => "aw-badge--accent",
+                                                _ => "aw-badge--muted"
+                                            };
+                                            var histoStatBadge = r.StatusLabel switch
+                                            {
+                                                "Payée" or "Effectué" => "aw-badge--brand",
+                                                "Brouillon" => "aw-badge--accent",
+                                                "Annulée" => "aw-badge--danger",
+                                                "Validée" => "aw-badge--accent",
+                                                _ => "aw-badge--muted"
+                                            };
+                                            <tr style="@(r.FactId.HasValue ? "cursor:pointer;" : null)" @onclick="@(() => OnHistoRowClick(r))">
+                                                <td>@r.DateOp.ToString("dd/MM/yyyy HH:mm")</td>
+                                                <td><span class="aw-badge @histoTypeBadge">@r.Type</span></td>
+                                                <td><span class="aw-table__meta">@r.Reference</span></td>
+                                                <td><span class="aw-table__title">@r.Description</span></td>
+                                                <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.Business" Amount="r.Montant" /></td>
+                                                <td><span class="aw-badge @histoStatBadge">@r.StatusLabel</span></td>
+                                                <td>@r.Utilisateur</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            <AwPager TotalCount="_histoFiltered.Count"
+                                     Page="_histoPage"
+                                     PageSize="_histoPageSize"
+                                     ItemLabel="ligne"
+                                     PageChanged="SetHistoPage"
+                                     PageSizeChanged="SetHistoPageSize" />
+                            <div class="d-flex justify-content-end mt-2 gap-3">
+                                <small class="aw-table__meta">@_histoFiltered.Count lignes</small>
+                                <small class="fw-bold" style="color:var(--aw-brand);">Total : <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Business" Amount="_histoFiltered.Sum(h => h.Montant)" /></small>
+                            </div>
+                        </div>
+                    }
+                }
+            }
+
+            @* ══════════════════ VENTES ══════════════════ *@
+            @if (_tab == 1)
+            {
+                <nav class="aw-modnav" aria-label="Vues ventes" role="tablist">
+                    <button type="button" role="tab" aria-selected="@(_venteView == "lignes")"
+                            class="aw-modnav__item @(_venteView == "lignes" ? "aw-modnav__item--active" : "")"
+                            @onclick='@(async () => await OnVenteViewChanged("lignes"))'>
+                        <i class="bi bi-list-ul" aria-hidden="true"></i>
+                        <span>Détail lignes</span>
+                    </button>
+                    <button type="button" role="tab" aria-selected="@(_venteView == "factures")"
+                            class="aw-modnav__item @(_venteView == "factures" ? "aw-modnav__item--active" : "")"
+                            @onclick='@(async () => await OnVenteViewChanged("factures"))'>
+                        <i class="bi bi-calendar3" aria-hidden="true"></i>
+                        <span>Factures du mois</span>
+                    </button>
+                </nav>
+
+                @if (_venteView == "lignes")
+                {
+                    var ventePageItems = PageOf(_venteFiltered, _ventePage, _ventePageSize).ToList();
+
+                    <div class="aw-actionbar">
+                        <div class="aw-actionbar__search">
+                            <i class="bi bi-search" aria-hidden="true"></i>
+                            <input type="search"
+                                   placeholder="Rechercher (n° facture, client, article, utilisateur…)"
+                                   aria-label="Rechercher des lignes de vente"
+                                   @bind="_venteSearch"
+                                   @bind:event="oninput"
+                                   @bind:after="ApplyVenteFilter" />
+                        </div>
+                        <div class="aw-actionbar__filters">
+                            <AwSearchSelect AriaLabel="Période comptable"
+                                            Placeholder="Période"
+                                            Searchable="true"
+                                            Value="@_ventePeriodeFilter"
+                                            ValueChanged="OnVentePeriodeSelectChanged"
+                                            Options="@GetVentePeriodeOptions()" />
+                            @if (_ventePeriodeFilter == "libre")
+                            {
+                                <AwDateRange AriaLabel="Période libre ventes"
+                                             PersistKey="rapports.ventes.libre"
+                                             From="_venteFrom"
+                                             To="_venteTo"
+                                             FromChanged="OnVenteFromChanged"
+                                             ToChanged="OnVenteToChanged"
+                                             Changed="LoadVentes" />
+                            }
+                            else if (int.TryParse(_ventePeriodeFilter, out _))
+                            {
+                                var sel = _periodes.FirstOrDefault(p => p.Id.ToString() == _ventePeriodeFilter);
+                                if (sel != null)
+                                {
+                                    <span class="aw-badge @(sel.Activated == true ? "aw-badge--brand" : "aw-badge--muted")">
+                                        @sel.FromDate?.ToString("dd/MM/yyyy") — @sel.ToDate?.ToString("dd/MM/yyyy")
+                                    </span>
+                                }
+                            }
+                            <AwSearchSelect AriaLabel="Utilisateur"
+                                            Placeholder="Utilisateur"
+                                            Searchable="true"
+                                            Value="@(_venteUserFilter ?? "")"
+                                            ValueChanged="OnVenteUserFilterChanged"
+                                            Options="@ToFilterOptions(VenteUserOptions(), "Utilisateur : tous")" />
+                            <AwSearchSelect AriaLabel="Article"
+                                            Placeholder="Article"
+                                            Searchable="true"
+                                            Value="@(_venteArticleFilter ?? "")"
+                                            ValueChanged="OnVenteArticleFilterChanged"
+                                            Options="@ToFilterOptions(VenteArticleOptions(), "Article : tous")" />
+                        </div>
+                        <div class="aw-actionbar__actions">
+                            <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="LoadVentes">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                            <HubActionsMenu>
+                                <li><button type="button" class="dropdown-item" @onclick="@ExportVenteExcel" disabled="@(!HasVenteExportData())"><i class="bi bi-file-earmark-excel me-2"></i>Exporter Excel</button></li>
+                                <li><button type="button" class="dropdown-item" @onclick="@(() => JS.InvokeVoidAsync("printReport"))"><i class="bi bi-printer me-2"></i>Imprimer</button></li>
+                            </HubActionsMenu>
+                        </div>
+                    </div>
+
+                    @if (_ventePeriodeFilter == "grouped")
+                    {
+                        @if (_venteLoading)
+                        {
+                            <div class="aw-table-region">
+                                <AwSkeleton Variant="table" Rows="5" />
+                            </div>
+                        }
+                        else if (!_venteGroupedFiltered.Any())
+                        {
+                            <div class="aw-table-region">
+                                <div class="aw-empty">
+                                    <i class="bi bi-calendar-x"></i>
+                                    <p>Aucune vente sur les périodes comptables définies.</p>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            @foreach (var g in _venteGroupedFiltered)
+                            {
+                                var gPage = GetVenteGroupPage(g.Label);
+                                var gPageSize = _ventePageSize;
+                                var gItems = PageOf(g.Lignes, gPage, gPageSize).ToList();
+                                <div class="aw-shell mb-3" style="padding:0;">
+                                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 px-3 py-2" style="border-bottom:1px solid var(--aw-line,#e2e8f0);">
+                                        <div class="d-flex align-items-center gap-2">
+                                            <i class="bi bi-calendar3" aria-hidden="true"></i>
+                                            <span class="fw-semibold">@g.Label</span>
+                                            @if (g.IsActive)
+                                            {
+                                                <span class="aw-badge aw-badge--brand"><i class="bi bi-check-circle me-1"></i>Active</span>
+                                            }
+                                            @if (g.IsHorsPeriode)
+                                            {
+                                                <span class="aw-badge aw-badge--accent"><i class="bi bi-exclamation-triangle me-1"></i>Hors période</span>
+                                            }
+                                        </div>
+                                        <small class="aw-table__meta">@g.NbFactures facture(s) · @g.Lignes.Count ligne(s) · <span class="fw-semibold" style="color:var(--aw-brand);"><CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Resolved" Amount="g.Total" /></span></small>
+                                    </div>
+                                    <div class="aw-table-region" @key="@($"{UserCurrency.DisplayRevision}-{g.Label}")">
+                                        <div class="aw-table-wrap">
+                                            <table class="aw-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>N° Facture</th>
+                                                        <th>Client</th>
+                                                        <th>Article</th>
+                                                        <th class="aw-table__num">Qté</th>
+                                                        <th class="aw-table__num">Total ligne</th>
+                                                        <th>Date</th>
+                                                        <th>Par</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @foreach (var item in gItems)
+                                                    {
+                                                        <tr>
+                                                            <td><span class="aw-table__title">@item.NumFacture</span></td>
+                                                            <td>@item.Client</td>
+                                                            <td>@item.Article</td>
+                                                            <td class="aw-table__num">@item.Qte.ToString("N2")</td>
+                                                            <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.Resolved" Amount="item.DisplayLineTotal" /></td>
+                                                            <td>@item.Date.ToString("dd/MM/yyyy")</td>
+                                                            <td>@item.Utilisateur</td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        <AwPager TotalCount="g.Lignes.Count"
+                                                 Page="gPage"
+                                                 PageSize="gPageSize"
+                                                 ItemLabel="ligne"
+                                                 PageChanged="@(p => SetVenteGroupPage(g.Label, p))"
+                                                 PageSizeChanged="SetVentePageSize" />
+                                    </div>
+                                </div>
+                            }
+                        }
+                    }
+                    else
+                    {
+                        @if (_venteLoading)
+                        {
+                            <div class="aw-table-region">
+                                <AwSkeleton Variant="table" Rows="5" />
+                            </div>
+                        }
+                        else if (!ventePageItems.Any())
+                        {
+                            <div class="aw-table-region">
+                                <div class="aw-empty">
+                                    <i class="bi bi-graph-up-arrow"></i>
+                                    <p>Aucune ligne de vente pour ces filtres.</p>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                                <div class="aw-table-wrap">
+                                    <table class="aw-table">
+                                        <thead>
+                                            <tr>
+                                                @if (_ventePeriodeFilter == "libre")
+                                                {
+                                                    <th>Période</th>
+                                                }
+                                                <th>N° Facture</th>
+                                                <th>Client</th>
+                                                <th>Article</th>
+                                                <th class="aw-table__num">Qté</th>
+                                                <th class="aw-table__num">PU</th>
+                                                <th class="aw-table__num">Total ligne</th>
+                                                <th class="aw-table__num">Total facture</th>
+                                                <th class="aw-table__num">% Réd.</th>
+                                                <th>Date</th>
+                                                <th>Établie par</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var item in ventePageItems)
+                                            {
+                                                <tr>
+                                                    @if (_ventePeriodeFilter == "libre")
+                                                    {
+                                                        <td><span class="aw-table__meta">@item.PeriodeLabel</span></td>
+                                                    }
+                                                    <td><span class="aw-table__title">@item.NumFacture</span></td>
+                                                    <td>@item.Client</td>
+                                                    <td>@item.Article</td>
+                                                    <td class="aw-table__num">@item.Qte.ToString("N2")</td>
+                                                    <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.Resolved" Amount="item.DisplayPu" IsUnitPrice="true" /></td>
+                                                    <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.Resolved" Amount="item.DisplayLineTotal" /></td>
+                                                    <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.Resolved" Amount="item.DisplayFactTotal" /></td>
+                                                    <td class="aw-table__num">@item.Reduction.ToString("N0")</td>
+                                                    <td>@item.Date.ToString("dd/MM/yyyy")</td>
+                                                    <td>@item.Utilisateur</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <AwPager TotalCount="_venteFiltered.Count"
+                                         Page="_ventePage"
+                                         PageSize="_ventePageSize"
+                                         ItemLabel="ligne"
+                                         PageChanged="SetVentePage"
+                                         PageSizeChanged="SetVentePageSize" />
+                                @if (_venteData.Any())
+                                {
+                                    <div class="d-flex justify-content-end mt-2 gap-3">
+                                        <small class="aw-table__meta">@_venteData.Count lignes · @_venteData.Select(v => v.NumFacture).Distinct().Count() factures</small>
+                                        <small class="fw-bold" style="color:var(--aw-brand);">Total : <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Resolved" Amount="_venteData.Sum(v => v.DisplayLineTotal)" /></small>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    }
+                }
+
+                @if (_venteView == "factures")
+                {
+                    var vmPageItems = PageOf(_vmFiltered, _vmPage, _vmPageSize).ToList();
+
+                    @if (_vmData.Any() || _vmLoading)
+                    {
+                        <section class="aw-overview" aria-label="Vue d'ensemble factures du mois">
+                            <div class="aw-overview__top">
+                                <div class="aw-overview__intro">
+                                    <h2 class="aw-overview__title">Factures du mois</h2>
+                                    <p class="aw-overview__lead">Synthèse mensuelle des factures, réductions et net à payer.</p>
+                                </div>
+                                <div class="aw-overview__cover aw-overview__cover--brand">
+                                    <span class="aw-overview__cover-value"><CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Business" Amount="_vmTotalNet" /></span>
+                                    <span class="aw-overview__cover-label">net du mois</span>
+                                </div>
+                            </div>
+                            <div class="aw-overview__metrics">
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-receipt"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">Factures</span>
+                                        <span class="aw-overview__metric-value">@_vmTotalFactures</span>
+                                    </div>
+                                </article>
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-cash-stack"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">Ventes</span>
+                                        <span class="aw-overview__metric-value"><CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Business" Amount="_vmTotalMontant" /></span>
+                                    </div>
+                                </article>
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-percent"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">Réductions</span>
+                                        <span class="aw-overview__metric-value"><CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Business" Amount="_vmTotalReduction" /></span>
+                                    </div>
+                                </article>
+                            </div>
+                        </section>
+                    }
+
+                    <div class="aw-actionbar">
+                        <div class="aw-actionbar__search">
+                            <i class="bi bi-search" aria-hidden="true"></i>
+                            <input type="search"
+                                   placeholder="Rechercher (n° facture, client, utilisateur…)"
+                                   aria-label="Rechercher des factures"
+                                   @bind="_vmSearch"
+                                   @bind:event="oninput"
+                                   @bind:after="ApplyVmFilter" />
+                        </div>
+                        <div class="aw-actionbar__filters">
+                            <AwDateRange AriaLabel="Mois des factures"
+                                         SingleDay="true"
+                                         PersistKey="rapports.factures.mois"
+                                         From="_vmMois"
+                                         To="_vmMois"
+                                         FromChanged="OnVmMoisChanged"
+                                         ToChanged="OnVmMoisChanged"
+                                         Changed="LoadVenteMois" />
+                            <AwSearchSelect AriaLabel="Utilisateur"
+                                            Placeholder="Utilisateur"
+                                            Searchable="true"
+                                            Value="@(_vmUserFilter ?? "")"
+                                            ValueChanged="OnVmUserFilterChanged"
+                                            Options="@ToFilterOptions(_vmData.Select(f => f.User), "Utilisateur : tous")" />
+                        </div>
+                        <div class="aw-actionbar__actions">
+                            <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="LoadVenteMois">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                            <HubActionsMenu>
+                                <li><button type="button" class="dropdown-item" @onclick="@ExportVmExcel" disabled="@(!_vmData.Any())"><i class="bi bi-file-earmark-excel me-2"></i>Exporter Excel</button></li>
+                                <li><button type="button" class="dropdown-item" @onclick="@(() => JS.InvokeVoidAsync("printReport"))"><i class="bi bi-printer me-2"></i>Imprimer</button></li>
+                            </HubActionsMenu>
+                        </div>
+                    </div>
+
+                    @if (_vmLoading)
+                    {
+                        <div class="aw-table-region">
+                            <AwSkeleton Variant="table" Rows="5" />
+                        </div>
+                    }
+                    else if (!vmPageItems.Any())
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-empty">
+                                <i class="bi bi-calendar3"></i>
+                                <p>Aucune facture pour ce mois.</p>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>N° Facture</th>
+                                            <th>Client</th>
+                                            <th class="aw-table__num">Total</th>
+                                            <th class="aw-table__num">Réduction</th>
+                                            <th class="aw-table__num">Net à payer</th>
+                                            <th>Date</th>
+                                            <th>Statut</th>
+                                            <th>Utilisateur</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var v in vmPageItems)
+                                        {
+                                            var (factLbl, factBadge) = v.Status switch
+                                            {
+                                                0 => ("Brouillon", "aw-badge--accent"),
+                                                1 => ("Validée", "aw-badge--accent"),
+                                                2 => ("Payée", "aw-badge--brand"),
+                                                3 => ("Annulée", "aw-badge--danger"),
+                                                _ => ("Inconnu", "aw-badge--muted")
+                                            };
+                                            <tr>
+                                                <td><span class="aw-table__title">@v.Id</span></td>
+                                                <td>@v.DescriptionName</td>
+                                                <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="(v.Total ?? 0)" Taux="@(v.Taux > 0 ? v.Taux : _displayTaux)" /></td>
+                                                <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="(v.Reduction ?? 0)" Taux="@(v.Taux > 0 ? v.Taux : _displayTaux)" /></td>
+                                                <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="(v.TotalApresReduction ?? 0)" Taux="@(v.Taux > 0 ? v.Taux : _displayTaux)" /></td>
+                                                <td>@v.Date.ToString("dd/MM/yyyy")</td>
+                                                <td><span class="aw-badge @factBadge">@factLbl</span></td>
+                                                <td>@v.User</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            <AwPager TotalCount="_vmFiltered.Count"
+                                     Page="_vmPage"
+                                     PageSize="_vmPageSize"
+                                     ItemLabel="facture"
+                                     PageChanged="SetVmPage"
+                                     PageSizeChanged="SetVmPageSize" />
+                        </div>
+                    }
+                }
+            }
+
+            @* ══════════════════ ACHATS & APPRO ══════════════════ *@
+            @if (_tab == 2)
+            {
+                <nav class="aw-modnav" aria-label="Vues achats et appro" role="tablist">
+                    <button type="button" role="tab" aria-selected="@(_achatsView == "commandes")"
+                            class="aw-modnav__item @(_achatsView == "commandes" ? "aw-modnav__item--active" : "")"
+                            @onclick='@(async () => await OnAchatsViewChanged("commandes"))'>
+                        <i class="bi bi-list-check" aria-hidden="true"></i>
+                        <span>Commandes</span>
+                    </button>
+                    <button type="button" role="tab" aria-selected="@(_achatsView == "marges")"
+                            class="aw-modnav__item @(_achatsView == "marges" ? "aw-modnav__item--active" : "")"
+                            @onclick='@(async () => await OnAchatsViewChanged("marges"))'>
+                        <i class="bi bi-graph-down" aria-hidden="true"></i>
+                        <span>Appro &amp; marges</span>
+                    </button>
+                    <button type="button" role="tab" aria-selected="@(_achatsView == "mouvements")"
+                            class="aw-modnav__item @(_achatsView == "mouvements" ? "aw-modnav__item--active" : "")"
+                            @onclick='@(async () => await OnAchatsViewChanged("mouvements"))'>
+                        <i class="bi bi-arrow-left-right" aria-hidden="true"></i>
+                        <span>Mouvements</span>
+                    </button>
+                </nav>
+
+                @if (_achatsView == "commandes")
+                {
+                    var cmdPageItems = PageOf(_cmdFiltered, _cmdPage, _cmdPageSize).ToList();
+                    var cmdNouvelles = _cmdData.Count(r => r.Status == 0);
+                    var cmdEnCours = _cmdData.Count(r => r.Status == 1);
+                    var cmdRecues = _cmdData.Count(r => r.Status == 2);
+                    var cmdAnnulees = _cmdData.Count(r => r.Status == 3);
+
+                    @if (_cmdData.Any() || _cmdLoading)
+                    {
+                        <section class="aw-overview" aria-label="Vue d'ensemble commandes rapport">
+                            <div class="aw-overview__top">
+                                <div class="aw-overview__intro">
+                                    <h2 class="aw-overview__title">Commandes fournisseurs</h2>
+                                    <p class="aw-overview__lead">Suivi des commandes, articles et taux de réception.</p>
+                                </div>
+                                <div class="aw-overview__cover aw-overview__cover--brand">
+                                    <span class="aw-overview__cover-value">@_cmdData.Count</span>
+                                    <span class="aw-overview__cover-label">commande(s)</span>
+                                </div>
+                            </div>
+                            <div class="aw-overview__metrics">
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-plus-circle"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">Nouvelles</span>
+                                        <span class="aw-overview__metric-value">@cmdNouvelles</span>
+                                    </div>
+                                </article>
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-hourglass-split"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">En cours</span>
+                                        <span class="aw-overview__metric-value">@cmdEnCours</span>
+                                    </div>
+                                </article>
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-check-circle"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">Reçues</span>
+                                        <span class="aw-overview__metric-value">@cmdRecues</span>
+                                    </div>
+                                </article>
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-x-circle"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">Annulées</span>
+                                        <span class="aw-overview__metric-value">@cmdAnnulees</span>
+                                    </div>
+                                </article>
+                            </div>
+                        </section>
+                    }
+
+                    <div class="aw-actionbar">
+                        <div class="aw-actionbar__search">
+                            <i class="bi bi-search" aria-hidden="true"></i>
+                            <input type="search"
+                                   placeholder="Rechercher (n°, fournisseur, article, utilisateur…)"
+                                   aria-label="Rechercher des commandes"
+                                   @bind="_cmdSearch"
+                                   @bind:event="oninput"
+                                   @bind:after="ApplyCmdFilter" />
+                        </div>
+                        <div class="aw-actionbar__filters">
+                            <AwDateRange AriaLabel="Période commandes"
+                                         PersistKey="rapports.commandes"
+                                         From="_cmdFrom"
+                                         To="_cmdTo"
+                                         FromChanged="OnCmdFromChanged"
+                                         ToChanged="OnCmdToChanged"
+                                         Changed="LoadCommandes" />
+                            <AwSearchSelect AriaLabel="Fournisseur"
+                                            Placeholder="Fournisseur"
+                                            Searchable="true"
+                                            Value="@(_cmdFournisseurFilter ?? "")"
+                                            ValueChanged="OnCmdFournisseurFilterChanged"
+                                            Options="@ToFilterOptions(_cmdData.Select(r => r.Fournisseur), "Fournisseur : tous")" />
+                            <AwSearchSelect AriaLabel="Utilisateur"
+                                            Placeholder="Utilisateur"
+                                            Searchable="true"
+                                            Value="@(_cmdUserFilter ?? "")"
+                                            ValueChanged="OnCmdUserFilterChanged"
+                                            Options="@ToFilterOptions(_cmdData.Select(r => r.User), "Utilisateur : tous")" />
+                        </div>
+                        <div class="aw-actionbar__actions">
+                            <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="LoadCommandes">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                            <HubActionsMenu>
+                                <li><button type="button" class="dropdown-item" @onclick="@ExportCmdExcel" disabled="@(!_cmdData.Any())"><i class="bi bi-file-earmark-excel me-2"></i>Exporter Excel</button></li>
+                                <li><button type="button" class="dropdown-item" @onclick="@(() => JS.InvokeVoidAsync("printReport"))"><i class="bi bi-printer me-2"></i>Imprimer</button></li>
+                            </HubActionsMenu>
+                        </div>
+                    </div>
+
+                    @if (_cmdLoading)
+                    {
+                        <div class="aw-table-region">
+                            <AwSkeleton Variant="table" Rows="5" />
+                        </div>
+                    }
+                    else if (!cmdPageItems.Any())
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-empty">
+                                <i class="bi bi-list-check"></i>
+                                <p>Aucune commande pour ces filtres.</p>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>N°</th>
+                                            <th>Fournisseur</th>
+                                            <th>Articles</th>
+                                            <th class="aw-table__num">Nb Art.</th>
+                                            <th>Réception</th>
+                                            <th>Date cmd</th>
+                                            <th>Statut</th>
+                                            <th>Utilisateur</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var r in cmdPageItems)
+                                        {
+                                            var (cmdLbl, cmdBadge) = r.Status switch
+                                            {
+                                                0 => ("Nouvelle", "aw-badge--muted"),
+                                                1 => ("En cours", "aw-badge--accent"),
+                                                2 => ("Reçue", "aw-badge--brand"),
+                                                3 => ("Annulée", "aw-badge--danger"),
+                                                _ => ("—", "aw-badge--muted")
+                                            };
+                                            var pct = r.TotalOrder > 0
+                                                ? Math.Min(100, (int)(r.TotalReceived / r.TotalOrder * 100))
+                                                : 0;
+                                            var meterTone = pct >= 100 ? "brand" : pct >= 50 ? "accent" : "danger";
+                                            <tr style="@(r.Status == 3 ? "opacity:0.5;" : null)">
+                                                <td><span class="aw-table__title">@r.Id</span></td>
+                                                <td>@r.Fournisseur</td>
+                                                <td>
+                                                    @foreach (var art in r.Articles)
+                                                    {
+                                                        <div style="font-size:0.85rem; line-height:1.5;">
+                                                            <strong>@art.Name</strong>
+                                                            <span class="aw-table__meta"> — Cmd: @art.QteOrder.ToString("N0")</span>
+                                                            @if (art.QteReceived > 0)
+                                                            {
+                                                                <span style="color:var(--aw-brand);"> ✓ Reçu: @art.QteReceived.ToString("N0")</span>
+                                                            }
+                                                        </div>
+                                                    }
+                                                    @if (!r.Articles.Any())
+                                                    {
+                                                        <span class="aw-table__meta">Aucun article</span>
+                                                    }
+                                                </td>
+                                                <td class="aw-table__num">@r.NbArticles</td>
+                                                <td>
+                                                    @if (r.TotalOrder > 0)
+                                                    {
+                                                        <div class="aw-table-meter" title="@pct % reçu">
+                                                            <div class="aw-overview__meter-track">
+                                                                <div class="@($"aw-overview__meter-fill aw-overview__meter-fill--{meterTone}")"
+                                                                     style="width:@pct%"></div>
+                                                            </div>
+                                                            <span class="aw-table__num">@pct%</span>
+                                                        </div>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="aw-table__meta">—</span>
+                                                    }
+                                                </td>
+                                                <td>@(r.DateCommande?.ToString("dd/MM/yyyy") ?? "—")</td>
+                                                <td><span class="aw-badge @cmdBadge">@cmdLbl</span></td>
+                                                <td>@r.User</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            <AwPager TotalCount="_cmdFiltered.Count"
+                                     Page="_cmdPage"
+                                     PageSize="_cmdPageSize"
+                                     ItemLabel="commande"
+                                     PageChanged="SetCmdPage"
+                                     PageSizeChanged="SetCmdPageSize" />
+                        </div>
+                    }
+                }
+
+                @if (_achatsView == "marges")
+                {
+                    var benPageItems = PageOf(_benFiltered, _benPage, _benPageSize).ToList();
+
+                    <div class="aw-actionbar">
+                        <div class="aw-actionbar__search">
+                            <i class="bi bi-search" aria-hidden="true"></i>
+                            <input type="search"
+                                   placeholder="Rechercher (n°, article, utilisateur…)"
+                                   aria-label="Rechercher appro et marges"
+                                   @bind="_benSearch"
+                                   @bind:event="oninput"
+                                   @bind:after="ApplyBenFilter" />
+                        </div>
+                        <div class="aw-actionbar__filters">
+                            <AwDateRange AriaLabel="Période marges"
+                                         PersistKey="rapports.marges"
+                                         From="_benFrom"
+                                         To="_benTo"
+                                         FromChanged="OnBenFromChanged"
+                                         ToChanged="OnBenToChanged"
+                                         Changed="LoadApproBen" />
+                            @if (_benTaux > 0)
+                            {
+                                <span class="aw-badge aw-badge--muted">Taux @_benTaux.ToString("N0")</span>
+                            }
+                            <AwSearchSelect AriaLabel="Utilisateur"
+                                            Placeholder="Utilisateur"
+                                            Searchable="true"
+                                            Value="@(_benUserFilter ?? "")"
+                                            ValueChanged="OnBenUserFilterChanged"
+                                            Options="@ToFilterOptions(_benData.Select(r => r.User), "Utilisateur : tous")" />
+                            <AwSearchSelect AriaLabel="Article"
+                                            Placeholder="Article"
+                                            Searchable="true"
+                                            Value="@(_benArticleFilter ?? "")"
+                                            ValueChanged="OnBenArticleFilterChanged"
+                                            Options="@ToFilterOptions(_benData.Select(r => r.ArticleName), "Article : tous")" />
+                        </div>
+                        <div class="aw-actionbar__actions">
+                            <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="LoadApproBen">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                            <HubActionsMenu>
+                                <li><button type="button" class="dropdown-item" @onclick="@ExportBenExcel" disabled="@(!_benData.Any())"><i class="bi bi-file-earmark-excel me-2"></i>Exporter Excel</button></li>
+                                <li><button type="button" class="dropdown-item" @onclick="@(() => JS.InvokeVoidAsync("printReport"))"><i class="bi bi-printer me-2"></i>Imprimer</button></li>
+                            </HubActionsMenu>
+                        </div>
+                    </div>
+
+                    @if (_benLoading)
+                    {
+                        <div class="aw-table-region">
+                            <AwSkeleton Variant="table" Rows="5" />
+                        </div>
+                    }
+                    else if (!benPageItems.Any())
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-empty">
+                                <i class="bi bi-graph-down"></i>
+                                <p>Aucune ligne d'appro / marge pour ces filtres.</p>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>N°</th>
+                                            <th>Article</th>
+                                            <th class="aw-table__num">Qté</th>
+                                            <th class="aw-table__num">Dépensé</th>
+                                            <th class="aw-table__num">Stock act.</th>
+                                            <th class="aw-table__num">PA</th>
+                                            <th class="aw-table__num">PV</th>
+                                            <th class="aw-table__num">Bén. unit.</th>
+                                            <th class="aw-table__num">Bén. total</th>
+                                            <th>Date</th>
+                                            <th>Utilisateur</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var a in benPageItems)
+                                        {
+                                            var stkBadge = a.StockActuel <= 0 ? "aw-badge--danger" : "aw-badge--brand";
+                                            <tr>
+                                                <td><span class="aw-table__meta">@a.Id</span></td>
+                                                <td><span class="aw-table__title">@a.ArticleName</span></td>
+                                                <td class="aw-table__num">@a.Qte.ToString("N2")</td>
+                                                <td class="aw-table__num" title="Coût d'achat = Qté × PA">
+                                                    <CurrencyText Mode="@CurrencyText.DisplayMode.Business" Amount="a.Depense" />
+                                                </td>
+                                                <td class="aw-table__num">
+                                                    <span class="aw-badge @stkBadge" title="Stock actuel de l'article">@a.StockActuel.ToString("N0")</span>
+                                                </td>
+                                                <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.Business" Amount="a.PA" /></td>
+                                                <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.Business" Amount="a.PV" /></td>
+                                                <td class="aw-table__num" style="color:@(a.Ben >= 0 ? "var(--bs-success)" : "var(--bs-danger)")">
+                                                    <CurrencyText Mode="@CurrencyText.DisplayMode.Business" Amount="a.Ben" />
+                                                </td>
+                                                <td class="aw-table__num" style="color:@(a.BenTotal >= 0 ? "var(--bs-success)" : "var(--bs-danger)")">
+                                                    <CurrencyText Mode="@CurrencyText.DisplayMode.Business" Amount="a.BenTotal" />
+                                                </td>
+                                                <td>@a.Date.ToString("dd/MM/yyyy")</td>
+                                                <td>@a.User</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            <AwPager TotalCount="_benFiltered.Count"
+                                     Page="_benPage"
+                                     PageSize="_benPageSize"
+                                     ItemLabel="ligne"
+                                     PageChanged="SetBenPage"
+                                     PageSizeChanged="SetBenPageSize" />
+                            <div class="d-flex justify-content-end mt-2 gap-3 flex-wrap">
+                                <small class="aw-table__meta">@_benFiltered.Count lignes</small>
+                                <small class="fw-bold">Total dépensé : <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Business" Amount="_benFiltered.Sum(b => b.Depense_Usd)" /></small>
+                                <small class="fw-bold text-info">Bénéfice total : <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Business" Amount="_benFiltered.Sum(b => b.BenTotal_Usd)" /></small>
+                            </div>
+                        </div>
+                    }
+                }
+
+                @if (_achatsView == "mouvements")
+                {
+                    var vaPageItems = PageOf(_vaFiltered, _vaPage, _vaPageSize).ToList();
+
+                    <div class="aw-actionbar">
+                        <div class="aw-actionbar__search">
+                            <i class="bi bi-search" aria-hidden="true"></i>
+                            <input type="search"
+                                   placeholder="Rechercher (article, code, utilisateur…)"
+                                   aria-label="Rechercher des mouvements"
+                                   @bind="_vaSearch"
+                                   @bind:event="oninput"
+                                   @bind:after="ApplyVaFilter" />
+                        </div>
+                        <div class="aw-actionbar__filters">
+                            <AwDateRange AriaLabel="Période mouvements"
+                                         PersistKey="rapports.mouvements"
+                                         From="_vaFrom"
+                                         To="_vaTo"
+                                         FromChanged="OnVaFromChanged"
+                                         ToChanged="OnVaToChanged"
+                                         Changed="LoadVenteAppro" />
+                            <AwSearchSelect AriaLabel="Utilisateur"
+                                            Placeholder="Utilisateur"
+                                            Searchable="true"
+                                            Value="@(_vaUserFilter ?? "")"
+                                            ValueChanged="OnVaUserFilterChanged"
+                                            Options="@ToFilterOptions(_vaData.Select(r => r.Utilisateur), "Utilisateur : tous")" />
+                            <AwSearchSelect AriaLabel="Article"
+                                            Placeholder="Article"
+                                            Searchable="true"
+                                            Value="@(_vaArticleFilter ?? "")"
+                                            ValueChanged="OnVaArticleFilterChanged"
+                                            Options="@ToFilterOptions(_vaData.Select(r => r.Description), "Article : tous")" />
+                            <AwSearchSelect AriaLabel="Mouvement"
+                                            Placeholder="Mouvement"
+                                            Searchable="false"
+                                            Value="@(_vaMouvementFilter ?? "")"
+                                            ValueChanged="OnVaMouvementFilterChanged"
+                                            Options="@ToFilterOptions(_vaData.Select(r => r.Mouvement), "Mouvement : tous")" />
+                        </div>
+                        <div class="aw-actionbar__actions">
+                            <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="LoadVenteAppro">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                            <HubActionsMenu>
+                                <li><button type="button" class="dropdown-item" @onclick="@ExportVaExcel" disabled="@(!_vaData.Any())"><i class="bi bi-file-earmark-excel me-2"></i>Exporter Excel</button></li>
+                                <li><button type="button" class="dropdown-item" @onclick="@(() => JS.InvokeVoidAsync("printReport"))"><i class="bi bi-printer me-2"></i>Imprimer</button></li>
+                            </HubActionsMenu>
+                        </div>
+                    </div>
+
+                    @if (_vaLoading)
+                    {
+                        <div class="aw-table-region">
+                            <AwSkeleton Variant="table" Rows="5" />
+                        </div>
+                    }
+                    else if (!vaPageItems.Any())
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-empty">
+                                <i class="bi bi-arrow-left-right"></i>
+                                <p>Aucun mouvement pour ces filtres.</p>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Code</th>
+                                            <th>Article</th>
+                                            <th class="aw-table__num">Qté</th>
+                                            <th class="aw-table__num">PU</th>
+                                            <th>Date</th>
+                                            <th>Mouvement</th>
+                                            <th>Utilisateur</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var v in vaPageItems)
+                                        {
+                                            var mvBadge = v.Mouvement == "Entrée" ? "aw-badge--brand" : "aw-badge--danger";
+                                            <tr>
+                                                <td><span class="aw-table__meta">@v.IdArticle</span></td>
+                                                <td><span class="aw-table__title">@v.Description</span></td>
+                                                <td class="aw-table__num">@v.Qte.ToString("N2")</td>
+                                                <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.Business" Amount="v.Pu" /></td>
+                                                <td>@v.Date.ToString("dd/MM/yyyy")</td>
+                                                <td><span class="aw-badge @mvBadge">@v.Mouvement</span></td>
+                                                <td>@v.Utilisateur</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            <AwPager TotalCount="_vaFiltered.Count"
+                                     Page="_vaPage"
+                                     PageSize="_vaPageSize"
+                                     ItemLabel="mouvement"
+                                     PageChanged="SetVaPage"
+                                     PageSizeChanged="SetVaPageSize" />
+                            <div class="d-flex justify-content-end mt-2 gap-3">
+                                <small class="aw-table__meta">@_vaFiltered.Count mouvements</small>
+                                <small class="fw-bold" style="color:var(--bs-success);">Entrées : <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Business" Amount="@(_vaFiltered.Where(m => m.Mouvement == "Entrée").Sum(m => m.Qte * m.Pu))" /></small>
+                                <small class="fw-bold" style="color:var(--bs-danger);">Sorties : <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Business" Amount="@(_vaFiltered.Where(m => m.Mouvement == "Sortie").Sum(m => m.Qte * m.Pu))" /></small>
+                            </div>
+                        </div>
+                    }
+                }
+            }
+
+            @* ══════════════════ STOCK ══════════════════ *@
+            @if (_tab == 3)
+            {
+                var stockPageItems = PageOf(_stockFiltered, _stockPage, _stockPageSize).ToList();
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search"
+                               placeholder="Rechercher (code, article, localisation…)"
+                               aria-label="Rechercher dans le stock"
+                               @bind="_stockSearch"
+                               @bind:event="oninput"
+                               @bind:after="ApplyStockFilter" />
+                    </div>
+                    <div class="aw-actionbar__filters">
+                        <AwSearchSelect AriaLabel="Localisation"
+                                        Placeholder="Localisation"
+                                        Searchable="true"
+                                        Value="@(_stockLocFilter ?? "")"
+                                        ValueChanged="OnStockLocFilterChanged"
+                                        Options="@ToFilterOptions(_stockData.Select(r => r.Localisation), "Localisation : toutes")" />
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="LoadStock">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                        <HubActionsMenu>
+                            <li><button type="button" class="dropdown-item" @onclick="@ExportStockExcel" disabled="@(!_stockData.Any())"><i class="bi bi-file-earmark-excel me-2"></i>Exporter Excel</button></li>
+                            <li><button type="button" class="dropdown-item" @onclick="@(() => JS.InvokeVoidAsync("printReport"))"><i class="bi bi-printer me-2"></i>Imprimer</button></li>
+                        </HubActionsMenu>
+                    </div>
+                </div>
+
+                @if (_stockLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!stockPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-box-seam"></i>
+                            <p>Aucun stock pour ces filtres.</p>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>Code</th>
+                                        <th>Article</th>
+                                        <th>Localisation</th>
+                                        <th class="aw-table__num">Prix</th>
+                                        <th class="aw-table__num">Stock</th>
+                                        <th class="aw-table__num">Min (seuil)</th>
+                                        <th class="aw-table__num">Qté max</th>
+                                        <th class="aw-table__num">Valeur stock</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var s in stockPageItems)
+                                    {
+                                        var stockBadge = s.Qte <= s.Seuil ? "aw-badge--danger" : "aw-badge--brand";
+                                        <tr>
+                                            <td><span class="aw-table__meta">@s.IdArticle</span></td>
+                                            <td><span class="aw-table__title">@s.Description</span></td>
+                                            <td>@s.Localisation</td>
+                                            <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.Business" Amount="@((decimal)s.Price)" /></td>
+                                            <td class="aw-table__num"><span class="aw-badge @stockBadge">@s.Qte</span></td>
+                                            <td class="aw-table__num">@s.Seuil</td>
+                                            <td class="aw-table__num">@s.QteMax</td>
+                                            <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.Business" Amount="@((decimal)s.ValeurStock)" /></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="_stockFiltered.Count"
+                                 Page="_stockPage"
+                                 PageSize="_stockPageSize"
+                                 ItemLabel="ligne"
+                                 PageChanged="SetStockPage"
+                                 PageSizeChanged="SetStockPageSize" />
+                        <div class="d-flex justify-content-end mt-2 gap-3">
+                            <small class="aw-table__meta">@_stockFiltered.Count lignes</small>
+                            <small class="fw-bold" style="color:var(--aw-brand);">Valeur totale : <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Business" Amount="@((decimal)_stockFiltered.Sum(a => a.ValeurStock))" /></small>
+                        </div>
+                    </div>
+                }
+            }
+
+            </div>
+        </div>
+    </div>
+}
+
+</ModuleGuard>
+
+@code {
+    /* ── Hub ── */
+    int _tab;
+    bool _loaded;
+    bool _canRapportsRead;
+    List<int> _currentUserLocalisations = new();
+
+    /* --- Sous-vues fusionnées --- */
+    string _activiteView = "bilan";
+    string _venteView = "lignes";
+    string _achatsView = "commandes";
+
+    static readonly int[] PageSizeChoices = [10, 25, 50, 100];
+    static readonly List<AwSearchSelect.Option> _bilanPeriodeOptions = new()
+    {
+        new("jour", "Jour"),
+        new("semaine", "Semaine"),
+        new("mois", "Mois")
+    };
+
+    readonly Dictionary<string, int> _venteGroupPages = new(StringComparer.Ordinal);
+    int _bilanPage = 1, _bilanPageSize = 25;
+    int _histoPage = 1, _histoPageSize = 25;
+    int _ventePage = 1, _ventePageSize = 25;
+    int _vmPage = 1, _vmPageSize = 25;
+    int _cmdPage = 1, _cmdPageSize = 25;
+    int _benPage = 1, _benPageSize = 25;
+    int _vaPage = 1, _vaPageSize = 25;
+    int _stockPage = 1, _stockPageSize = 25;
+
+    readonly HashSet<string> _loadedSections = new(StringComparer.Ordinal);
+
+    /* ════════════════════ BILAN ════════════════════ */
+    List<BilanRowDto> _bilanRows = new();
+    List<BilanRowDto> _bilanFiltered = new();
+    string _bilanSearch = "";
+    string? _bilanUserFilter;
+    string? _bilanTypeFilter;
+    bool _bilanLoading;
+    string _bilanPeriode = "jour";
+    DateTime? _bilanFrom = DateTime.Today;
+    DateTime? _bilanTo = DateTime.Today;
+    string _bilanTitre = "";
+    int _bilanNbFactures;
+    decimal _bilanTotalVentes;
+    decimal _bilanTotalAppros;
+    decimal _bilanBenefice;
+
+    /* ════════════════════ VENTES ════════════════════ */
+    List<Periode> _periodes = new();
+    string _ventePeriodeFilter = "libre";
+    DateTime? _venteFrom = new DateTime(DateTime.Today.Year, 1, 1);
+    DateTime? _venteTo = DateTime.Today;
+    bool _venteLoading;
+    List<RptVenteVm> _venteData = new();
+    List<VentePeriodeGroup> _venteGrouped = new();
+    List<RptVenteVm> _venteFiltered = new();
+    List<VentePeriodeGroup> _venteGroupedFiltered = new();
+    string _venteSearch = "";
+    string? _venteUserFilter;
+    string? _venteArticleFilter;
+
+    record RptVenteVm(
+        int NumFacture, string Client, string Article,
+        double Qte,
+        decimal? LineMontant, int? LineMoneyId, decimal? LineTaux, decimal? LineMontantApres,
+        double LegacyPu, double LegacyLineTotal,
+        decimal? FactMontant, int? FactMoneyId, decimal? FactMontantApres,
+        decimal LegacyFactTotal, decimal Reduction, decimal FactTaux,
+        DateOnly Date, string Utilisateur, string PeriodeLabel,
+        decimal DisplayPu, decimal DisplayLineTotal, decimal DisplayFactTotal);
+
+    class VentePeriodeGroup
+    {
+        public string Label { get; set; } = "";
+        public bool IsActive { get; set; }
+        public bool IsHorsPeriode { get; set; }
+        public int NbFactures { get; set; }
+        public decimal Total { get; set; }
+        public List<RptVenteVm> Lignes { get; set; } = new();
+    }
+
+    /* ════════════════════ STOCK ════════════════════ */
+    List<StockReportRowDto> _stockData = new();
+    List<StockReportRowDto> _stockFiltered = new();
+    bool _stockLoading;
+    string _stockSearch = "";
+    string? _stockLocFilter;
+
+    /* ════════════════════ COMMANDES ════════════════════ */
+    List<CommandeReportRowDto> _cmdData = new();
+    List<CommandeReportRowDto> _cmdFiltered = new();
+    bool _cmdLoading;
+    string _cmdSearch = "";
+    string? _cmdUserFilter;
+    string? _cmdFournisseurFilter;
+    DateTime? _cmdFrom = new DateTime(DateTime.Today.Year, 1, 1);
+    DateTime? _cmdTo = DateTime.Today;
+
+    /* ════════════════════ APPRO & BÉNÉFICE ════════════════════ */
+    List<ApproMargeReportRowDto> _benData = new();
+    List<ApproMargeReportRowDto> _benFiltered = new();
+    bool _benLoading;
+    string _benSearch = "";
+    string? _benUserFilter;
+    string? _benArticleFilter;
+    decimal _benTaux;
+    decimal _displayTaux;
+    decimal _benTotalUsd;
+    DateTime? _benFrom = new DateTime(DateTime.Today.Year, 1, 1);
+    DateTime? _benTo = DateTime.Today;
+
+    /* ════════════════════ VENTES MENSUELLES ════════════════════ */
+    List<FactMoisRowDto> _vmData = new();
+    List<FactMoisRowDto> _vmFiltered = new();
+    bool _vmLoading;
+    string _vmSearch = "";
+    string? _vmUserFilter;
+    DateTime? _vmMois = DateTime.Today;
+    int _vmTotalFactures;
+    decimal _vmTotalMontant;
+    decimal _vmTotalReduction;
+    decimal _vmTotalNet;
+
+    /* ════════════════════ VENTES & APPRO ════════════════════ */
+    List<MouvementReportRowDto> _vaData = new();
+    List<MouvementReportRowDto> _vaFiltered = new();
+    bool _vaLoading;
+    string _vaSearch = "";
+    string? _vaUserFilter;
+    string? _vaArticleFilter;
+    string? _vaMouvementFilter;
+    DateTime? _vaFrom = new DateTime(DateTime.Today.Year, 1, 1);
+    DateTime? _vaTo = DateTime.Today;
+
+    /* ════════════════════ HISTORIQUE ════════════════════ */
+    List<HistoRow> _histoData = new();
+    List<HistoRow> _histoFiltered = new();
+    bool _histoLoading;
+    string _histoSearch = "";
+    string? _histoUserFilter;
+    DateTime? _histoFrom = new DateTime(DateTime.Today.Year, 1, 1);
+    DateTime? _histoTo = DateTime.Today;
+    string? _histoTypeFilter;
+
+    List<KeyValuePair<string, string>> _histoTypeOptions = new()
+    {
+        new("Vente", "Ventes"),
+        new("Appro", "Approvisionnements"),
+    };
+
+    class HistoRow
+    {
+        public int RowId { get; set; }
+        public DateTime DateOp { get; set; }
+        public DateOnly Date { get; set; }
+        public string Type { get; set; } = "";
+        public string Reference { get; set; } = "";
+        public string Description { get; set; } = "";
+        public decimal Montant { get; set; }
+        public int StatusCode { get; set; }
+        public string StatusLabel { get; set; } = "";
+        public Color StatusStyle { get; set; } = Color.Default;
+        public string Utilisateur { get; set; } = "";
+        public int? FactId { get; set; }
+    }
+
+
+    /* === PAGINATION & FILTRES AW === */
+
+    IList<T> PageOf<T>(IList<T> items, int page, int pageSize) =>
+        items.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+    int PageCount(int total, int pageSize) =>
+        total <= 0 ? 1 : (int)Math.Ceiling(total / (double)Math.Max(1, pageSize));
+
+    void SetBilanPage(int page) => _bilanPage = Math.Clamp(page, 1, PageCount(_bilanFiltered.Count, _bilanPageSize));
+    void SetBilanPageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _bilanPageSize = size; _bilanPage = 1; }
+    void SetHistoPage(int page) => _histoPage = Math.Clamp(page, 1, PageCount(_histoFiltered.Count, _histoPageSize));
+    void SetHistoPageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _histoPageSize = size; _histoPage = 1; }
+    void SetVentePage(int page) => _ventePage = Math.Clamp(page, 1, PageCount(_venteFiltered.Count, _ventePageSize));
+    void SetVentePageSize(int size)
+    {
+        if (!PageSizeChoices.Contains(size)) return;
+        _ventePageSize = size;
+        _ventePage = 1;
+        foreach (var key in _venteGroupPages.Keys.ToList())
+            _venteGroupPages[key] = 1;
+    }
+    int GetVenteGroupPage(string label) => _venteGroupPages.TryGetValue(label, out var p) ? p : 1;
+    void SetVenteGroupPage(string label, int page)
+    {
+        var group = _venteGroupedFiltered.FirstOrDefault(g => g.Label == label);
+        var total = group?.Lignes.Count ?? 0;
+        _venteGroupPages[label] = Math.Clamp(page, 1, PageCount(total, _ventePageSize));
+    }
+    void SetVmPage(int page) => _vmPage = Math.Clamp(page, 1, PageCount(_vmFiltered.Count, _vmPageSize));
+    void SetVmPageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _vmPageSize = size; _vmPage = 1; }
+    void SetCmdPage(int page) => _cmdPage = Math.Clamp(page, 1, PageCount(_cmdFiltered.Count, _cmdPageSize));
+    void SetCmdPageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _cmdPageSize = size; _cmdPage = 1; }
+    void SetBenPage(int page) => _benPage = Math.Clamp(page, 1, PageCount(_benFiltered.Count, _benPageSize));
+    void SetBenPageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _benPageSize = size; _benPage = 1; }
+    void SetVaPage(int page) => _vaPage = Math.Clamp(page, 1, PageCount(_vaFiltered.Count, _vaPageSize));
+    void SetVaPageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _vaPageSize = size; _vaPage = 1; }
+    void SetStockPage(int page) => _stockPage = Math.Clamp(page, 1, PageCount(_stockFiltered.Count, _stockPageSize));
+    void SetStockPageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _stockPageSize = size; _stockPage = 1; }
+
+    List<AwSearchSelect.Option> ToFilterOptions(IEnumerable<string?> values, string allLabel)
+    {
+        var list = new List<AwSearchSelect.Option> { new("", allLabel) };
+        foreach (var v in HubFilterHelper.DistinctNonEmpty(values))
+            list.Add(new(v, v));
+        return list;
+    }
+
+    List<AwSearchSelect.Option> GetHistoTypeFilterOptions()
+    {
+        var list = new List<AwSearchSelect.Option> { new("", "Type : tous") };
+        foreach (var o in _histoTypeOptions)
+            list.Add(new(o.Key, o.Value));
+        return list;
+    }
+
+    List<AwSearchSelect.Option> GetVentePeriodeOptions()
+    {
+        var list = new List<AwSearchSelect.Option>
+        {
+            new("libre", "Plage libre"),
+            new("grouped", "Périodes groupées")
+        };
+        foreach (var p in _periodes)
+        {
+            var lbl = FormatPeriodeLabel(p) + (p.Activated == true ? " ★" : "");
+            list.Add(new(p.Id.ToString(), lbl));
+        }
+        return list;
+    }
+
+    Task OnBilanPeriodeSelectChanged(string? value)
+    {
+        _bilanPeriode = string.IsNullOrWhiteSpace(value) ? "jour" : value;
+        OnBilanPeriodeChanged();
+        return Task.CompletedTask;
+    }
+
+    Task OnBilanUserFilterChanged(string? v) { _bilanUserFilter = string.IsNullOrWhiteSpace(v) ? null : v; ApplyBilanFilter(); return Task.CompletedTask; }
+    Task OnBilanTypeFilterChanged(string? v) { _bilanTypeFilter = string.IsNullOrWhiteSpace(v) ? null : v; ApplyBilanFilter(); return Task.CompletedTask; }
+    Task OnHistoUserFilterChanged(string? v) { _histoUserFilter = string.IsNullOrWhiteSpace(v) ? null : v; ApplyHistoriqueFilter(); return Task.CompletedTask; }
+    Task OnHistoTypeFilterChanged(string? v) { _histoTypeFilter = string.IsNullOrWhiteSpace(v) ? null : v; ApplyHistoriqueFilter(); return Task.CompletedTask; }
+    async Task OnVentePeriodeSelectChanged(string? v)
+    {
+        _ventePeriodeFilter = string.IsNullOrWhiteSpace(v) ? "libre" : v;
+        await OnVentePeriodeFilterChanged();
+    }
+    Task OnVenteUserFilterChanged(string? v) { _venteUserFilter = string.IsNullOrWhiteSpace(v) ? null : v; ApplyVenteFilter(); return Task.CompletedTask; }
+    Task OnVenteArticleFilterChanged(string? v) { _venteArticleFilter = string.IsNullOrWhiteSpace(v) ? null : v; ApplyVenteFilter(); return Task.CompletedTask; }
+    Task OnVmUserFilterChanged(string? v) { _vmUserFilter = string.IsNullOrWhiteSpace(v) ? null : v; ApplyVmFilter(); return Task.CompletedTask; }
+    Task OnCmdFournisseurFilterChanged(string? v) { _cmdFournisseurFilter = string.IsNullOrWhiteSpace(v) ? null : v; ApplyCmdFilter(); return Task.CompletedTask; }
+    Task OnCmdUserFilterChanged(string? v) { _cmdUserFilter = string.IsNullOrWhiteSpace(v) ? null : v; ApplyCmdFilter(); return Task.CompletedTask; }
+    Task OnBenUserFilterChanged(string? v) { _benUserFilter = string.IsNullOrWhiteSpace(v) ? null : v; ApplyBenFilter(); return Task.CompletedTask; }
+    Task OnBenArticleFilterChanged(string? v) { _benArticleFilter = string.IsNullOrWhiteSpace(v) ? null : v; ApplyBenFilter(); return Task.CompletedTask; }
+    Task OnVaUserFilterChanged(string? v) { _vaUserFilter = string.IsNullOrWhiteSpace(v) ? null : v; ApplyVaFilter(); return Task.CompletedTask; }
+    Task OnVaArticleFilterChanged(string? v) { _vaArticleFilter = string.IsNullOrWhiteSpace(v) ? null : v; ApplyVaFilter(); return Task.CompletedTask; }
+    Task OnVaMouvementFilterChanged(string? v) { _vaMouvementFilter = string.IsNullOrWhiteSpace(v) ? null : v; ApplyVaFilter(); return Task.CompletedTask; }
+    Task OnStockLocFilterChanged(string? v) { _stockLocFilter = string.IsNullOrWhiteSpace(v) ? null : v; ApplyStockFilter(); return Task.CompletedTask; }
+    /* ════════════════════ FILTRES CLIENT ════════════════════ */
+
+    IEnumerable<RptVenteVm> FilterVenteRows(IEnumerable<RptVenteVm> source)
+    {
+        var q = source.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(_venteSearch))
+            q = q.Where(r => HubFilterHelper.MatchesSearch(_venteSearch,
+                r.NumFacture.ToString(), r.Client, r.Article, r.Utilisateur, r.PeriodeLabel));
+        if (!string.IsNullOrWhiteSpace(_venteUserFilter))
+            q = q.Where(r => HubFilterHelper.MatchesFilter(_venteUserFilter, r.Utilisateur));
+        if (!string.IsNullOrWhiteSpace(_venteArticleFilter))
+            q = q.Where(r => HubFilterHelper.MatchesFilter(_venteArticleFilter, r.Article));
+        return q;
+    }
+
+    void ApplyVenteFilter() {
+        _ventePage = 1;
+        _venteGroupPages.Clear();
+        _venteFiltered = FilterVenteRows(_venteData).ToList();
+        _venteGroupedFiltered = _venteGrouped
+            .Select(g =>
+            {
+                var lignes = FilterVenteRows(g.Lignes).ToList();
+                return new VentePeriodeGroup
+                {
+                    Label = g.Label,
+                    IsActive = g.IsActive,
+                    IsHorsPeriode = g.IsHorsPeriode,
+                    Lignes = lignes,
+                    NbFactures = lignes.Select(l => l.NumFacture).Distinct().Count(),
+                    Total = lignes.Sum(l => l.DisplayLineTotal)
+                };
+            })
+            .Where(g => g.Lignes.Any())
+            .ToList();
+    }
+
+    List<string> VenteUserOptions() =>
+        HubFilterHelper.DistinctNonEmpty(
+            (_ventePeriodeFilter == "grouped" ? _venteGrouped.SelectMany(g => g.Lignes) : _venteData)
+            .Select(r => r.Utilisateur));
+
+    List<string> VenteArticleOptions() =>
+        HubFilterHelper.DistinctNonEmpty(
+            (_ventePeriodeFilter == "grouped" ? _venteGrouped.SelectMany(g => g.Lignes) : _venteData)
+            .Select(r => r.Article));
+
+    void ApplyBilanFilter() {
+        _bilanPage = 1;
+        _bilanFiltered = _bilanRows.Where(r =>
+        {
+            if (!HubFilterHelper.MatchesSearch(_bilanSearch, r.Reference, r.Description, r.Utilisateur, r.Type))
+                return false;
+            if (!HubFilterHelper.MatchesFilter(_bilanUserFilter, r.Utilisateur)) return false;
+            if (!HubFilterHelper.MatchesFilter(_bilanTypeFilter, r.Type)) return false;
+            return true;
+        }).ToList();
+    }
+
+    void ApplyStockFilter() {
+        _stockPage = 1;
+        _stockFiltered = _stockData.Where(r =>
+        {
+            if (!HubFilterHelper.MatchesSearch(_stockSearch, r.IdArticle, r.Description, r.Localisation))
+                return false;
+            if (!HubFilterHelper.MatchesFilter(_stockLocFilter, r.Localisation)) return false;
+            return true;
+        }).ToList();
+    }
+
+    void ApplyCmdFilter() {
+        _cmdPage = 1;
+        _cmdFiltered = _cmdData.Where(r =>
+        {
+            if (!HubFilterHelper.MatchesSearch(_cmdSearch, r.Id.ToString(), r.Fournisseur, r.User,
+                string.Join(" ", r.Articles.Select(a => a.Name))))
+                return false;
+            if (!HubFilterHelper.MatchesFilter(_cmdUserFilter, r.User)) return false;
+            if (!HubFilterHelper.MatchesFilter(_cmdFournisseurFilter, r.Fournisseur)) return false;
+            return true;
+        }).ToList();
+    }
+
+    void ApplyBenFilter() {
+        _benPage = 1;
+        _benFiltered = _benData.Where(r =>
+        {
+            if (!HubFilterHelper.MatchesSearch(_benSearch, r.Id.ToString(), r.ArticleName, r.User))
+                return false;
+            if (!HubFilterHelper.MatchesFilter(_benUserFilter, r.User)) return false;
+            if (!HubFilterHelper.MatchesFilter(_benArticleFilter, r.ArticleName)) return false;
+            return true;
+        }).ToList();
+    }
+
+    void ApplyVmFilter() {
+        _vmPage = 1;
+        _vmFiltered = _vmData.Where(f =>
+        {
+            if (!HubFilterHelper.MatchesSearch(_vmSearch, f.Id.ToString(), f.DescriptionName, f.User, f.DescriptionArticle))
+                return false;
+            if (!HubFilterHelper.MatchesFilter(_vmUserFilter, f.User)) return false;
+            return true;
+        }).ToList();
+    }
+
+    void ApplyVaFilter() {
+        _vaPage = 1;
+        _vaFiltered = _vaData.Where(r =>
+        {
+            if (!HubFilterHelper.MatchesSearch(_vaSearch, r.IdArticle, r.Description, r.Utilisateur, r.Mouvement))
+                return false;
+            if (!HubFilterHelper.MatchesFilter(_vaUserFilter, r.Utilisateur)) return false;
+            if (!HubFilterHelper.MatchesFilter(_vaArticleFilter, r.Description)) return false;
+            if (!HubFilterHelper.MatchesFilter(_vaMouvementFilter, r.Mouvement)) return false;
+            return true;
+        }).ToList();
+    }
+
+    void ApplyHistoriqueFilter() {
+        _histoPage = 1;
+        var q = _histoData.AsEnumerable();
+        _histoFiltered = q.Where(r =>
+        {
+            if (!HubFilterHelper.MatchesSearch(_histoSearch, r.Reference, r.Description, r.Utilisateur, r.Type, r.StatusLabel))
+                return false;
+            if (!HubFilterHelper.MatchesFilter(_histoUserFilter, r.Utilisateur)) return false;
+            if (!HubFilterHelper.MatchesFilter(_histoTypeFilter, r.Type)) return false;
+            return true;
+        }).ToList();
+    }
+
+    string FilterCountText(int filtered, int total) =>
+        total > 0 ? $"{filtered} affiché{(filtered > 1 ? "s" : "")} sur {total}" : "";
+
+    /* ════════════════════════════════════════════════════════════
+       INIT
+       ════════════════════════════════════════════════════════════ */
+
+    protected override async Task OnInitializedAsync()
+    {
+        UserCurrency.OnChanged += OnCurrencyPreferenceChanged;
+        await UserCurrency.EnsureLoadedAsync();
+
+        // Fetch user's assigned localisations via service
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            var login = user.FindFirst("login")?.Value
+                ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isAdmin = AppFunctions.Normalize(user.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+
+            if (!string.IsNullOrEmpty(login))
+            {
+                _currentUserLocalisations = await LocalisationService.GetUserLocalisationIdsAsync(login, isAdmin);
+            }
+
+            var perms = await PermissionResolver.GetPermissionsAsync(login);
+            _canRapportsRead = PermissionGate.ViewTab(perms, "rapports",
+                () => PermissionGate.LegacyRead(perms, AppFunctions.Rapports, isAdmin));
+        }
+
+        SetBilanPeriodDates();
+        try { _periodes = await FinanceService.GetPeriodesAsync(); } catch { _periodes = new(); }
+        var activePeriode = _periodes.FirstOrDefault(p => p.Activated == true);
+        if (activePeriode != null)
+        {
+            _ventePeriodeFilter = activePeriode.Id.ToString();
+            if (activePeriode.FromDate.HasValue) _venteFrom = activePeriode.FromDate.Value;
+            if (activePeriode.ToDate.HasValue) _venteTo = activePeriode.ToDate.Value;
+        }
+        _displayTaux = await RapportQuery.GetLatestTauxAsync();
+        _loaded = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        try
+        {
+            var saved = await JS.InvokeAsync<int>("tabNavigation.getTab", "rapport", 100);
+            ApplySavedTabState(saved, persistMigration: true);
+        }
+        catch { }
+
+        await EnsureActiveSectionLoadedAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    void OnCurrencyPreferenceChanged()
+    {
+        if (!_loaded) return;
+        RefreshCurrencyDisplay();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    void RefreshCurrencyDisplay()
+    {
+        var taux = _displayTaux > 0 ? _displayTaux : UserCurrency.CachedTaux;
+        if (_venteData.Count > 0)
+            _venteData = _venteData.Select(r => EnrichVenteRow(r, taux)).ToList();
+
+        if (_venteGrouped.Count > 0)
+        {
+            _venteGrouped = _venteGrouped.Select(g =>
+            {
+                var lignes = g.Lignes.Select(r => EnrichVenteRow(r, taux)).ToList();
+                return new VentePeriodeGroup
+                {
+                    Label = g.Label,
+                    IsActive = g.IsActive,
+                    IsHorsPeriode = g.IsHorsPeriode,
+                    NbFactures = g.NbFactures,
+                    Lignes = lignes,
+                    Total = lignes.Sum(l => l.DisplayLineTotal)
+                };
+            }).ToList();
+        }
+
+        if (_venteData.Count > 0 || _venteGrouped.Count > 0)
+            ApplyVenteFilter();
+    }
+
+    public void Dispose() => UserCurrency.OnChanged -= OnCurrencyPreferenceChanged;
+
+    static int EncodeTabState(int tab, int subIndex) => (tab + 1) * 100 + subIndex;
+
+    static (int tab, int subIndex) DecodeTabState(int encoded) => (encoded / 100 - 1, encoded % 100);
+
+    static (int tab, int subIndex) MapLegacyTab(int legacyTab) => legacyTab switch
+    {
+        0 => (0, 0),
+        7 => (0, 1),
+        1 => (1, 0),
+        5 => (1, 1),
+        3 => (2, 0),
+        4 => (2, 1),
+        6 => (2, 2),
+        2 => (3, 0),
+        _ => (0, 0)
+    };
+
+    void ApplySavedTabState(int saved, bool persistMigration)
+    {
+        int tab;
+        int subIndex;
+        if (saved < 100)
+        {
+            (tab, subIndex) = MapLegacyTab(saved);
+            if (persistMigration)
+                _ = PersistTabStateAsync(tab, subIndex);
+        }
+        else
+        {
+            (tab, subIndex) = DecodeTabState(saved);
+            tab = Math.Clamp(tab, 0, 3);
+        }
+
+        _tab = tab;
+        ApplySubViewIndex(tab, subIndex);
+    }
+
+    void ApplySubViewIndex(int tab, int subIndex)
+    {
+        switch (tab)
+        {
+            case 0:
+                _activiteView = subIndex == 1 ? "historique" : "bilan";
+                break;
+            case 1:
+                _venteView = subIndex == 1 ? "factures" : "lignes";
+                break;
+            case 2:
+                _achatsView = subIndex switch
+                {
+                    1 => "marges",
+                    2 => "mouvements",
+                    _ => "commandes"
+                };
+                break;
+        }
+    }
+
+    int CurrentSubIndex() => _tab switch
+    {
+        0 => _activiteView == "historique" ? 1 : 0,
+        1 => _venteView == "factures" ? 1 : 0,
+        2 => _achatsView switch { "marges" => 1, "mouvements" => 2, _ => 0 },
+        _ => 0
+    };
+
+    async Task PersistTabStateAsync(int tab, int subIndex)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("tabNavigation.saveTab", "rapport", EncodeTabState(tab, subIndex));
+        }
+        catch { }
+    }
+
+    async Task OnTabChange(int tabIndex)
+    {
+        _tab = tabIndex;
+        await PersistTabStateAsync(tabIndex, CurrentSubIndex());
+        await EnsureActiveSectionLoadedAsync();
+    }
+
+    string GetRapportSectionDescription() => _tab switch
+    {
+        1 => "Analyse des ventes par lignes de facture et synthèse mensuelle.",
+        2 => "Commandes fournisseurs, marges d'approvisionnement et mouvements.",
+        3 => "Inventaire et valorisation du stock par article et localisation.",
+        _ => "Bilan d'activité et historique des opérations."
+    };
+
+    async Task OnActiviteViewChanged(string view)
+    {
+        _activiteView = view;
+        await PersistTabStateAsync(0, view == "historique" ? 1 : 0);
+        await EnsureSectionLoadedAsync(view == "historique" ? "historique" : "bilan");
+    }
+
+    async Task OnVenteViewChanged(string view)
+    {
+        _venteView = view;
+        await PersistTabStateAsync(1, view == "factures" ? 1 : 0);
+        await EnsureSectionLoadedAsync(view == "factures" ? "ventes-mois" : "ventes");
+    }
+
+    async Task OnAchatsViewChanged(string view)
+    {
+        _achatsView = view;
+        var sub = view switch { "marges" => 1, "mouvements" => 2, _ => 0 };
+        await PersistTabStateAsync(2, sub);
+        await EnsureSectionLoadedAsync(view switch
+        {
+            "marges" => "appro-ben",
+            "mouvements" => "vente-appro",
+            _ => "commandes"
+        });
+    }
+
+    async Task EnsureActiveSectionLoadedAsync()
+    {
+        switch (_tab)
+        {
+            case 0:
+                await EnsureSectionLoadedAsync(_activiteView == "historique" ? "historique" : "bilan");
+                break;
+            case 1:
+                await EnsureSectionLoadedAsync(_venteView == "factures" ? "ventes-mois" : "ventes");
+                break;
+            case 2:
+                await EnsureSectionLoadedAsync(_achatsView switch
+                {
+                    "marges" => "appro-ben",
+                    "mouvements" => "vente-appro",
+                    _ => "commandes"
+                });
+                break;
+            case 3:
+                await EnsureSectionLoadedAsync("stock");
+                break;
+        }
+    }
+
+    async Task EnsureSectionLoadedAsync(string section)
+    {
+        if (_loadedSections.Contains(section)) return;
+        _loadedSections.Add(section);
+        switch (section)
+        {
+            case "bilan": await LoadBilan(); break;
+            case "historique": await LoadHistorique(); break;
+            case "ventes": await LoadVentes(); break;
+            case "ventes-mois": await LoadVenteMois(); break;
+            case "stock": await LoadStock(); break;
+            case "commandes": await LoadCommandes(); break;
+            case "appro-ben": await LoadApproBen(); break;
+            case "vente-appro": await LoadVenteAppro(); break;
+        }
+    }
+
+    /* ════════════════════ BILAN — LOGIQUE ════════════════════ */
+
+    void OnBilanPeriodeChanged()
+    {
+        SetBilanPeriodDates();
+        _ = LoadBilan();
+    }
+
+    Task OnBilanFromChanged(DateTime? value)
+    {
+        _bilanFrom = value;
+        if (_bilanPeriode == "jour")
+            _bilanTo = value;
+        return Task.CompletedTask;
+    }
+
+    Task OnBilanToChanged(DateTime? value)
+    {
+        _bilanTo = value;
+        if (_bilanPeriode == "jour")
+            _bilanFrom = value;
+        return Task.CompletedTask;
+    }
+
+    Task OnHistoFromChanged(DateTime? value) { _histoFrom = value; return Task.CompletedTask; }
+    Task OnHistoToChanged(DateTime? value) { _histoTo = value; return Task.CompletedTask; }
+    Task OnVenteFromChanged(DateTime? value) { _venteFrom = value; return Task.CompletedTask; }
+    Task OnVenteToChanged(DateTime? value) { _venteTo = value; return Task.CompletedTask; }
+    Task OnVmMoisChanged(DateTime? value) { _vmMois = value; return Task.CompletedTask; }
+    Task OnCmdFromChanged(DateTime? value) { _cmdFrom = value; return Task.CompletedTask; }
+    Task OnCmdToChanged(DateTime? value) { _cmdTo = value; return Task.CompletedTask; }
+    Task OnBenFromChanged(DateTime? value) { _benFrom = value; return Task.CompletedTask; }
+    Task OnBenToChanged(DateTime? value) { _benTo = value; return Task.CompletedTask; }
+    Task OnVaFromChanged(DateTime? value) { _vaFrom = value; return Task.CompletedTask; }
+    Task OnVaToChanged(DateTime? value) { _vaTo = value; return Task.CompletedTask; }
+
+    void SetBilanPeriodDates()
+    {
+        var today = DateTime.Today;
+        switch (_bilanPeriode)
+        {
+            case "jour":
+                _bilanFrom = today; _bilanTo = today; break;
+            case "semaine":
+                int diff = (7 + (today.DayOfWeek - DayOfWeek.Monday)) % 7;
+                _bilanFrom = today.AddDays(-diff); _bilanTo = _bilanFrom.Value.AddDays(6); break;
+            case "mois":
+                _bilanFrom = new DateTime(today.Year, today.Month, 1);
+                _bilanTo = _bilanFrom.Value.AddMonths(1).AddDays(-1); break;
+        }
+    }
+
+    async Task LoadBilan()
+    {
+        _bilanLoading = true;
+        StateHasChanged();
+        var from = DateOnly.FromDateTime(_bilanFrom ?? DateTime.Today);
+        var to = DateOnly.FromDateTime(_bilanTo ?? DateTime.Today);
+
+        _bilanTitre = _bilanPeriode switch
+        {
+            "jour" => $"Bilan journalier — {from:dd/MM/yyyy}",
+            "semaine" => $"Bilan hebdomadaire — {from:dd/MM/yyyy} au {to:dd/MM/yyyy}",
+            "mois" => $"Bilan mensuel — {from:MMMM yyyy}",
+            _ => "Bilan"
+        };
+
+        var result = await RapportQuery.GetBilanAsync(from, to);
+        _bilanRows = result.Rows.ToList();
+        _displayTaux = result.LatestTaux;
+        _bilanNbFactures = result.NbFactures;
+        _bilanTotalVentes = result.TotalVentes;
+        _bilanTotalAppros = result.TotalAppros;
+        _bilanBenefice = result.Benefice;
+        _bilanLoading = false;
+        ApplyBilanFilter();
+        StateHasChanged();
+    }
+
+    async Task ExportBilanExcel()
+    {
+        using var workbook = new ClosedXML.Excel.XLWorkbook();
+        var ws = workbook.Worksheets.Add("Bilan");
+        ws.Cell(1, 1).Value = _bilanTitre; ws.Cell(1, 1).Style.Font.Bold = true; ws.Cell(1, 1).Style.Font.FontSize = 14; ws.Range(1, 1, 1, 7).Merge();
+        ws.Cell(3, 1).Value = "Factures"; ws.Cell(3, 2).Value = _bilanNbFactures;
+        ws.Cell(4, 1).Value = "Total ventes"; ws.Cell(4, 2).Value = (double)_bilanTotalVentes; ws.Cell(4, 2).Style.NumberFormat.Format = "#,##0.00";
+        ws.Cell(5, 1).Value = "Total appros"; ws.Cell(5, 2).Value = (double)_bilanTotalAppros; ws.Cell(5, 2).Style.NumberFormat.Format = "#,##0.00";
+        ws.Cell(6, 1).Value = "Bénéfice"; ws.Cell(6, 2).Value = (double)_bilanBenefice; ws.Cell(6, 2).Style.NumberFormat.Format = "#,##0.00";
+        ws.Range(3, 1, 6, 1).Style.Font.Bold = true;
+        string[] headers = { "Date", "Type", "Réf.", "Description", "Qté", "Montant", "Utilisateur" };
+        for (int i = 0; i < headers.Length; i++) { var cell = ws.Cell(8, i + 1); cell.Value = headers[i]; cell.Style.Font.Bold = true; cell.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#4472C4"); cell.Style.Font.FontColor = ClosedXML.Excel.XLColor.White; }
+        int row = 9;
+        foreach (var r in _bilanRows) { ws.Cell(row, 1).Value = r.Date.ToString("dd/MM/yyyy"); ws.Cell(row, 2).Value = r.Type; ws.Cell(row, 3).Value = r.Reference; ws.Cell(row, 4).Value = r.Description; ws.Cell(row, 5).Value = (double)r.Qte; ws.Cell(row, 6).Value = (double)r.Montant; ws.Cell(row, 6).Style.NumberFormat.Format = "#,##0.00"; ws.Cell(row, 7).Value = r.Utilisateur; row++; }
+        ws.Columns().AdjustToContents();
+        using var ms = new System.IO.MemoryStream(); workbook.SaveAs(ms);
+        var base64 = Convert.ToBase64String(ms.ToArray());
+        var fileName = $"Bilan_{_bilanPeriode}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+        await JS.InvokeVoidAsync("eval", $"var a=document.createElement('a');a.href='data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{base64}';a.download='{fileName}';document.body.appendChild(a);a.click();document.body.removeChild(a);");
+    }
+
+    byte[] GenerateBilanExcelBytes()
+    {
+        using var workbook = new ClosedXML.Excel.XLWorkbook();
+        var ws = workbook.Worksheets.Add("Bilan");
+        ws.Cell(1, 1).Value = _bilanTitre; ws.Cell(1, 1).Style.Font.Bold = true; ws.Cell(1, 1).Style.Font.FontSize = 14; ws.Range(1, 1, 1, 7).Merge();
+        ws.Cell(3, 1).Value = "Factures"; ws.Cell(3, 2).Value = _bilanNbFactures;
+        ws.Cell(4, 1).Value = "Total ventes"; ws.Cell(4, 2).Value = (double)_bilanTotalVentes; ws.Cell(4, 2).Style.NumberFormat.Format = "#,##0.00";
+        ws.Cell(5, 1).Value = "Total appros"; ws.Cell(5, 2).Value = (double)_bilanTotalAppros; ws.Cell(5, 2).Style.NumberFormat.Format = "#,##0.00";
+        ws.Cell(6, 1).Value = "Bénéfice"; ws.Cell(6, 2).Value = (double)_bilanBenefice; ws.Cell(6, 2).Style.NumberFormat.Format = "#,##0.00";
+        string[] headers = { "Date", "Type", "Réf.", "Description", "Qté", "Montant", "Utilisateur" };
+        for (int i = 0; i < headers.Length; i++) { var cell = ws.Cell(8, i + 1); cell.Value = headers[i]; cell.Style.Font.Bold = true; cell.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#4472C4"); cell.Style.Font.FontColor = ClosedXML.Excel.XLColor.White; }
+        int row = 9;
+        foreach (var r in _bilanRows) { ws.Cell(row, 1).Value = r.Date.ToString("dd/MM/yyyy"); ws.Cell(row, 2).Value = r.Type; ws.Cell(row, 3).Value = r.Reference; ws.Cell(row, 4).Value = r.Description; ws.Cell(row, 5).Value = (double)r.Qte; ws.Cell(row, 6).Value = (double)r.Montant; ws.Cell(row, 6).Style.NumberFormat.Format = "#,##0.00"; ws.Cell(row, 7).Value = r.Utilisateur; row++; }
+        ws.Columns().AdjustToContents();
+        using var ms = new System.IO.MemoryStream(); workbook.SaveAs(ms); return ms.ToArray();
+    }
+
+    async Task SendBilanEmail()
+    {
+        var parameters = new DialogParameters
+        {
+            ["Subject"] = _bilanTitre,
+            ["ExcelBytes"] = GenerateBilanExcelBytes(),
+            ["ExcelFileName"] = $"Bilan_{_bilanPeriode}_{DateTime.Now:yyyyMMdd}.xlsx"
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, NoHeader = true };
+        await DialogService.ShowAsync<EmailDialog>("Envoyer le rapport par email", parameters, options);
+    }
+
+    /* ════════════════════ VENTES — LOGIQUE ════════════════════ */
+
+    static string FormatPeriodeLabel(Periode p)
+    {
+        var dates = p.FromDate.HasValue && p.ToDate.HasValue
+            ? $"{p.FromDate:dd/MM/yyyy} — {p.ToDate:dd/MM/yyyy}"
+            : "Dates non définies";
+        return string.IsNullOrWhiteSpace(p.Comment) ? dates : $"{dates} · {p.Comment}";
+    }
+
+    Periode? FindPeriodeForDate(DateOnly date) =>
+        _periodes.FirstOrDefault(p => p.FromDate.HasValue && p.ToDate.HasValue
+            && date >= DateOnly.FromDateTime(p.FromDate.Value)
+            && date <= DateOnly.FromDateTime(p.ToDate.Value));
+
+    string ResolvePeriodeLabel(DateOnly date)
+    {
+        var p = FindPeriodeForDate(date);
+        return p != null ? FormatPeriodeLabel(p) : "Hors période";
+    }
+
+    async Task OnVentePeriodeFilterChanged()
+    {
+        if (int.TryParse(_ventePeriodeFilter, out var pid))
+        {
+            var p = _periodes.FirstOrDefault(x => x.Id == pid);
+            if (p?.FromDate != null) _venteFrom = p.FromDate.Value;
+            if (p?.ToDate != null) _venteTo = p.ToDate.Value;
+        }
+        await LoadVentes();
+    }
+
+    bool HasVenteExportData() =>
+        _ventePeriodeFilter == "grouped" ? _venteGroupedFiltered.Any(g => g.Lignes.Any()) : _venteFiltered.Any();
+
+    static RptVenteVm ToVenteVm(VenteLigneReportDto d) => new(
+        d.NumFacture, d.Client, d.Article, d.Qte,
+        d.LineMontant, d.LineMoneyId, d.LineTaux, d.LineMontantApres,
+        d.LegacyPu, d.LegacyLineTotal,
+        d.FactMontant, d.FactMoneyId, d.FactMontantApres,
+        d.LegacyFactTotal, d.Reduction, d.FactTaux,
+        d.Date, d.Utilisateur, "", 0, 0, 0);
+
+    async Task<List<RptVenteVm>> QueryVenteRowsAsync(DateOnly from, DateOnly to)
+    {
+        await UserCurrency.EnsureLoadedAsync();
+        var latestTaux = await RapportQuery.GetLatestTauxAsync();
+        if (latestTaux <= 0) latestTaux = UserCurrency.CachedTaux;
+
+        var rows = await RapportQuery.GetVentesLignesAsync(from, to);
+        return rows.Select(r => EnrichVenteRow(ToVenteVm(r), latestTaux)).ToList();
+    }
+
+    RptVenteVm EnrichVenteRow(RptVenteVm raw, decimal latestTaux)
+    {
+        var lineTaux = raw.LineTaux ?? (raw.FactTaux > 0 ? raw.FactTaux : latestTaux);
+        var factMoneyId = raw.FactMoneyId ?? CurrencyDefaults.MoneyIdCdf;
+        var lineMoneyFallback = raw.LineMoneyId ?? factMoneyId;
+        var factTaux = raw.FactTaux > 0 ? raw.FactTaux : latestTaux;
+
+        var displayLine = UserCurrency.ResolveDisplayAmount(
+            raw.LineMontant, raw.LineMoneyId, raw.LineTaux, raw.LineMontantApres,
+            (decimal)raw.LegacyLineTotal, lineMoneyFallback, lineTaux);
+
+        var displayFact = UserCurrency.ResolveDisplayAmount(
+            raw.FactMontant, raw.FactMoneyId, factTaux, raw.FactMontantApres,
+            raw.LegacyFactTotal, factMoneyId, factTaux);
+
+        return raw with
+        {
+            DisplayLineTotal = displayLine,
+            DisplayPu = UserCurrency.ResolveLineUnitPrice(displayLine, raw.Qte),
+            DisplayFactTotal = displayFact,
+            PeriodeLabel = ResolvePeriodeLabel(raw.Date)
+        };
+    }
+
+    async Task LoadVentes()
+    {
+        _venteLoading = true;
+        _venteGrouped.Clear();
+        _venteData.Clear();
+
+        if (_ventePeriodeFilter == "grouped")
+        {
+            DateOnly minDate = DateOnly.FromDateTime(DateTime.Today.AddYears(-10));
+            DateOnly maxDate = DateOnly.FromDateTime(DateTime.Today);
+            if (_periodes.Any(p => p.FromDate.HasValue))
+                minDate = _periodes.Where(p => p.FromDate.HasValue).Min(p => DateOnly.FromDateTime(p.FromDate!.Value));
+            if (_periodes.Any(p => p.ToDate.HasValue))
+                maxDate = _periodes.Where(p => p.ToDate.HasValue).Max(p => DateOnly.FromDateTime(p.ToDate!.Value));
+            if (maxDate < DateOnly.FromDateTime(DateTime.Today))
+                maxDate = DateOnly.FromDateTime(DateTime.Today);
+
+            var allRows = await QueryVenteRowsAsync(minDate, maxDate);
+
+            foreach (var p in _periodes.OrderByDescending(x => x.FromDate))
+            {
+                if (!p.FromDate.HasValue || !p.ToDate.HasValue) continue;
+                var from = DateOnly.FromDateTime(p.FromDate.Value);
+                var to = DateOnly.FromDateTime(p.ToDate.Value);
+                var lignes = allRows.Where(r => r.Date >= from && r.Date <= to).ToList();
+                if (!lignes.Any()) continue;
+                _venteGrouped.Add(new VentePeriodeGroup
+                {
+                    Label = FormatPeriodeLabel(p),
+                    IsActive = p.Activated == true,
+                    NbFactures = lignes.Select(l => l.NumFacture).Distinct().Count(),
+                    Total = lignes.Sum(l => l.DisplayLineTotal),
+                    Lignes = lignes
+                });
+            }
+
+            var hors = allRows.Where(r => FindPeriodeForDate(r.Date) == null).ToList();
+            if (hors.Any())
+            {
+                _venteGrouped.Add(new VentePeriodeGroup
+                {
+                    Label = "Hors période comptable",
+                    IsHorsPeriode = true,
+                    NbFactures = hors.Select(l => l.NumFacture).Distinct().Count(),
+                    Total = hors.Sum(l => l.DisplayLineTotal),
+                    Lignes = hors
+                });
+            }
+        }
+        else
+        {
+            DateOnly from, to;
+            if (int.TryParse(_ventePeriodeFilter, out var pid))
+            {
+                var p = _periodes.FirstOrDefault(x => x.Id == pid);
+                if (p?.FromDate != null && p?.ToDate != null)
+                {
+                    from = DateOnly.FromDateTime(p.FromDate.Value);
+                    to = DateOnly.FromDateTime(p.ToDate.Value);
+                }
+                else
+                {
+                    from = _venteFrom.HasValue ? DateOnly.FromDateTime(_venteFrom.Value) : DateOnly.MinValue;
+                    to = _venteTo.HasValue ? DateOnly.FromDateTime(_venteTo.Value) : DateOnly.MaxValue;
+                }
+            }
+            else
+            {
+                from = _venteFrom.HasValue ? DateOnly.FromDateTime(_venteFrom.Value) : DateOnly.MinValue;
+                to = _venteTo.HasValue ? DateOnly.FromDateTime(_venteTo.Value) : DateOnly.MaxValue;
+            }
+            _venteData = await QueryVenteRowsAsync(from, to);
+        }
+
+        _venteLoading = false;
+        ApplyVenteFilter();
+    }
+
+    async Task ExportVenteExcel()
+    {
+        using var workbook = new ClosedXML.Excel.XLWorkbook();
+        var ws = workbook.Worksheets.Add("Ventes");
+        string[] headers = { "Période", "N° Facture", "Client", "Article", "Qté", "PU", "Total ligne", "Total facture", "% Réd.", "Date", "Établie par" };
+        for (int i = 0; i < headers.Length; i++) { var cell = ws.Cell(1, i + 1); cell.Value = headers[i]; cell.Style.Font.Bold = true; cell.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#4472C4"); cell.Style.Font.FontColor = ClosedXML.Excel.XLColor.White; }
+        int row = 2;
+        IEnumerable<RptVenteVm> exportRows = _ventePeriodeFilter == "grouped"
+            ? _venteGroupedFiltered.SelectMany(g => g.Lignes)
+            : _venteFiltered;
+        foreach (var r in exportRows)
+        {
+            ws.Cell(row, 1).Value = r.PeriodeLabel;
+            ws.Cell(row, 2).Value = r.NumFacture;
+            ws.Cell(row, 3).Value = r.Client;
+            ws.Cell(row, 4).Value = r.Article;
+            ws.Cell(row, 5).Value = r.Qte;
+            ws.Cell(row, 6).Value = (double)r.DisplayPu;
+            ws.Cell(row, 7).Value = (double)r.DisplayLineTotal;
+            ws.Cell(row, 8).Value = (double)r.DisplayFactTotal;
+            ws.Cell(row, 9).Value = (double)r.Reduction;
+            ws.Cell(row, 10).Value = r.Date.ToString("dd/MM/yyyy");
+            ws.Cell(row, 11).Value = r.Utilisateur;
+            row++;
+        }
+        ws.Columns().AdjustToContents();
+        using var ms = new System.IO.MemoryStream(); workbook.SaveAs(ms);
+        var base64 = Convert.ToBase64String(ms.ToArray());
+        await JS.InvokeVoidAsync("eval", $"var a=document.createElement('a');a.href='data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{base64}';a.download='Ventes_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx';document.body.appendChild(a);a.click();document.body.removeChild(a);");
+    }
+
+    /* ════════════════════ STOCK — LOGIQUE ════════════════════ */
+
+    async Task LoadStock()
+    {
+        _stockLoading = true;
+        _stockData = (await RapportQuery.GetStockAsync(_currentUserLocalisations)).ToList();
+        _stockLoading = false;
+        ApplyStockFilter();
+    }
+
+    async Task ExportStockExcel()
+    {
+        using var workbook = new ClosedXML.Excel.XLWorkbook();
+        var ws = workbook.Worksheets.Add("Stock");
+        string[] headers = { "Code", "Article", "Localisation", "Prix", "Stock", "Min (seuil)", "Qté max", "Valeur stock" };
+        for (int i = 0; i < headers.Length; i++) { var cell = ws.Cell(1, i + 1); cell.Value = headers[i]; cell.Style.Font.Bold = true; cell.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#4472C4"); cell.Style.Font.FontColor = ClosedXML.Excel.XLColor.White; }
+        int row = 2;
+        foreach (var a in _stockData) { ws.Cell(row, 1).Value = a.IdArticle; ws.Cell(row, 2).Value = a.Description; ws.Cell(row, 3).Value = a.Localisation; ws.Cell(row, 4).Value = a.Price; ws.Cell(row, 4).Style.NumberFormat.Format = "#,##0.00"; ws.Cell(row, 5).Value = (double)a.Qte; ws.Cell(row, 6).Value = a.Seuil; ws.Cell(row, 7).Value = a.QteMax; ws.Cell(row, 8).Value = a.ValeurStock; ws.Cell(row, 8).Style.NumberFormat.Format = "#,##0.00"; row++; }
+        ws.Columns().AdjustToContents();
+        using var ms = new System.IO.MemoryStream(); workbook.SaveAs(ms);
+        var base64 = Convert.ToBase64String(ms.ToArray());
+        await JS.InvokeVoidAsync("eval", $"var a=document.createElement('a');a.href='data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{base64}';a.download='Stock_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx';document.body.appendChild(a);a.click();document.body.removeChild(a);");
+    }
+
+    /* ════════════════════ COMMANDES — LOGIQUE ════════════════════ */
+
+    async Task LoadCommandes()
+    {
+        _cmdLoading = true;
+        var from = _cmdFrom.HasValue ? DateOnly.FromDateTime(_cmdFrom.Value) : (DateOnly?)null;
+        var to = _cmdTo.HasValue ? DateOnly.FromDateTime(_cmdTo.Value) : (DateOnly?)null;
+        _cmdData = (await RapportQuery.GetCommandesFournisseurAsync(from, to)).ToList();
+        _cmdLoading = false;
+        ApplyCmdFilter();
+    }
+
+    async Task ExportCmdExcel()
+    {
+        using var workbook = new ClosedXML.Excel.XLWorkbook();
+        var ws = workbook.Worksheets.Add("Commandes");
+        string[] headers = { "N°", "Fournisseur", "Articles", "Nb Art.", "Commandé", "Reçu", "% Réception", "Date cmd", "Statut", "Utilisateur" };
+        for (int i = 0; i < headers.Length; i++) { var cell = ws.Cell(1, i + 1); cell.Value = headers[i]; cell.Style.Font.Bold = true; cell.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#4472C4"); cell.Style.Font.FontColor = ClosedXML.Excel.XLColor.White; }
+        int row = 2;
+        foreach (var r in _cmdData) { ws.Cell(row, 1).Value = r.Id; ws.Cell(row, 2).Value = r.Fournisseur; ws.Cell(row, 3).Value = string.Join(", ", r.Articles.Select(a => $"{a.Name} ({a.QteOrder:N0})")); ws.Cell(row, 4).Value = r.NbArticles; ws.Cell(row, 5).Value = (double)r.TotalOrder; ws.Cell(row, 6).Value = (double)r.TotalReceived; ws.Cell(row, 7).Value = r.TotalOrder > 0 ? $"{(int)(r.TotalReceived / r.TotalOrder * 100)}%" : "—"; ws.Cell(row, 8).Value = r.DateCommande?.ToString("dd/MM/yyyy") ?? ""; ws.Cell(row, 9).Value = r.Status switch { 0 => "Nouvelle", 1 => "En cours", 2 => "Reçue", 3 => "Annulée", _ => "—" }; ws.Cell(row, 10).Value = r.User; row++; }
+        ws.Columns().AdjustToContents();
+        using var ms = new System.IO.MemoryStream(); workbook.SaveAs(ms);
+        var base64 = Convert.ToBase64String(ms.ToArray());
+        await JS.InvokeVoidAsync("eval", $"var a=document.createElement('a');a.href='data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{base64}';a.download='Commandes_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx';document.body.appendChild(a);a.click();document.body.removeChild(a);");
+    }
+
+    /* ════════════════════ APPRO & BÉNÉFICE — LOGIQUE ════════════════════ */
+
+    async Task LoadApproBen()
+    {
+        _benLoading = true;
+        var from = _benFrom.HasValue ? DateOnly.FromDateTime(_benFrom.Value) : (DateOnly?)null;
+        var to = _benTo.HasValue ? DateOnly.FromDateTime(_benTo.Value) : (DateOnly?)null;
+        var result = await RapportQuery.GetApproMargesAsync(from, to, _currentUserLocalisations);
+        _benData = result.Rows.ToList();
+        _benTaux = result.LatestTaux;
+        _benTotalUsd = result.TotalBeneficeUsd;
+        _benLoading = false;
+        ApplyBenFilter();
+    }
+
+    async Task ExportBenExcel()
+    {
+        using var workbook = new ClosedXML.Excel.XLWorkbook();
+        var ws = workbook.Worksheets.Add("Appro_Benefice");
+        string[] headers = { "N°", "Article", "Qté", "Dépensé ($)", "Stock act.", "PA ($)", "PV ($)", "Bén. unit. ($)", "Bén. total ($)", "Date", "Utilisateur" };
+        for (int i = 0; i < headers.Length; i++) { var cell = ws.Cell(1, i + 1); cell.Value = headers[i]; cell.Style.Font.Bold = true; cell.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#4472C4"); cell.Style.Font.FontColor = ClosedXML.Excel.XLColor.White; }
+        int row = 2;
+        foreach (var a in _benData)
+        {
+            ws.Cell(row, 1).Value = a.Id;
+            ws.Cell(row, 2).Value = a.ArticleName;
+            ws.Cell(row, 3).Value = (double)a.Qte;
+            ws.Cell(row, 4).Value = (double)a.Depense_Usd; ws.Cell(row, 4).Style.NumberFormat.Format = "#,##0.00";
+            ws.Cell(row, 5).Value = (double)a.StockActuel;
+            ws.Cell(row, 6).Value = (double)a.PA; ws.Cell(row, 6).Style.NumberFormat.Format = "#,##0.00";
+            ws.Cell(row, 7).Value = (double)a.PV; ws.Cell(row, 7).Style.NumberFormat.Format = "#,##0.00";
+            ws.Cell(row, 8).Value = (double)a.Ben; ws.Cell(row, 8).Style.NumberFormat.Format = "#,##0.00";
+            ws.Cell(row, 9).Value = (double)a.BenTotal; ws.Cell(row, 9).Style.NumberFormat.Format = "#,##0.00";
+            ws.Cell(row, 10).Value = a.Date.ToString("dd/MM/yyyy");
+            ws.Cell(row, 11).Value = a.User;
+            row++;
+        }
+        ws.Columns().AdjustToContents();
+        using var ms = new System.IO.MemoryStream(); workbook.SaveAs(ms);
+        var base64 = Convert.ToBase64String(ms.ToArray());
+        await JS.InvokeVoidAsync("eval", $"var a=document.createElement('a');a.href='data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{base64}';a.download='ApproBenefice_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx';document.body.appendChild(a);a.click();document.body.removeChild(a);");
+    }
+
+    /* ════════════════════ VENTES MENSUELLES — LOGIQUE ════════════════════ */
+
+    async Task LoadVenteMois()
+    {
+        _vmLoading = true;
+        var mois = _vmMois ?? DateTime.Today;
+        var result = await RapportQuery.GetFacturesMoisAsync(mois.Year, mois.Month);
+        _displayTaux = result.LatestTaux;
+        _vmData = result.Factures.ToList();
+        _vmTotalFactures = result.TotalFactures;
+        _vmTotalMontant = result.TotalMontantUsd;
+        _vmTotalReduction = result.TotalReductionUsd;
+        _vmTotalNet = result.TotalNetUsd;
+        _vmLoading = false;
+        ApplyVmFilter();
+    }
+
+    async Task ExportVmExcel()
+    {
+        using var workbook = new ClosedXML.Excel.XLWorkbook();
+        var ws = workbook.Worksheets.Add("Ventes_Mois");
+        string[] headers = { "N° Facture", "Client", "Total", "Réduction", "Net à payer", "Date", "Statut", "Utilisateur" };
+        for (int i = 0; i < headers.Length; i++) { var cell = ws.Cell(1, i + 1); cell.Value = headers[i]; cell.Style.Font.Bold = true; cell.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#4472C4"); cell.Style.Font.FontColor = ClosedXML.Excel.XLColor.White; }
+        int row = 2;
+        foreach (var f in _vmData) { ws.Cell(row, 1).Value = f.Id; ws.Cell(row, 2).Value = f.DescriptionName; ws.Cell(row, 3).Value = (double)(f.Total ?? 0); ws.Cell(row, 3).Style.NumberFormat.Format = "#,##0.00"; ws.Cell(row, 4).Value = (double)(f.Reduction ?? 0); ws.Cell(row, 4).Style.NumberFormat.Format = "#,##0.00"; ws.Cell(row, 5).Value = (double)(f.TotalApresReduction ?? 0); ws.Cell(row, 5).Style.NumberFormat.Format = "#,##0.00"; ws.Cell(row, 6).Value = f.Date.ToString("dd/MM/yyyy"); ws.Cell(row, 7).Value = f.Status switch { 0 => "Brouillon", 1 => "Validée", 2 => "Payée", 3 => "Annulée", _ => "Inconnu" }; ws.Cell(row, 8).Value = f.User; row++; }
+        ws.Columns().AdjustToContents();
+        using var ms = new System.IO.MemoryStream(); workbook.SaveAs(ms);
+        var base64 = Convert.ToBase64String(ms.ToArray());
+        await JS.InvokeVoidAsync("eval", $"var a=document.createElement('a');a.href='data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{base64}';a.download='VentesMois_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx';document.body.appendChild(a);a.click();document.body.removeChild(a);");
+    }
+
+    /* ════════════════════ VENTES & APPRO — LOGIQUE ════════════════════ */
+
+    async Task LoadVenteAppro()
+    {
+        _vaLoading = true;
+        var from = _vaFrom.HasValue ? DateOnly.FromDateTime(_vaFrom.Value) : (DateOnly?)null;
+        var to = _vaTo.HasValue ? DateOnly.FromDateTime(_vaTo.Value) : (DateOnly?)null;
+        _vaData = (await RapportQuery.GetMouvementsAsync(from, to)).ToList();
+        _vaLoading = false;
+        ApplyVaFilter();
+    }
+
+    async Task ExportVaExcel()
+    {
+        using var workbook = new ClosedXML.Excel.XLWorkbook();
+        var ws = workbook.Worksheets.Add("Ventes_Appros");
+        string[] headers = { "Code", "Article", "Qté", "PU", "Date", "Mouvement", "Utilisateur" };
+        for (int i = 0; i < headers.Length; i++) { var cell = ws.Cell(1, i + 1); cell.Value = headers[i]; cell.Style.Font.Bold = true; cell.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#4472C4"); cell.Style.Font.FontColor = ClosedXML.Excel.XLColor.White; }
+        int row = 2;
+        foreach (var r in _vaData) { ws.Cell(row, 1).Value = r.IdArticle; ws.Cell(row, 2).Value = r.Description; ws.Cell(row, 3).Value = (double)r.Qte; ws.Cell(row, 4).Value = (double)r.Pu; ws.Cell(row, 5).Value = r.Date.ToString("dd/MM/yyyy"); ws.Cell(row, 6).Value = r.Mouvement; ws.Cell(row, 7).Value = r.Utilisateur; row++; }
+        ws.Columns().AdjustToContents();
+        using var ms = new System.IO.MemoryStream(); workbook.SaveAs(ms);
+        var base64 = Convert.ToBase64String(ms.ToArray());
+        await JS.InvokeVoidAsync("eval", $"var a=document.createElement('a');a.href='data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{base64}';a.download='VentesAppros_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx';document.body.appendChild(a);a.click();document.body.removeChild(a);");
+    }
+
+    /* ════════════════════ HISTORIQUE — LOGIQUE ════════════════════ */
+
+    async Task LoadHistorique()
+    {
+        _histoLoading = true;
+        var from = DateOnly.FromDateTime(_histoFrom ?? new DateTime(DateTime.Today.Year, 1, 1));
+        var to = DateOnly.FromDateTime(_histoTo ?? DateTime.Today);
+        var rows = await RapportQuery.GetHistoriqueAsync(from, to);
+        _histoData = rows.Select(r => new HistoRow
+        {
+            RowId = r.RowId,
+            DateOp = r.DateOp,
+            Date = r.Date,
+            Type = r.Type,
+            Reference = r.Reference,
+            Description = r.Description,
+            Montant = r.Montant,
+            StatusCode = r.StatusCode,
+            StatusLabel = r.StatusLabel,
+            StatusStyle = r.StatusCode switch
+            {
+                0 => Color.Default,
+                1 => Color.Info,
+                2 => Color.Success,
+                3 => Color.Error,
+                _ => Color.Secondary
+            },
+            Utilisateur = r.Utilisateur,
+            FactId = r.FactId
+        }).ToList();
+        _histoLoading = false;
+        ApplyHistoriqueFilter();
+    }
+
+    async Task OnHistoRowClick(HistoRow row)
+    {
+        if (row?.FactId.HasValue == true)
+        {
+            var parameters = new DialogParameters
+            {
+                ["FactId"] = row.FactId.Value
+            };
+            var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+            await DialogService.ShowAsync<FactureDetail>($"Facture N°{row.FactId}", parameters, options);
+        }
+    }
+
+    async Task ExportHistoExcel()
+    {
+        using var workbook = new ClosedXML.Excel.XLWorkbook();
+        var ws = workbook.Worksheets.Add("Historique");
+        string[] headers = { "Date", "Type", "Réf.", "Description", "Montant", "Statut", "Utilisateur" };
+        for (int i = 0; i < headers.Length; i++) { var cell = ws.Cell(1, i + 1); cell.Value = headers[i]; cell.Style.Font.Bold = true; cell.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#4472C4"); cell.Style.Font.FontColor = ClosedXML.Excel.XLColor.White; }
+        int row = 2;
+        foreach (var r in _histoFiltered) { ws.Cell(row, 1).Value = r.DateOp.ToString("dd/MM/yyyy HH:mm"); ws.Cell(row, 2).Value = r.Type; ws.Cell(row, 3).Value = r.Reference; ws.Cell(row, 4).Value = r.Description; ws.Cell(row, 5).Value = (double)r.Montant; ws.Cell(row, 5).Style.NumberFormat.Format = "#,##0.00"; ws.Cell(row, 6).Value = r.StatusLabel; ws.Cell(row, 7).Value = r.Utilisateur; row++; }
+        ws.Columns().AdjustToContents();
+        using var ms = new System.IO.MemoryStream(); workbook.SaveAs(ms);
+        var base64 = Convert.ToBase64String(ms.ToArray());
+        await JS.InvokeVoidAsync("eval", $"var a=document.createElement('a');a.href='data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{base64}';a.download='Historique_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx';document.body.appendChild(a);a.click();document.body.removeChild(a);");
+    }
+}

@@ -1,0 +1,136 @@
+@page "/admin/fournisseur/nouveau"
+@page "/admin/fournisseur/modifier/{SupplierId:int}"
+@rendermode InteractiveServer
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@inject ISupplierService SupplierService
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+@using AppPlusPlus.Domain.Common
+@using AppPlusPlus.Application.Services.Administration
+@inject IPermissionResolver PermissionResolver
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>@AppSettings.AppName — @(_isEdit ? "Modifier le fournisseur" : "Nouveau fournisseur")</PageTitle>
+
+<div class="aw-page">
+    <div class="aw-form">
+        <header class="aw-form__head">
+            <div>
+                <p class="aw-form__eyebrow">Administration</p>
+                <h1 class="aw-form__title">@(_isEdit ? "Modifier le fournisseur" : "Nouveau fournisseur")</h1>
+            </div>
+            <div class="aw-form__actions">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="OnCancel">
+                    <i class="bi bi-arrow-left"></i> Annuler
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="OnSave">
+                    <i class="bi bi-check-lg"></i> Enregistrer
+                </button>
+            </div>
+        </header>
+        <div class="aw-form__body">
+            <div class="aw-form__grid">
+                <div class="aw-field">
+                    <label class="aw-field__label">N° Fournisseur</label>
+                    <input type="text" class="aw-input" @bind="_item.SupplierNumber" placeholder="FRN-001" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Nom *</label>
+                    <input type="text" class="aw-input" @bind="_item.SupplierName" placeholder="Nom du fournisseur" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Contact / Téléphone</label>
+                    <input type="text" class="aw-input" @bind="_item.Contact" placeholder="+243 ..." />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Email</label>
+                    <input type="text" class="aw-input" @bind="_item.Email" placeholder="email@exemple.com" />
+                </div>
+                <div class="aw-field aw-form__span-2">
+                    <label class="aw-field__label">Adresse</label>
+                    <input type="text" class="aw-input" @bind="_item.Adresse" placeholder="Adresse du fournisseur" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Montant à payer</label>
+                    <MudNumericField @bind-Value="_item.CcAmountToPay" T="decimal?" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="0.00" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Montant payé</label>
+                    <MudNumericField @bind-Value="_item.CcAmountPay" T="decimal?" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="0.00" />
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public int? SupplierId { get; set; }
+
+    bool _isEdit;
+    Supplier _item = new();
+    string _currentLogin = "";
+    string _backRoute = "/administration";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+            if (!string.IsNullOrEmpty(_currentLogin))
+            {
+                var perms = await PermissionResolver.GetPermissionsAsync(_currentLogin);
+                _backRoute = perms.HasHierarchicalGrants
+                    ? PermissionCatalog.TabHubRoute("administration", perms.Grants)
+                    : "/administration";
+            }
+        }
+
+        if (SupplierId.HasValue)
+        {
+            _isEdit = true;
+            var existing = await SupplierService.GetByIdAsync(SupplierId.Value);
+            if (existing != null) _item = existing;
+        }
+    }
+
+    void OnCancel() => Navigation.NavigateTo(_backRoute);
+
+    async Task OnSave()
+    {
+        if (string.IsNullOrWhiteSpace(_item.SupplierName))
+        {
+            Snackbar.Add("Le nom est obligatoire", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            _item.UserLogin = _currentLogin;
+
+            if (_isEdit)
+            {
+                await SupplierService.UpdateAsync(_item);
+            }
+            else
+            {
+                _item.CreationDate = DateOnly.FromDateTime(DateTime.Today);
+                await SupplierService.AddAsync(_item);
+            }
+
+            Snackbar.Add(_item.SupplierName, Severity.Success);
+            Navigation.NavigateTo(_backRoute);
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(msg, Severity.Error);
+        }
+    }
+}

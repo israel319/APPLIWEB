@@ -1,0 +1,315 @@
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using AppPlusPlus.Application.DTOs.Inventaire
+@using AppPlusPlus.Application.Services.Inventaire
+@using AppPlusPlus.Application.Services.Catalogue
+@using AppPlusPlus.Domain.Common
+@using AppPlusPlus.Domain.Entities.Catalogue
+@inject IInventaireService InventaireService
+@inject ICatalogueService CatalogueService
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+
+<MudDialog Class="inventaire-reception-dialog">
+    <DialogContent>
+        @if (_loading)
+        {
+            <div class="aw-dialog">
+                <div class="aw-dialog__body">
+                    <AwSkeleton Variant="form" Rows="5" />
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="aw-dialog aw-dialog--inventaire-reception">
+                <header class="aw-dialog__head">
+                    <div class="aw-dialog__title-wrap">
+                        <i class="bi bi-box-arrow-in-down" aria-hidden="true"></i>
+                        <h2 class="aw-dialog__title">Réception du @_dateJour.ToString("dd/MM/yyyy")</h2>
+                    </div>
+                    @if (_readOnly)
+                    {
+                        <span class="aw-badge aw-badge--brand">Clôturée</span>
+                    }
+                    else
+                    {
+                        <span class="aw-badge aw-badge--accent">Ouverte</span>
+                    }
+                </header>
+                <div class="aw-dialog__body">
+                    @if (!_readOnly && _canWrite)
+                    {
+                        <div class="aw-field aw-field--picker appro-article-picker">
+                            <label class="aw-field__label">Ajouter une ligne</label>
+                            <ArticleAutocomplete Articles="@_articles"
+                                                 Value="@_pickerArticleId"
+                                                 ValueChanged="OnPickerArticleSelected"
+                                                 Placeholder="Rechercher un article…"
+                                                 MinCharacters="2"
+                                                 OpenOnFocus="true" />
+                        </div>
+                    }
+
+                    <div class="aw-table-region aw-inventaire-reception-dialog__table">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>Heure</th>
+                                        <th>Article</th>
+                                        <th class="aw-table__num">Qté</th>
+                                        <th>Exp.</th>
+                                        <th class="aw-table__num">P.U. (FC)</th>
+                                        <th class="aw-table__num">Montant</th>
+                                        @if (!_readOnly && _canWrite){<th></th>}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @if (!_lines.Any())
+                                    {
+                                        <tr>
+                                            <td colspan="@(_readOnly || !_canWrite ? 6 : 7)" class="aw-table__meta" style="text-align:center;padding:1rem;">
+                                                Ajoutez des lignes avec l'heure de réception
+                                            </td>
+                                        </tr>
+                                    }
+                                    @foreach (var line in _lines)
+                                    {
+                                        var montant = line.Quantite * line.PrixUnitaire;
+                                        <tr>
+                                            <td class="aw-table__num">
+                                                @if (_readOnly)
+                                                {
+                                                    @line.Heure.ToString("HH:mm")
+                                                }
+                                                else
+                                                {
+                                                    <input type="time" class="aw-input aw-input--table aw-input--time" @bind="line.Heure" />
+                                                }
+                                            </td>
+                                            <td>
+                                                <span class="aw-table__title">@(line.ArticleName ?? line.IdArticle)</span>
+                                                <span class="aw-table__meta">@line.IdArticle</span>
+                                            </td>
+                                            <td class="aw-table__num">
+                                                @if (_readOnly)
+                                                {
+                                                    @line.Quantite.ToString("N2")
+                                                }
+                                                else
+                                                {
+                                                    <input type="number" class="aw-input aw-input--table" @bind="line.Quantite" min="0.01" step="0.01" />
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (_readOnly)
+                                                {
+                                                    @FormatExpiration(line.DateExpiration)
+                                                }
+                                                else
+                                                {
+                                                    <input type="date" class="aw-input aw-input--table aw-input--date"
+                                                           @bind="line.DateExpiration" />
+                                                }
+                                            </td>
+                                            <td class="aw-table__num">
+                                                @if (_readOnly)
+                                                {
+                                                    @CurrencyFormat.Cdf(line.PrixUnitaire, "N0")
+                                                }
+                                                else
+                                                {
+                                                    <input type="number" class="aw-input aw-input--table aw-input--table-wide" @bind="line.PrixUnitaire" min="0" step="1" />
+                                                }
+                                            </td>
+                                            <td class="aw-table__num"><strong>@CurrencyFormat.Cdf(montant, "N0")</strong></td>
+                                            @if (!_readOnly && _canWrite)
+                                            {
+                                                <td>
+                                                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="() => RemoveLine(line)">
+                                                        <i class="bi bi-trash"></i>
+                                                    </button>
+                                                </td>
+                                            }
+                                        </tr>
+                                    }
+                                </tbody>
+                                @if (_lines.Any())
+                                {
+                                    <tfoot>
+                                        <tr>
+                                            <td colspan="5" class="aw-table__num"><strong>Total du jour</strong></td>
+                                            <td class="aw-table__num"><strong>@CurrencyFormat.Cdf(_lines.Sum(l => l.Quantite * l.PrixUnitaire), "N0")</strong></td>
+                                            @if (!_readOnly && _canWrite){<td></td>}
+                                        </tr>
+                                    </tfoot>
+                                }
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (!_loading)
+        {
+            <div class="aw-dialog__footer aw-inventaire-reception-dialog__footer">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="@(() => MudDialog.Cancel())">
+                    <i class="bi bi-x-lg"></i> Annuler
+                </button>
+                @if (!_readOnly && _canWrite)
+                {
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="OnSave" disabled="@(!_lines.Any() || _saving)">
+                        <i class="bi bi-check-lg"></i> Enregistrer
+                    </button>
+                }
+            </div>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public int InventaireId { get; set; }
+    [Parameter] public int ReceptionId { get; set; }
+    [Parameter] public DateOnly? DateJour { get; set; }
+
+    bool _loading = true;
+    bool _saving;
+    bool _readOnly;
+    bool _canWrite;
+    int _receptionId;
+    DateOnly _dateJour;
+    string _login = "";
+    string? _pickerArticleId;
+    List<Article> _articles = new();
+    List<LineVm> _lines = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+        _login = user.FindFirst("login")?.Value
+            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? user.Identity?.Name
+            ?? "";
+        var isAdmin = AppFunctions.Normalize(user.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+        var perms = await PermissionResolver.GetPermissionsAsync(_login);
+        _canWrite = PermissionGate.DoAction(perms, "articles.inventaire.write",
+            () => PermissionGate.LegacyWrite(perms, AppFunctions.Stock, isAdmin));
+
+        _articles = await CatalogueService.GetArticlesAsync();
+        _dateJour = DateJour ?? DateOnly.FromDateTime(DateTime.Today);
+
+        InventaireReceptionDto? rec = null;
+        if (ReceptionId > 0)
+            rec = await InventaireService.GetReceptionAsync(ReceptionId);
+        else
+            rec = await InventaireService.GetReceptionForDayAsync(InventaireId, _dateJour);
+
+        if (rec != null)
+        {
+            _receptionId = rec.IdReception;
+            _dateJour = rec.DateJour;
+            _readOnly = rec.Statut == InventaireReceptionStatut.Cloture;
+            _lines = rec.Lines.Select(l => new LineVm
+            {
+                Id = l.Id,
+                IdArticle = l.IdArticle,
+                ArticleName = l.ArticleName,
+                Quantite = l.Quantite,
+                PrixUnitaire = l.PrixUnitaire,
+                Heure = TimeOnly.FromDateTime(l.DateLigne),
+                DateExpiration = l.DateExpiration
+            }).ToList();
+        }
+
+        _loading = false;
+    }
+
+    async Task OnPickerArticleSelected(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || _readOnly) return;
+        var art = _articles.FirstOrDefault(a => a.IdArticle == value)
+                  ?? _articles.FirstOrDefault(a => a.Description?.Equals(value.Trim(), StringComparison.OrdinalIgnoreCase) == true);
+        var id = art?.IdArticle ?? value.Trim();
+
+        var puFc = art != null
+            ? CurrencyFormat.ArticleToFc((decimal)art.Price, CurrencyDefaults.IsUsdMoneyId(art.IdMonais), UserCurrency.CachedTaux)
+            : 0;
+
+        _lines.Insert(0, new LineVm
+        {
+            IdArticle = id,
+            ArticleName = art?.Description,
+            Quantite = 1,
+            PrixUnitaire = puFc,
+            Heure = TimeOnly.FromDateTime(DateTime.Now)
+        });
+
+        _pickerArticleId = null;
+        await Task.CompletedTask;
+    }
+
+    void RemoveLine(LineVm line) => _lines.Remove(line);
+
+    async Task OnSave()
+    {
+        if (!_lines.Any()) return;
+        _saving = true;
+        try
+        {
+            _receptionId = await InventaireService.SaveReceptionAsync(new InventaireReceptionSaveRequest
+            {
+                IdReception = _receptionId > 0 ? _receptionId : null,
+                IdInventaire = InventaireId,
+                DateJour = _dateJour,
+                UserLogin = _login,
+                Lines = _lines.Select(l => new InventaireReceptionLineInput
+                {
+                    Id = l.Id > 0 ? l.Id : null,
+                    IdArticle = l.IdArticle,
+                    Quantite = l.Quantite,
+                    PrixUnitaire = l.PrixUnitaire,
+                    DateLigne = _dateJour.ToDateTime(l.Heure),
+                    DateExpiration = l.DateExpiration
+                }).ToList()
+            });
+            Snackbar.Add("Réception enregistrée", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    static string FormatExpiration(DateOnly? date)
+    {
+        if (date is null) return "—";
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        if (date.Value < today) return $"{date:dd/MM/yyyy} (expiré)";
+        if (date.Value <= today.AddDays(30)) return $"{date:dd/MM/yyyy} (bientôt)";
+        return date.Value.ToString("dd/MM/yyyy");
+    }
+
+    class LineVm
+    {
+        public int Id { get; set; }
+        public string IdArticle { get; set; } = "";
+        public string? ArticleName { get; set; }
+        public decimal Quantite { get; set; }
+        public decimal PrixUnitaire { get; set; }
+        public TimeOnly Heure { get; set; } = TimeOnly.FromDateTime(DateTime.Now);
+        public DateOnly? DateExpiration { get; set; }
+    }
+}

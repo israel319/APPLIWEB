@@ -1,0 +1,454 @@
+@page "/localisation/{Id:int}"
+@rendermode InteractiveServer
+@using AppPlusPlus.Application.DTOs.Stock
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject ILocalisationService LocalisationService
+@inject IUserAdminService UserAdminService
+@inject IStockService StockService
+@inject NavigationManager Navigation
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+
+<PageTitle>@AppSettings.AppName — @(_localisation?.DescriptionLocalisation ?? "Localisation")</PageTitle>
+
+@if (_loading)
+{
+    <div class="aw-page">
+        <div class="aw-loading" style="min-height:200px;">
+            <span class="aw-spinner" role="status" aria-hidden="true"></span>
+            <span>Chargement…</span>
+        </div>
+    </div>
+}
+else if (_localisation == null)
+{
+    <div class="aw-page">
+        <div class="aw-shell" style="max-width:720px;margin:1.5rem auto;">
+            <div class="aw-empty">
+                <i class="bi bi-exclamation-triangle"></i>
+                <p><strong>Localisation introuvable</strong><br />Cette localisation n'existe pas ou a été supprimée.</p>
+                <button type="button" class="aw-btn aw-btn--primary" style="margin-top:0.75rem;"
+                        @onclick="@(() => Navigation.NavigateTo("/admin"))">
+                    <i class="bi bi-arrow-left"></i> Retour
+                </button>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    var articleList = FilteredArticles.ToList();
+    var artPageItems = PageOf(articleList, _artPage, _artPageSize);
+    var userPageItems = PageOf(_users, _userPage, _userPageSize);
+
+    <div class="aw-page aw-page--workspace">
+        <div class="aw-workspace">
+            <header class="aw-object-head">
+                <div class="aw-object-head__identity">
+                    <div style="display:inline-flex;align-items:center;gap:0.45rem;">
+                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--icon aw-btn--sm"
+                                @onclick="@(() => Navigation.NavigateTo("/admin"))" title="Retour">
+                            <i class="bi bi-arrow-left"></i>
+                        </button>
+                        <p class="aw-object-head__eyebrow" style="margin:0;">Localisation</p>
+                    </div>
+                    <h1 class="aw-object-head__title">
+                        @_localisation.DescriptionLocalisation
+                        @if (_localisation.IsDepot)
+                        {
+                            <span class="aw-badge aw-badge--accent" style="margin-left:0.4rem;vertical-align:middle;font-size:0.7rem;">Dépôt</span>
+                        }
+                    </h1>
+                    <p class="aw-object-head__desc">Stock et utilisateurs de cette localisation</p>
+                </div>
+                @if (_canStockWrite)
+                {
+                    <div class="aw-object-head__actions">
+                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="@OnReceiveFromLocation">
+                            <i class="bi bi-box-arrow-in-down"></i> Recevoir
+                        </button>
+                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="@OnApproLocation">
+                            <i class="bi bi-cart-plus"></i> Approvisionner
+                        </button>
+                    </div>
+                }
+            </header>
+
+            <nav class="aw-railnav" aria-label="Sections localisation" role="tablist">
+                <button type="button" role="tab" aria-selected="@(_tab == 0)"
+                        class="aw-railnav__item @(_tab == 0 ? "aw-railnav__item--active" : "")"
+                        @onclick="@(async () => await OnTabChange(0))">
+                    <i class="bi bi-box-seam" aria-hidden="true"></i>
+                    Articles
+                    <span class="aw-railnav__count">@_stockArticles.Count</span>
+                </button>
+                <button type="button" role="tab" aria-selected="@(_tab == 1)"
+                        class="aw-railnav__item @(_tab == 1 ? "aw-railnav__item--active" : "")"
+                        @onclick="@(async () => await OnTabChange(1))">
+                    <i class="bi bi-people" aria-hidden="true"></i>
+                    Utilisateurs
+                    <span class="aw-railnav__count">@_users.Count</span>
+                </button>
+            </nav>
+
+            <div class="aw-workspace__body">
+                @if (_tab == 0)
+                {
+                    <div class="aw-actionbar">
+                        <div class="aw-actionbar__search">
+                            <i class="bi bi-search" aria-hidden="true"></i>
+                            <input type="search"
+                                   placeholder="Rechercher un article…"
+                                   aria-label="Rechercher un article"
+                                   @bind="_articleSearch"
+                                   @bind:event="oninput"
+                                   @bind:after="OnArticleSearchChanged" />
+                        </div>
+                        <div class="aw-actionbar__actions">
+                            <button type="button" class="aw-btn aw-btn--primary" @onclick="OnAddArticle">
+                                <i class="bi bi-plus-lg"></i> Nouvel article
+                            </button>
+                        </div>
+                    </div>
+
+                    @if (!artPageItems.Any())
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-empty">
+                                <i class="bi bi-inbox"></i>
+                                <p>@(string.IsNullOrWhiteSpace(_articleSearch) ? "Aucun article dans cette localisation." : "Aucun article pour cette recherche.")</p>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Article</th>
+                                            <th>Stock / Min–Max</th>
+                                            <th class="aw-table__num">Prix</th>
+                                            <th>État</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var item in artPageItems)
+                                        {
+                                            var qte = item.Qte;
+                                            var seuil = item.Seuil;
+                                            var qteMax = item.QteMax;
+                                            var stockBadge = qte <= 0 ? "aw-badge--danger"
+                                                : qte <= seuil && seuil > 0 ? "aw-badge--accent"
+                                                : "aw-badge--brand";
+                                            <tr @onclick="@(() => OnArticleRowClick(item))" style="cursor:pointer;">
+                                                <td>
+                                                    <span class="aw-table__title">@item.Description</span>
+                                                    <span class="aw-table__meta">Code : @item.IdArticle</span>
+                                                </td>
+                                                <td>
+                                                    <span class="aw-badge @stockBadge">
+                                                        @if (qte <= 0) { <i class="bi bi-exclamation-circle me-1"></i> }
+                                                        else if (seuil > 0 && qte <= seuil) { <i class="bi bi-exclamation-triangle me-1"></i> }
+                                                        @qte.ToString("N2")
+                                                    </span>
+                                                    <span class="aw-table__meta" style="display:block;margin-top:0.2rem;">
+                                                        min @seuil.ToString("N0")@if (qteMax > 0) { <text> · max @qteMax</text> }
+                                                    </span>
+                                                </td>
+                                                <td class="aw-table__num">
+                                                    <CurrencyText Mode="@CurrencyText.DisplayMode.Business" Amount="(decimal)item.Price" Format="N0" />
+                                                </td>
+                                                <td>
+                                                    @if (qte <= 0)
+                                                    {
+                                                        <span class="aw-badge aw-badge--danger"><i class="bi bi-x-circle me-1"></i>Rupture</span>
+                                                    }
+                                                    else if (seuil > 0 && qte <= seuil)
+                                                    {
+                                                        <span class="aw-badge aw-badge--accent"><i class="bi bi-exclamation-triangle me-1"></i>Stock bas</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="aw-badge aw-badge--brand"><i class="bi bi-check-circle me-1"></i>OK</span>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            <AwPager TotalCount="articleList.Count"
+                                     Page="_artPage"
+                                     PageSize="_artPageSize"
+                                     ItemLabel="article"
+                                     PageChanged="SetArtPage"
+                                     PageSizeChanged="SetArtPageSize" />
+                        </div>
+                    }
+                }
+                else
+                {
+                    @if (!_users.Any())
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-empty">
+                                <i class="bi bi-people"></i>
+                                <p>Aucun utilisateur assigné à cette localisation.</p>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Utilisateur</th>
+                                            <th>Contact</th>
+                                            <th>Rôle</th>
+                                            <th>Statut</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var u in userPageItems)
+                                        {
+                                            <tr style="cursor:default;">
+                                                <td>
+                                                    <span class="aw-table__title">@u.Name</span>
+                                                    <span class="aw-table__meta">@u.Login</span>
+                                                </td>
+                                                <td>
+                                                    @if (!string.IsNullOrWhiteSpace(u.Email))
+                                                    {
+                                                        <span class="aw-table__meta"><i class="bi bi-envelope me-1"></i>@u.Email</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="aw-table__meta">—</span>
+                                                    }
+                                                </td>
+                                                <td>
+                                                    <span class="aw-badge aw-badge--accent">@(u.Role?.DescriptionRole ?? "—")</span>
+                                                </td>
+                                                <td>
+                                                    @if (u.Activated == true)
+                                                    {
+                                                        <span class="aw-badge aw-badge--brand"><i class="bi bi-check-circle me-1"></i>Actif</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="aw-badge aw-badge--muted">Inactif</span>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            <AwPager TotalCount="_users.Count"
+                                     Page="_userPage"
+                                     PageSize="_userPageSize"
+                                     ItemLabel="utilisateur"
+                                     PageChanged="SetUserPage"
+                                     PageSizeChanged="SetUserPageSize" />
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private bool _loading = true;
+    private int _tab;
+    private bool _canStockWrite;
+    private string _login = "";
+    private Localisation? _localisation;
+    private List<User> _users = new();
+    private List<StockArticleDto> _stockArticles = new();
+    private string _articleSearch = "";
+
+    private int _artPage = 1;
+    private int _artPageSize = 10;
+    private int _userPage = 1;
+    private int _userPageSize = 10;
+    private static readonly int[] PageSizeChoices = [10, 25, 50, 100];
+
+    private IEnumerable<StockArticleDto> FilteredArticles => string.IsNullOrWhiteSpace(_articleSearch)
+        ? _stockArticles
+        : _stockArticles.Where(a =>
+            (a.IdArticle?.Contains(_articleSearch, StringComparison.OrdinalIgnoreCase) ?? false) ||
+            (a.Description?.Contains(_articleSearch, StringComparison.OrdinalIgnoreCase) ?? false));
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            _login = user.FindFirst("login")?.Value
+                ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+            var isAdmin = AppFunctions.Normalize(user.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+            var perms = await PermissionResolver.GetPermissionsAsync(_login);
+            _canStockWrite = isAdmin || perms.CanWrite(AppFunctions.Approvisionnement);
+        }
+
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        _loading = true;
+
+        _localisation = await LocalisationService.GetLocalisationByIdAsync(Id);
+
+        if (_localisation != null)
+        {
+            _users = await UserAdminService.GetUsersByLocalisationAsync(Id);
+            _stockArticles = await StockService.GetStockArticleViewAsync(Id);
+        }
+
+        _loading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                var savedTab = await JS.InvokeAsync<int>("tabNavigation.getTab", $"localisation-{Id}", 0);
+                if (savedTab != _tab)
+                {
+                    _tab = savedTab;
+                    StateHasChanged();
+                }
+            }
+            catch { }
+        }
+    }
+
+    async Task OnTabChange(int tabIndex)
+    {
+        _tab = tabIndex;
+        try
+        {
+            await JS.InvokeVoidAsync("tabNavigation.saveTab", $"localisation-{Id}", tabIndex);
+        }
+        catch { }
+    }
+
+    private async Task OnArticleRowClick(StockArticleDto dto)
+    {
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        var article = await ctx.Articles.FirstOrDefaultAsync(a => a.IdArticle == dto.IdArticle);
+        if (article == null) return;
+
+        var localisations = await ctx.Localisations.OrderBy(l => l.DescriptionLocalisation).ToListAsync();
+        var locDict = localisations.ToDictionary(l => l.IdLocalisation, l => l.DescriptionLocalisation ?? "?");
+        var stocks = (await ctx.Stocks
+            .Where(s => s.IdArticle == dto.IdArticle)
+            .ToListAsync())
+            .Select(s => new StockLocationInfo
+            {
+                StockId = s.Id,
+                IdLocalisation = s.IdLocalisation,
+                LocalisationName = locDict.GetValueOrDefault(s.IdLocalisation, "?"),
+                Qte = s.Qte,
+                Seuil = s.Seuil,
+                QteMax = s.QteMax
+            })
+            .OrderBy(s => s.LocalisationName)
+            .ToList();
+
+        var parameters = new DialogParameters
+        {
+            { "Article", article },
+            { "Stocks", stocks },
+            { "Localisations", localisations }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<ArticleDetailDialog>(article.Description ?? article.IdArticle, parameters, options);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled) await LoadData();
+    }
+
+    private void OnAppro(StockArticleDto article)
+    {
+        Navigation.NavigateTo($"/stock/appro/nouveau?PreselectedArticleId={article.IdArticle}&PreselectedLocalisationId={Id}");
+    }
+
+    private void OnApproLocation()
+    {
+        Navigation.NavigateTo($"/stock/appro/nouveau?PreselectedLocalisationId={Id}");
+    }
+
+    async Task OnReceiveFromLocation()
+    {
+        if (_localisation == null) return;
+
+        var parameters = new DialogParameters<LocalisationTransferDialog>
+        {
+            { x => x.DestLocalisationId, Id },
+            { x => x.DestLocalisationName, _localisation.DescriptionLocalisation ?? "—" },
+            { x => x.Login, _login }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<LocalisationTransferDialog>(
+            "Recevoir des articles", parameters, options);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+            await LoadData();
+    }
+
+    private void OnAddArticle()
+    {
+        Navigation.NavigateTo($"/gestion/article/nouveau?localisationId={Id}");
+    }
+
+    private void OnEditArticle(StockArticleDto article)
+    {
+        Navigation.NavigateTo($"/gestion/article/modifier/{article.IdArticle}");
+    }
+
+    void OnArticleSearchChanged() => _artPage = 1;
+
+    IList<T> PageOf<T>(IList<T> items, int page, int pageSize) =>
+        items.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+    int PageCount(int total, int pageSize) =>
+        total <= 0 ? 1 : (int)Math.Ceiling(total / (double)Math.Max(1, pageSize));
+
+    void SetArtPage(int page) =>
+        _artPage = Math.Clamp(page, 1, PageCount(FilteredArticles.Count(), _artPageSize));
+
+    void SetArtPageSize(int size)
+    {
+        if (!PageSizeChoices.Contains(size)) return;
+        _artPageSize = size;
+        _artPage = 1;
+    }
+
+    void SetUserPage(int page) =>
+        _userPage = Math.Clamp(page, 1, PageCount(_users.Count, _userPageSize));
+
+    void SetUserPageSize(int size)
+    {
+        if (!PageSizeChoices.Contains(size)) return;
+        _userPageSize = size;
+        _userPage = 1;
+    }
+}

@@ -1,0 +1,918 @@
+@using AppPlusPlus.Domain.Common
+@using AppPlusPlus.Application.DTOs.Catalogue
+@using AppPlusPlus.Web.Services
+@using System.Globalization
+@using Microsoft.AspNetCore.WebUtilities
+@inject ICatalogueService CatalogueService
+@inject IPublicCatalogPricingService CatalogPricing
+@inject IClientCartService Cart
+@inject NavigationManager Navigation
+@inject HomeCatalogCoordinator HomeCatalog
+@implements IDisposable
+
+<section class="landing-catalog mk-catalog @(StayOnHome ? "landing-catalog--home-embed" : "") @(PreviewMode ? "landing-catalog--preview" : "")" id="catalogue">
+    <div class="landing-catalog-inner mk-catalog__inner">
+        @if (_loadFailed)
+        {
+            <p class="landing-catalog-empty">
+                Catalogue temporairement indisponible.
+                <button type="button" class="landing-catalog-search__reset" @onclick="RetryLoadAsync">Réessayer</button>
+            </p>
+        }
+        else if (_loading)
+        {
+            <PublicPageSkeleton Variant="catalog-categories" Count="8" />
+        }
+        else if (!_orderableCategoryIds.Any())
+        {
+            <p class="landing-catalog-empty">Aucun article commandable pour le moment.</p>
+        }
+        else
+        {
+            <div class="landing-catalog-stage mk-catalog-stage @(_refreshingResults ? "landing-catalog-stage--busy" : "")">
+                <div class="landing-catalog-panel mk-catalog-panel">
+                    @if (_selectedCategoryId.HasValue)
+                    {
+                        <button type="button"
+                                class="mk-catalog-back"
+                                @onclick="CloseCategory"
+                                aria-label="Retour aux catégories">
+                            <i class="bi bi-chevron-left" aria-hidden="true"></i> Catégories
+                        </button>
+                    }
+
+                    @if (ShowCatalogSearch)
+                    {
+                    <div class="mk-catalog-tools">
+                        <label class="mk-catalog-search" aria-label="Rechercher un article">
+                            <i class="bi bi-search" aria-hidden="true"></i>
+                            <input type="search"
+                                   value="@_productSearch"
+                                   @oninput="OnProductSearchInput"
+                                   placeholder="@(PreviewMode ? "Rechercher une robe, un pyjama, un sac..." : "Rechercher dans le catalogue...")"
+                                   autocomplete="off"
+                                   enterkeyhint="search" />
+                            @if (!string.IsNullOrWhiteSpace(_productSearch))
+                            {
+                                <button type="button"
+                                        class="mk-catalog-search__clear"
+                                        aria-label="Effacer la recherche"
+                                        @onclick="ClearProductSearch">
+                                    <i class="bi bi-x-lg" aria-hidden="true"></i>
+                                </button>
+                            }
+                        </label>
+                    </div>
+                    }
+
+                    @if (_isGlobalSearch || _selectedCategoryId.HasValue)
+                    {
+                        <div class="mk-sec-head mk-sec-head--compact">
+                            <div>
+                                @if (_isGlobalSearch)
+                                {
+                                    <h2 class="mk-catalog-heading">Recherche</h2>
+                                }
+                                else
+                                {
+                                    <h2 class="mk-catalog-heading">@GetCategoryName(_selectedCategoryId!.Value)</h2>
+                                }
+                            </div>
+                        </div>
+                    }
+                    else if (ShowBrowseHeading)
+                    {
+                        <div class="mk-sec-head mk-sec-head--compact">
+                            <div>
+                                <h2 class="mk-catalog-heading">Parcourir par type d'article</h2>
+                            </div>
+                        </div>
+                    }
+
+                    @if (_isGlobalSearch || _selectedCategoryId.HasValue)
+                    {
+                        @if (_loadingCategory)
+                        {
+                            <PublicPageSkeleton Variant="catalog-products" Count="8" />
+                        }
+                        else if (_categoryTotal == 0)
+                        {
+                            <p class="landing-catalog-empty">
+                                @if (string.IsNullOrWhiteSpace(_productSearch))
+                                {
+                                    @:Aucun article dans cette catégorie.
+                                }
+                                else
+                                {
+                                    @:Aucun article pour "@_productSearch.Trim()".
+                                    <button type="button" class="landing-catalog-search__reset" @onclick="ClearProductSearch">
+                                        Effacer la recherche
+                                    </button>
+                                }
+                            </p>
+                        }
+                        else
+                        {
+                            @if (!string.IsNullOrWhiteSpace(GetProductMetaLabel()))
+                            {
+                                <div class="mk-catalog-summary" aria-live="polite">
+                                    <span>@GetProductMetaLabel()</span>
+                                </div>
+                            }
+                            <div class="mk-grid">
+                                @{ var cardIndex = 0; }
+                                @foreach (var art in DisplayArticles)
+                                {
+                                    var qty = GetCartQty(art.IdArticle);
+                                    var articleId = art.IdArticle;
+                                    var bg = MkCatalogUi.CardBackgrounds[cardIndex % MkCatalogUi.CardBackgrounds.Length];
+                                    var fg = MkCatalogUi.CardForegrounds[cardIndex % MkCatalogUi.CardForegrounds.Length];
+                                    cardIndex++;
+                                    <article class="mk-card" style="@($"--mk-card-bg:{bg};--mk-card-fg:{fg}")">
+                                        <div class="mk-card__pic">
+                                            @if (qty > 0)
+                                            {
+                                                <span class="mk-card__flag">@qty au panier</span>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(art.ImageArticle))
+                                            {
+                                                <img src="@art.ImageArticle" alt="" loading="lazy" decoding="async" />
+                                            }
+                                            else
+                                            {
+                                                <i class="bi bi-box-seam" aria-hidden="true"></i>
+                                            }
+                                        </div>
+                                        <div class="mk-card__info">
+                                            <h3>@art.Description</h3>
+                                            @if (!string.IsNullOrWhiteSpace(art.CategoryName))
+                                            {
+                                                <p class="mk-card__meta">@art.CategoryName</p>
+                                            }
+                                            <p class="mk-card__price">@FormatPrice(art)</p>
+                                            <div class="mk-card__actions">
+                                                <button type="button"
+                                                        class="mk-btn mk-btn--ghost mk-card__add"
+                                                        @onclick="@(() => AddToCart(art))">
+                                                    @(qty > 0 ? "Ajouter encore" : "Ajouter au panier")
+                                                </button>
+                                                @if (qty > 0)
+                                                {
+                                                    <button type="button"
+                                                            class="mk-card__remove"
+                                                            aria-label="@($"Retirer {art.Description} du panier")"
+                                                            @onclick="@(() => RemoveFromCart(articleId))">
+                                                        <i class="bi bi-x-lg" aria-hidden="true"></i>
+                                                    </button>
+                                                }
+                                            </div>
+                                        </div>
+                                    </article>
+                                }
+                            </div>
+
+                            @if (_totalPages > 1 && !PreviewMode)
+                            {
+                                <nav class="landing-catalog-pagination" aria-label="Pagination des articles">
+                                    <button type="button"
+                                            class="landing-catalog-pagination__btn"
+                                            disabled="@(_currentPage <= 1 || _loadingCategory || _refreshingResults)"
+                                            @onclick="GoPrevPage">
+                                        <i class="bi bi-chevron-left" aria-hidden="true"></i>
+                                        Préc.
+                                    </button>
+                                    <span class="landing-catalog-pagination__info">@_currentPage / @_totalPages</span>
+                                    <button type="button"
+                                            class="landing-catalog-pagination__btn"
+                                            disabled="@(_currentPage >= _totalPages || _loadingCategory || _refreshingResults)"
+                                            @onclick="GoNextPage">
+                                        Suiv.
+                                        <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                                    </button>
+                                </nav>
+                            }
+                        }
+                    }
+                    else if (!_categoriesWithArticles.Any())
+                    {
+                        <p class="landing-catalog-empty">Aucune catégorie disponible.</p>
+                    }
+                    else
+                    {
+                        <div class="mk-cats">
+                            @for (var i = 0; i < DisplayCategories.Count; i++)
+                            {
+                                var cat = DisplayCategories[i];
+                                var label = FormatCategoryLabel(cat.DescriptionCategory, cat.IdCategory);
+                                var dot = MkCatalogUi.CatDots[i % MkCatalogUi.CatDots.Length];
+                                <button type="button"
+                                        class="mk-cat"
+                                        style="@($"--mk-cat-dot:{dot}")"
+                                        @onclick="@(() => OpenCategory(cat.IdCategory))"
+                                        aria-label="@($"Voir {label}")">
+                                    <span class="mk-cat__disc" aria-hidden="true">
+                                        @if (!string.IsNullOrWhiteSpace(cat.ImageCategory))
+                                        {
+                                            <img src="@cat.ImageCategory" alt="" loading="lazy" decoding="async" />
+                                        }
+                                        else
+                                        {
+                                            <i class="bi @MkCatalogUi.PickCategoryIcon(cat.DescriptionCategory)"></i>
+                                        }
+                                    </span>
+                                    <span class="mk-cat__label">@label</span>
+                                </button>
+                            }
+                        </div>
+                    }
+
+                    @if (Cart.TotalQuantity > 0)
+                    {
+                        <div class="landing-catalog-cart-cta landing-catalog-panel__cart-cta">
+                            <span>@Cart.TotalQuantity article@(Cart.TotalQuantity > 1 ? "s" : "") dans le panier</span>
+                            <a href="/client/panier" class="landing-btn landing-btn--solid landing-btn--sm">Voir le panier</a>
+                        </div>
+                    }
+
+                    @if (PreviewMode && !_selectedCategoryId.HasValue && !_isGlobalSearch)
+                    {
+                        <div class="mk-catalog-preview-cta">
+                            <a href="/catalogue" class="mk-btn mk-btn--ghost">
+                                Voir tout le catalogue
+                                <i class="bi bi-arrow-right" aria-hidden="true"></i>
+                            </a>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+</section>
+
+@code {
+    const int PageSize = 15;
+
+    bool _loading = true;
+    bool _loadFailed;
+    bool _initialized;
+    bool _loadingCategory;
+    bool _refreshingResults;
+    int? _selectedCategoryId;
+    string _productSearch = "";
+    int _currentPage = 1;
+    int _categoryTotal;
+    int _loadRequestId;
+
+    List<CatalogArticleDto> _pageArticles = new();
+    List<ArticleCategory> _categories = new();
+    HashSet<int> _orderableCategoryIds = new();
+    Dictionary<int, string> _categoryNames = new();
+    CancellationTokenSource? _searchDebounceCts;
+
+    [Parameter]
+    public int? CategoryId { get; set; }
+
+    /// <summary>Catalogue intégré sur la page d'accueil (/) sans redirection vers /catalogue.</summary>
+    [Parameter]
+    public bool StayOnHome { get; set; }
+
+    /// <summary>Aperçu limité (accueil) — le catalogue complet est sur /catalogue.</summary>
+    [Parameter]
+    public bool PreviewMode { get; set; }
+
+    /// <summary>Page catalogue avec bandeau mockup (pas de titre redondant).</summary>
+    [Parameter]
+    public bool HasPageHero { get; set; }
+
+    [Parameter]
+    public int MaxCategoryCards { get; set; } = 6;
+
+    [Parameter]
+    public int MaxProductTiles { get; set; } = 8;
+
+    int EffectivePageSize => PreviewMode ? MaxProductTiles : PageSize;
+
+    List<ArticleCategory> DisplayCategories => PreviewMode
+        ? _categoriesWithArticles.Take(MaxCategoryCards).ToList()
+        : _categoriesWithArticles;
+
+    IEnumerable<CatalogArticleDto> DisplayArticles => PreviewMode
+        ? _pageArticles.Take(MaxProductTiles)
+        : _pageArticles;
+
+    bool _isGlobalSearch =>
+        !_selectedCategoryId.HasValue && !string.IsNullOrWhiteSpace(_productSearch);
+
+    bool ShowBrowseHeading =>
+        !StayOnHome
+        && !HasPageHero
+        && !_selectedCategoryId.HasValue
+        && !_isGlobalSearch;
+
+    bool ShowCatalogSearch =>
+        !StayOnHome
+        || _selectedCategoryId.HasValue
+        || _isGlobalSearch;
+
+    int _totalPages => _categoryTotal <= 0
+        ? 0
+        : (int)Math.Ceiling(_categoryTotal / (double)EffectivePageSize);
+
+    List<ArticleCategory> _categoriesWithArticles => _categories
+        .Where(c => c.VisibleCatalog && _orderableCategoryIds.Contains(c.IdCategory))
+        .OrderBy(c => c.DescriptionCategory)
+        .ToList();
+
+    protected override void OnInitialized()
+    {
+        Cart.Changed += OnCartChanged;
+        Navigation.LocationChanged += OnLocationChanged;
+        if (StayOnHome)
+            HomeCatalog.Changed += OnHomeCatalogRequest;
+        SyncSelectedCategory();
+        SyncSearchFromUri();
+    }
+
+    protected override void OnParametersSet()
+    {
+        SyncSelectedCategory();
+        SyncSearchFromUri();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _initialized)
+            return;
+
+        _initialized = true;
+        await LoadInitialDataAsync();
+    }
+
+    async Task LoadInitialDataAsync()
+    {
+        _loading = true;
+        _loadFailed = false;
+
+        try
+        {
+            await LoadBootstrapAsync();
+
+            var initialSearch = ParseSearchFromUri(Navigation.Uri);
+            if (!string.IsNullOrWhiteSpace(initialSearch) && !_selectedCategoryId.HasValue)
+                _productSearch = initialSearch;
+
+            if (_isGlobalSearch || _selectedCategoryId.HasValue)
+                await LoadProductResultsAsync(clearList: true);
+        }
+        catch
+        {
+            _loadFailed = true;
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+            if (StayOnHome)
+                await ApplyHomeCatalogPendingAsync();
+        }
+    }
+
+    async Task RetryLoadAsync() => await LoadInitialDataAsync();
+
+    void OnHomeCatalogRequest() => _ = InvokeAsync(async () =>
+    {
+        if (!_initialized || _loadFailed)
+            return;
+        await ApplyHomeCatalogPendingAsync();
+    });
+
+    async Task ApplyHomeCatalogPendingAsync()
+    {
+        var (search, categoryId, reset) = HomeCatalog.TakePending();
+
+        if (reset)
+        {
+            _selectedCategoryId = null;
+            _productSearch = "";
+            _currentPage = 1;
+            _pageArticles = new();
+            _categoryTotal = 0;
+            _loadingCategory = false;
+            _refreshingResults = false;
+            _searchDebounceCts?.Cancel();
+            await SafeStateHasChangedAsync();
+            return;
+        }
+
+        if (categoryId is > 0)
+        {
+            _selectedCategoryId = categoryId;
+            _productSearch = search ?? "";
+            _currentPage = 1;
+            _searchDebounceCts?.Cancel();
+            await SafeLoadProductResultsAsync(clearList: true);
+            var url = BuildHomeCatalogUrl(categoryId.Value, search);
+            Navigation.NavigateTo(url, replace: true);
+            return;
+        }
+
+        if (search is null)
+            return;
+
+        _selectedCategoryId = null;
+        _productSearch = search;
+        _currentPage = 1;
+        _searchDebounceCts?.Cancel();
+        await SafeLoadProductResultsAsync(clearList: true);
+        Navigation.NavigateTo(BuildHomeSearchUrl(search), replace: true);
+    }
+
+    static string BuildHomeCatalogUrl(int categoryId, string? searchWithinCategory)
+    {
+        var url = $"/?c={categoryId}";
+        if (!string.IsNullOrWhiteSpace(searchWithinCategory))
+            url += $"&q={Uri.EscapeDataString(searchWithinCategory.Trim())}";
+        return url;
+    }
+
+    static string BuildHomeSearchUrl(string search) =>
+        $"/?q={Uri.EscapeDataString(search.Trim())}";
+
+    void SyncSelectedCategory(string? uri = null)
+    {
+        var next = ResolveCategoryId(uri);
+        if (_selectedCategoryId == next)
+            return;
+
+        _selectedCategoryId = next;
+        _productSearch = "";
+        _currentPage = 1;
+        _searchDebounceCts?.Cancel();
+
+        if (!_selectedCategoryId.HasValue)
+        {
+            _pageArticles = new();
+            _categoryTotal = 0;
+            _loadingCategory = false;
+            _refreshingResults = false;
+            return;
+        }
+
+        if (_initialized && !_loadFailed)
+            _ = SafeLoadProductResultsAsync(clearList: true);
+    }
+
+    int? ResolveCategoryId(string? uri = null)
+    {
+        if (CategoryId is > 0)
+            return CategoryId;
+
+        return ParseCategoryFromUri(uri ?? Navigation.Uri);
+    }
+
+    static int? ParseCategoryFromUri(string uri)
+    {
+        var u = new Uri(uri);
+        var path = u.AbsolutePath.Trim('/').ToLowerInvariant();
+        if (path.StartsWith("catalogue/c/", StringComparison.Ordinal)
+            && int.TryParse(path["catalogue/c/".Length..], out var categoryId)
+            && categoryId > 0)
+        {
+            return categoryId;
+        }
+
+        var query = QueryHelpers.ParseQuery(u.Query);
+        if (query.TryGetValue("c", out var categoryValue)
+            && int.TryParse(categoryValue, out var homeCategoryId)
+            && homeCategoryId > 0)
+        {
+            return homeCategoryId;
+        }
+
+        return null;
+    }
+
+    static string? ParseSearchFromUri(string uri)
+    {
+        var query = QueryHelpers.ParseQuery(new Uri(uri).Query);
+        if (query.TryGetValue("q", out var value))
+        {
+            var text = value.ToString().Trim();
+            return string.IsNullOrEmpty(text) ? null : text;
+        }
+
+        return null;
+    }
+
+    void SyncSearchFromUri(string? uri = null)
+    {
+        var q = ParseSearchFromUri(uri ?? Navigation.Uri);
+        if (q is null || _productSearch == q)
+            return;
+
+        _productSearch = q;
+        _selectedCategoryId = null;
+        _currentPage = 1;
+        if (_initialized && !_loadFailed)
+            _ = SafeLoadProductResultsAsync(clearList: true);
+    }
+
+    void OnCartChanged() => _ = SafeStateHasChangedAsync();
+
+    void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        if (!IsCatalogueUri(e.Location))
+            return;
+
+        SyncSelectedCategory(e.Location);
+        SyncSearchFromUri(e.Location);
+        _ = SafeStateHasChangedAsync();
+    }
+
+    async Task SafeStateHasChangedAsync()
+    {
+        try { await InvokeAsync(StateHasChanged); }
+        catch { }
+    }
+
+    int GetCartQty(string? articleId) =>
+        string.IsNullOrWhiteSpace(articleId) ? 0 : Cart.Items.FirstOrDefault(i => i.ArticleId == articleId)?.Qty ?? 0;
+
+    void AddToCart(CatalogArticleDto art)
+    {
+        if (string.IsNullOrWhiteSpace(art.IdArticle))
+            return;
+
+        _ = Cart.AddArticleAsync(new Article
+        {
+            IdArticle = art.IdArticle,
+            Description = art.Description ?? string.Empty,
+            ImageArticle = art.ImageArticle,
+            IdMonais = art.IdMonais,
+            Price = art.Price
+        });
+    }
+
+    void RemoveFromCart(string? articleId)
+    {
+        if (string.IsNullOrWhiteSpace(articleId))
+            return;
+
+        _ = Cart.RemoveArticleAsync(articleId);
+    }
+
+    void OpenCategory(int categoryId)
+    {
+        if (_selectedCategoryId == categoryId && !_loadingCategory && string.IsNullOrWhiteSpace(_productSearch))
+            return;
+
+        _selectedCategoryId = categoryId;
+        _productSearch = "";
+        _currentPage = 1;
+        _searchDebounceCts?.Cancel();
+        _ = SafeLoadProductResultsAsync(clearList: true);
+
+        if (StayOnHome)
+        {
+            var homeTarget = $"/?c={categoryId}#catalogue";
+            if (!IsSameHomeCategoryUri(Navigation.Uri, categoryId))
+                Navigation.NavigateTo(homeTarget);
+            return;
+        }
+
+        var target = $"/catalogue/c/{categoryId}";
+        if (!IsSameCatalogPath(Navigation.Uri, target))
+            Navigation.NavigateTo(target);
+    }
+
+    void CloseCategory()
+    {
+        if (!_selectedCategoryId.HasValue && string.IsNullOrWhiteSpace(_productSearch))
+            return;
+
+        _selectedCategoryId = null;
+        _productSearch = "";
+        _currentPage = 1;
+        _pageArticles = new();
+        _categoryTotal = 0;
+        _loadingCategory = false;
+        _refreshingResults = false;
+        _searchDebounceCts?.Cancel();
+
+        if (StayOnHome)
+        {
+            if (new Uri(Navigation.Uri).Query.Length > 0 || new Uri(Navigation.Uri).Fragment.Length > 0)
+                Navigation.NavigateTo("/#catalogue");
+            return;
+        }
+
+        if (!IsSameCatalogPath(Navigation.Uri, "/catalogue"))
+            Navigation.NavigateTo("/catalogue");
+    }
+
+    static bool IsSameHomeCategoryUri(string currentUri, int categoryId)
+    {
+        var u = new Uri(currentUri);
+        var query = QueryHelpers.ParseQuery(u.Query);
+        return query.TryGetValue("c", out var value)
+               && int.TryParse(value, out var id)
+               && id == categoryId;
+    }
+
+    async Task GoPrevPage()
+    {
+        if (_currentPage <= 1 || _loadingCategory || _refreshingResults)
+            return;
+
+        _currentPage--;
+        await SafeLoadProductResultsAsync(clearList: false);
+    }
+
+    async Task GoNextPage()
+    {
+        if (_currentPage >= _totalPages || _loadingCategory || _refreshingResults)
+            return;
+
+        _currentPage++;
+        await SafeLoadProductResultsAsync(clearList: false);
+    }
+
+    async Task SafeLoadProductResultsAsync(bool clearList)
+    {
+        try
+        {
+            await LoadProductResultsAsync(clearList);
+        }
+        catch
+        {
+            _pageArticles = new();
+            _categoryTotal = 0;
+            _loadingCategory = false;
+            _refreshingResults = false;
+            await SafeStateHasChangedAsync();
+        }
+    }
+
+    async Task LoadProductResultsAsync(bool clearList)
+    {
+        if (_isGlobalSearch)
+        {
+            await LoadGlobalSearchAsync(clearList);
+            return;
+        }
+
+        if (_selectedCategoryId.HasValue)
+            await LoadCategoryPageAsync(clearList);
+    }
+
+    async Task LoadGlobalSearchAsync(bool clearList)
+    {
+        var requestId = ++_loadRequestId;
+        var page = _currentPage;
+        var search = _productSearch.Trim();
+
+        if (clearList || _pageArticles.Count == 0)
+            _loadingCategory = true;
+        else
+            _refreshingResults = true;
+
+        await SafeStateHasChangedAsync();
+
+        try
+        {
+            var (items, total) = await CatalogueService.SearchOrderableArticlesPageAsync(page, EffectivePageSize, search);
+
+            if (requestId != _loadRequestId || page != _currentPage || search != _productSearch.Trim())
+                return;
+
+            var maxPage = total <= 0 ? 1 : (int)Math.Ceiling(total / (double)EffectivePageSize);
+            if (page > maxPage && maxPage >= 1)
+            {
+                _currentPage = maxPage;
+                await LoadGlobalSearchAsync(clearList);
+                return;
+            }
+
+            _pageArticles = items;
+            _categoryTotal = total;
+        }
+        finally
+        {
+            if (requestId == _loadRequestId)
+            {
+                _loadingCategory = false;
+                _refreshingResults = false;
+                await SafeStateHasChangedAsync();
+            }
+        }
+    }
+
+    async Task LoadBootstrapAsync()
+    {
+        var bootstrapTask = CatalogueService.GetCatalogBootstrapAsync();
+        var pricingTask = CatalogPricing.EnsureLoadedAsync();
+        await Task.WhenAll(bootstrapTask, pricingTask);
+
+        var bootstrap = await bootstrapTask;
+        _categories = bootstrap.Categories;
+        _orderableCategoryIds = bootstrap.OrderableCategoryIds;
+        _categoryNames = _categories.ToDictionary(
+            c => c.IdCategory,
+            c => c.DescriptionCategory ?? $"Catégorie {c.IdCategory}");
+    }
+
+    async Task LoadCategoryPageAsync(bool clearList)
+    {
+        if (!_selectedCategoryId.HasValue)
+            return;
+
+        var requestId = ++_loadRequestId;
+        var categoryId = _selectedCategoryId.Value;
+        var page = _currentPage;
+        var search = string.IsNullOrWhiteSpace(_productSearch) ? null : _productSearch.Trim();
+
+        if (clearList || _pageArticles.Count == 0)
+            _loadingCategory = true;
+        else
+            _refreshingResults = true;
+
+        await SafeStateHasChangedAsync();
+
+        try
+        {
+            var (items, total) = await CatalogueService.GetOrderableArticlesPageAsync(
+                categoryId,
+                page,
+                EffectivePageSize,
+                search);
+
+            var currentSearch = string.IsNullOrWhiteSpace(_productSearch) ? null : _productSearch.Trim();
+            if (requestId != _loadRequestId
+                || _selectedCategoryId != categoryId
+                || page != _currentPage
+                || search != currentSearch)
+            {
+                return;
+            }
+
+            var maxPage = total <= 0 ? 1 : (int)Math.Ceiling(total / (double)EffectivePageSize);
+            if (page > maxPage && maxPage >= 1)
+            {
+                _currentPage = maxPage;
+                await LoadCategoryPageAsync(clearList);
+                return;
+            }
+
+            _pageArticles = items;
+            _categoryTotal = total;
+        }
+        finally
+        {
+            if (requestId == _loadRequestId)
+            {
+                _loadingCategory = false;
+                _refreshingResults = false;
+                await SafeStateHasChangedAsync();
+            }
+        }
+    }
+
+    string BuildFullCatalogUrl()
+    {
+        if (_selectedCategoryId is > 0)
+        {
+            if (!string.IsNullOrWhiteSpace(_productSearch))
+                return $"/catalogue/c/{_selectedCategoryId.Value}?q={Uri.EscapeDataString(_productSearch.Trim())}";
+            return $"/catalogue/c/{_selectedCategoryId.Value}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(_productSearch))
+            return $"/catalogue?q={Uri.EscapeDataString(_productSearch.Trim())}";
+
+        return "/catalogue";
+    }
+
+    static bool IsSameCatalogPath(string currentUri, string targetPath)
+    {
+        var current = new Uri(currentUri).AbsolutePath.Trim('/').ToLowerInvariant();
+        var target = targetPath.Trim('/').ToLowerInvariant();
+        return current == target;
+    }
+
+    static bool IsCatalogueUri(string uri)
+    {
+        var path = new Uri(uri).AbsolutePath.Trim('/').ToLowerInvariant();
+        return path is "" or "index" or "catalogue" || path.StartsWith("catalogue/c/");
+    }
+
+    string GetCategoryName(int categoryId) =>
+        FormatCategoryLabel(_categoryNames.GetValueOrDefault(categoryId), categoryId);
+
+    async Task OnProductSearchInput(ChangeEventArgs e)
+    {
+        _productSearch = e.Value?.ToString() ?? "";
+        _currentPage = 1;
+
+        _searchDebounceCts?.Cancel();
+        _searchDebounceCts = new CancellationTokenSource();
+        var token = _searchDebounceCts.Token;
+
+        try
+        {
+            await Task.Delay(350, token);
+            if (token.IsCancellationRequested)
+                return;
+
+            if (PreviewMode && !string.IsNullOrWhiteSpace(_productSearch))
+            {
+                Navigation.NavigateTo(BuildFullCatalogUrl());
+                return;
+            }
+
+            if (_isGlobalSearch || _selectedCategoryId.HasValue)
+                await SafeLoadProductResultsAsync(clearList: false);
+            else
+            {
+                _pageArticles = new();
+                _categoryTotal = 0;
+                await SafeStateHasChangedAsync();
+            }
+        }
+        catch (TaskCanceledException)
+        {
+        }
+    }
+
+    async Task ClearProductSearch()
+    {
+        _productSearch = "";
+        _currentPage = 1;
+        _searchDebounceCts?.Cancel();
+        _pageArticles = new();
+        _categoryTotal = 0;
+        _loadingCategory = false;
+        _refreshingResults = false;
+
+        if (_selectedCategoryId.HasValue)
+            await SafeLoadProductResultsAsync(clearList: true);
+
+        await SafeStateHasChangedAsync();
+    }
+
+    string GetProductMetaLabel()
+    {
+        if (_categoryTotal == 0)
+            return "";
+
+        var from = (_currentPage - 1) * EffectivePageSize + 1;
+        var to = Math.Min(_currentPage * EffectivePageSize, _categoryTotal);
+        if (PreviewMode)
+            to = Math.Min(to, MaxProductTiles);
+
+        if (string.IsNullOrWhiteSpace(_productSearch))
+            return $"{from}–{to} sur {_categoryTotal} article{(_categoryTotal > 1 ? "s" : "")}";
+
+        return $"{_categoryTotal} résultat{(_categoryTotal > 1 ? "s" : "")}";
+    }
+
+    static string FormatCategoryLabel(string? name, int categoryId)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return $"Catégorie {categoryId}";
+
+        var lower = name.Trim().ToLowerInvariant();
+        return CultureInfo.CurrentCulture.TextInfo.ToTitleCase(lower);
+    }
+
+    string FormatPrice(CatalogArticleDto art) =>
+        CatalogPricing.FormatUnit((decimal)art.Price, art.IdMonais);
+
+    static class MkCatalogUi
+    {
+        public static readonly string[] CatDots = ["#FFD3E6", "#FFE2B8", "#CFE4FF", "#C9F2D9"];
+        public static readonly string[] CardBackgrounds = ["#FFE0EE", "#D6E8FF", "#FFE9C7", "#D3F5E1"];
+        public static readonly string[] CardForegrounds = ["#FF2E8B", "#3E6FD6", "#FF9A22", "#0FBF56"];
+
+        public static string PickCategoryIcon(string? name)
+        {
+            var n = name?.ToLowerInvariant() ?? "";
+            if (n.Contains("robe") || n.Contains("fille")) return "bi-balloon-heart";
+            if (n.Contains("pant") || n.Contains("jean")) return "bi-columns-gap";
+            if (n.Contains("sweat") || n.Contains("veste")) return "bi-lightning";
+            if (n.Contains("pyjama")) return "bi-moon-stars";
+            if (n.Contains("chauss") || n.Contains("basket")) return "bi-boot";
+            if (n.Contains("sac")) return "bi-bag";
+            return "bi-tag";
+        }
+    }
+
+    public void Dispose()
+    {
+        if (StayOnHome)
+            HomeCatalog.Changed -= OnHomeCatalogRequest;
+        _searchDebounceCts?.Cancel();
+        _searchDebounceCts?.Dispose();
+        Navigation.LocationChanged -= OnLocationChanged;
+        Cart.Changed -= OnCartChanged;
+    }
+}

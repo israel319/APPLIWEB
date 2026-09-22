@@ -1,0 +1,6 @@
+db|table_count
+--|-----------
+TestAPP|49
+GlobalShoping|38
+
+(2 lignes affectées)

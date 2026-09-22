@@ -1,0 +1,12 @@
+@inject NavigationManager Nav
+
+<div style="padding:1rem;" class="rz-color-secondary">Redirection vers la page de connexion…</div>
+
+@code {
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        Nav.NavigateTo("/login", forceLoad: true);
+    }
+}

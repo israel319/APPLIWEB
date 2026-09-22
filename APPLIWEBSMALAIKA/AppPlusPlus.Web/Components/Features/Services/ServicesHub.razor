@@ -1,0 +1,240 @@
+@page "/services"
+@rendermode InteractiveServer
+@using AppPlusPlus.Application.DTOs.Prestations
+@using AppPlusPlus.Application.Services.Prestations
+@using AppPlusPlus.Domain.Enums
+@using AppPlusPlus.Domain.Common
+@inject IServiceCatalogService CatalogService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+
+<ModuleGuard ModuleCode="services" ModuleName="Catalogue prestations">
+
+<PageTitle>@AppSettings.AppName — Catalogue prestations</PageTitle>
+
+@if (!_loaded)
+{
+    <div class="aw-page">
+        <AwSkeleton Variant="page" Rows="7" />
+    </div>
+}
+else if (!_canRead)
+{
+    <div class="aw-page">
+        <div class="aw-shell" style="max-width:720px;margin:1.5rem auto;">
+            <div class="aw-empty">
+                <i class="bi bi-lock"></i>
+                <p><strong>Accès refusé</strong><br />Votre rôle ne possède pas les droits d'accès au module Services.</p>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    var filtered = FilteredItems().ToList();
+    var actifs = _items.Count(x => x.IsActive);
+    var inactifs = _items.Count - actifs;
+
+    <div class="aw-page aw-page--workspace">
+        <div class="aw-workspace">
+            <header class="aw-object-head">
+                <div class="aw-object-head__identity">
+                    <p class="aw-object-head__eyebrow">Module services</p>
+                    <h1 class="aw-object-head__title">Catalogue prestations</h1>
+                    <p class="aw-object-head__desc">Définissez vos services comme des articles — code, libellé et prix</p>
+                </div>
+            </header>
+
+            <div class="aw-workspace__body">
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search"
+                               placeholder="Rechercher (code, libellé, catégorie…)"
+                               aria-label="Rechercher une prestation"
+                               @bind="_search"
+                               @bind:event="oninput" />
+                    </div>
+                    @if (_items.Any())
+                    {
+                        <div class="aw-actionbar__filters">
+                            <AwSearchSelect AriaLabel="État de la prestation"
+                                            Placeholder="État"
+                                            Searchable="false"
+                                            Value="@_filterActive"
+                                            ValueChanged="OnFilterActiveChanged"
+                                            Options="@ActiveFilterOptions(actifs, inactifs)" />
+                        </div>
+                    }
+                    <div class="aw-actionbar__actions">
+                        @if (_canWrite)
+                        {
+                            <button type="button" class="aw-btn aw-btn--primary"
+                                    @onclick="@(() => Navigation.NavigateTo("/services/catalogue/nouveau"))">
+                                <i class="bi bi-plus-lg"></i> Nouvelle prestation
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                @if (!_items.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-briefcase"></i>
+                            <p>Aucune prestation. Cliquez sur <strong>Nouvelle prestation</strong> pour commencer.</p>
+                        </div>
+                    </div>
+                }
+                else if (!filtered.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-search"></i>
+                            <p>Aucune prestation pour ces filtres.</p>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>Prestation</th>
+                                        <th>Prix</th>
+                                        <th>Catégorie</th>
+                                        <th>État</th>
+                                        @if (_canWrite)
+                                        {
+                                            <th></th>
+                                        }
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in filtered)
+                                    {
+                                        <tr style="@(_canWrite ? "cursor:pointer;" : null)"
+                                            @onclick="@(() => OnRowClick(item))">
+                                            <td>
+                                                <span class="aw-table__title">@item.Description</span>
+                                                <span class="aw-table__meta">Code : @item.Code</span>
+                                            </td>
+                                            <td class="aw-table__num">
+                                                <CurrencyText Mode="@CurrencyText.DisplayMode.ApproNative"
+                                                              Amount="item.Price"
+                                                              IsUsd="item.IsUsd"
+                                                              Format="N2" />
+                                                <span class="aw-table__meta">/ @UnitLabel(item.UnitType)</span>
+                                            </td>
+                                            <td>@(string.IsNullOrWhiteSpace(item.Category) ? "—" : item.Category)</td>
+                                            <td>
+                                                <span class="aw-badge @(item.IsActive ? "aw-badge--brand" : "aw-badge--muted")">
+                                                    @(item.IsActive ? "Active" : "Inactive")
+                                                </span>
+                                            </td>
+                                            @if (_canWrite)
+                                            {
+                                                <td @onclick:stopPropagation="true">
+                                                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon"
+                                                            title="Modifier"
+                                                            @onclick="@(() => Navigation.NavigateTo($"/services/catalogue/modifier/{item.Code}"))">
+                                                        <i class="bi bi-pencil"></i>
+                                                    </button>
+                                                </td>
+                                            }
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+</ModuleGuard>
+
+@code {
+    bool _loaded;
+    bool _canRead;
+    bool _canWrite;
+    string _search = "";
+    string _filterActive = "all";
+    List<ServiceCatalogRowDto> _items = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var login = auth.User.FindFirst("login")?.Value
+            ?? auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "";
+        var isAdmin = AppFunctions.Normalize(auth.User.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+        var perms = await PermissionResolver.GetPermissionsAsync(login);
+        _canRead = PermissionGate.ViewTab(perms, "services",
+            () => PermissionGate.LegacyRead(perms, AppFunctions.Services, isAdmin));
+        _canWrite = PermissionGate.DoAction(perms, "services.write",
+            () => PermissionGate.LegacyWrite(perms, AppFunctions.Services, isAdmin));
+        _loaded = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !_canRead || _catalogLoaded)
+            return;
+
+        _catalogLoaded = true;
+        _items = await CatalogService.GetCatalogAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    bool _catalogLoaded;
+
+    Task OnFilterActiveChanged(string? v)
+    {
+        _filterActive = string.IsNullOrEmpty(v) ? "all" : v;
+        return Task.CompletedTask;
+    }
+
+    List<AwSearchSelect.Option> ActiveFilterOptions(int actifs, int inactifs) =>
+    [
+        new("all", $"Toutes ({_items.Count})"),
+        new("active", $"Actives ({actifs})"),
+        new("inactive", $"Inactives ({inactifs})")
+    ];
+
+    IEnumerable<ServiceCatalogRowDto> FilteredItems()
+    {
+        var q = _items.AsEnumerable();
+        if (_filterActive == "active") q = q.Where(x => x.IsActive);
+        if (_filterActive == "inactive") q = q.Where(x => !x.IsActive);
+        if (!string.IsNullOrWhiteSpace(_search))
+        {
+            var s = _search.Trim();
+            q = q.Where(x =>
+                x.Code.Contains(s, StringComparison.OrdinalIgnoreCase)
+                || x.Description.Contains(s, StringComparison.OrdinalIgnoreCase)
+                || (x.Category?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+        return q;
+    }
+
+    void OnRowClick(ServiceCatalogRowDto item)
+    {
+        if (_canWrite)
+            Navigation.NavigateTo($"/services/catalogue/modifier/{item.Code}");
+    }
+
+    static string UnitLabel(int unit) => unit switch
+    {
+        (int)ServiceUnitType.Flat => "forfait",
+        (int)ServiceUnitType.Unit => "unité",
+        _ => "heure"
+    };
+}

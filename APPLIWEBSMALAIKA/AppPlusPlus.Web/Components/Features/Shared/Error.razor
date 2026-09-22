@@ -1,0 +1,61 @@
+﻿@page "/Error"
+@attribute [AllowAnonymous]
+@layout PublicLayout
+@using Microsoft.AspNetCore.Diagnostics
+@inject ILogger<Error> Logger
+
+<PageTitle>Erreur — @AppSettings.AppName</PageTitle>
+
+<div class="landing-auth">
+    <div class="landing-auth-card text-center">
+        <div class="landing-auth-icon"><i class="bi bi-exclamation-triangle text-warning"></i></div>
+        <h1 class="landing-auth-title h4">Une erreur est survenue</h1>
+        <p class="landing-auth-sub mb-4">L'application n'a pas pu traiter votre demande. Réessayez ou retournez au catalogue.</p>
+        @if (ShowRequestId)
+        {
+            <p class="text-muted small mb-3"><strong>Réf. :</strong> <code>@RequestId</code></p>
+        }
+        @if (!string.IsNullOrWhiteSpace(_catalogHint))
+        {
+            <p class="text-muted small mb-3">@_catalogHint</p>
+        }
+        <a href="/catalogue" data-enhance-nav="false" class="landing-btn landing-btn--primary landing-btn--block">Retour au catalogue</a>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    string? RequestId { get; set; }
+    string? _catalogHint;
+    bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized()
+    {
+        RequestId = System.Diagnostics.Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+
+        var feature = HttpContext?.Features.Get<IExceptionHandlerPathFeature>();
+        var ex = feature?.Error;
+        if (ex is null)
+            return;
+
+        Logger.LogError(ex, "Erreur non gérée. Path={Path} Ref={Ref}", feature?.Path, RequestId);
+
+        if (IsCataloguePath(feature?.Path))
+        {
+            _catalogHint = ex is Microsoft.Data.SqlClient.SqlException
+                ? "Cause probable : base catalogue (colonne Image_Article ou connexion SQL). Exécutez Apply_db_acb256_glomyrashopping.sql sur la base Glomyra."
+                : "Cause probable : chargement du catalogue. Re-uploadez le publish le plus récent puis réessayez.";
+        }
+    }
+
+    static bool IsCataloguePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        var p = path.Trim('/').ToLowerInvariant();
+        return p is "" or "catalogue" || p.StartsWith("catalogue/c/");
+    }
+}

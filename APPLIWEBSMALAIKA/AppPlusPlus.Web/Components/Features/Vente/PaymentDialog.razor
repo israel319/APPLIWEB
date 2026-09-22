@@ -1,0 +1,303 @@
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+
+<MudDialog>
+    <DialogContent>
+        <div class="aw-dialog">
+            <header class="aw-dialog__head">
+                <div class="aw-dialog__title-wrap">
+                    <i class="bi bi-credit-card" aria-hidden="true"></i>
+                    <h2 class="aw-dialog__title">Paiement facture</h2>
+                </div>
+            </header>
+            <div class="aw-dialog__body">
+                @if (_loading)
+                {
+                    <div class="d-flex flex-column align-items-center justify-content-center" style="min-height:180px;">
+                        <div class="spinner-border text-primary" role="status"></div>
+                    </div>
+                }
+                else if (_fact is null)
+                {
+                    <div class="alert alert-warning mb-0"><strong>Introuvable</strong> Cette facture n'existe pas.</div>
+                }
+                else
+                {
+                    <div class="d-flex flex-column gap-3">
+                        <div class="aw-dialog__meta">
+                            <div>
+                                <span class="aw-dialog__meta-label">Client</span>
+                                <span class="aw-dialog__meta-value">@_fact.DescriptionName</span>
+                            </div>
+                            <div>
+                                <span class="aw-dialog__meta-label">Total facture</span>
+                                <span class="aw-dialog__meta-value">@CurrencyFormat.Fact(_totalFact, _isUsd, _fact?.Taux ?? 0)</span>
+                            </div>
+                            <div>
+                                <span class="aw-dialog__meta-label">Date</span>
+                                <span class="aw-dialog__meta-value">@_fact!.Date.ToString("dd/MM/yyyy")</span>
+                            </div>
+                            <div>
+                                <span class="aw-dialog__meta-label">Statut</span>
+                                @if (_solde <= 0)
+                                {
+                                    <span class="aw-badge aw-badge--brand"><i class="bi bi-check-circle"></i>Payée</span>
+                                }
+                                else
+                                {
+                                    <span class="aw-badge aw-badge--accent"><i class="bi bi-hourglass-split"></i>En cours</span>
+                                }
+                            </div>
+                        </div>
+
+                        @if (_payments.Any())
+                        {
+                            <div class="aw-dialog__section">Paiements enregistrés</div>
+                            <table class="table table-sm table-bordered hub-dialog-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th class="text-end">Montant</th>
+                                        <th>Note</th>
+                                        <th>Login</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var p in _payments)
+                                    {
+                                        <tr>
+                                            <td>@p.Date.ToString("dd/MM/yyyy")</td>
+                                            <td class="text-end">@CurrencyFormat.Fact(p.Montant, _isUsd, _fact?.Taux ?? 0)</td>
+                                            <td>@(p.Note ?? "—")</td>
+                                            <td>@(p.User ?? "—")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <span class="aw-dialog__meta-label">Déjà payé</span>
+                                <div class="hub-text-success fw-bold">@CurrencyFormat.Fact(_totalPaye, _isUsd, _fact?.Taux ?? 0)</div>
+                            </div>
+                            <div class="col-md-4">
+                                <span class="aw-dialog__meta-label">Solde restant</span>
+                                <div class="fw-bold @(_solde > 0 ? "hub-text-warning" : "hub-text-success")">@CurrencyFormat.Fact(_solde, _isUsd, _fact?.Taux ?? 0)</div>
+                            </div>
+                        </div>
+
+                        @if (_solde > 0)
+                        {
+                            <div class="aw-dialog__section">Nouveau paiement</div>
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <div class="aw-field">
+                                        <label class="aw-field__label">Montant</label>
+                                        <MudNumericField @bind-Value="_amount" T="decimal" Min="0" Max="@_solde"
+                                                         Placeholder="0.00" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="aw-field">
+                                        <AwDateField Label="Date" @bind-Value="_date" />
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="aw-field">
+                                        <label class="aw-field__label">Note (optionnel)</label>
+                                        <input type="text" class="aw-input" @bind="_note" maxlength="200" placeholder="Réf., mode…" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            @if (_showError)
+                            {
+                                <div class="alert alert-danger py-2 mb-0 small">@_errorMsg</div>
+                            }
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;">
+            @if (_fact is not null && _solde > 0)
+            {
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                    <i class="bi bi-x-lg"></i> Annuler
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="OnSave" disabled="@_saving">
+                    <i class="bi bi-credit-card"></i> Enregistrer le paiement
+                </button>
+            }
+            else
+            {
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="@(() => MudDialog.Close(DialogResult.Ok(true)))">
+                    <i class="bi bi-x-lg"></i> Fermer
+                </button>
+            }
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int FactId { get; set; }
+
+    Fact? _fact;
+    bool _isUsd => CurrencyFormat.IsUsd(_fact?.Money?.DescriptionMonais);
+    List<Payment> _payments = new();
+    bool _loading = true;
+    bool _saving;
+    bool _showError;
+    string _errorMsg = "";
+
+    decimal _totalFact;
+    decimal _totalPaye;
+    decimal _solde;
+
+    decimal _amount;
+    DateTime? _date = DateTime.Today;
+    string _note = "";
+    string _currentLogin = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+        }
+
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+
+        _fact = await ctx.Facts.AsNoTracking().Include(f => f.Money).FirstOrDefaultAsync(f => f.Id == FactId);
+        if (_fact is not null)
+        {
+            _payments = await ctx.Payments
+                .Where(p => p.IdFact == FactId)
+                .OrderBy(p => p.Date)
+                .ThenBy(p => p.Id)
+                .AsNoTracking()
+                .ToListAsync();
+
+            _totalFact = _fact.TotalApresReduction ?? _fact.Total ?? 0;
+            _totalPaye = _payments.Sum(p => p.Montant);
+            _solde = _totalFact - _totalPaye;
+            if (_solde < 0) _solde = 0;
+        }
+
+        _loading = false;
+    }
+
+    void Cancel() => MudDialog.Close();
+
+    async Task OnSave()
+    {
+        _showError = false;
+
+        if (_amount <= 0)
+        {
+            _showError = true;
+            _errorMsg = "Le montant doit être supérieur à 0.";
+            return;
+        }
+
+        if (_amount > _solde)
+        {
+            _showError = true;
+            _errorMsg = $"Le montant ne peut pas dépasser le solde restant ({CurrencyFormat.Fact(_solde, _isUsd, _fact?.Taux ?? 0)}).";
+            return;
+        }
+
+        if (_date is null)
+        {
+            _showError = true;
+            _errorMsg = "Veuillez sélectionner une date.";
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+
+            var payment = new Payment
+            {
+                IdFact = FactId,
+                Date = DateOnly.FromDateTime(_date.Value),
+                Note = string.IsNullOrWhiteSpace(_note) ? null : _note.Trim(),
+                DateSys = DateTime.Now,
+                User = _currentLogin
+            };
+            var moneyId = _fact?.MoneyId ?? CurrencyDefaults.MoneyIdCdf;
+            var taux = _fact?.Taux ?? 0;
+            CurrencyFormat.ApplySnapshot(payment, CurrencyFormat.FromNativeAmount(_amount, moneyId, taux));
+            ctx.Payments.Add(payment);
+
+            var newTotalPaye = _totalPaye + _amount;
+            if (newTotalPaye >= _totalFact)
+            {
+                var fact = await ctx.Facts.FindAsync(FactId);
+                if (fact is not null)
+                {
+                    fact.Status = 2;
+
+                    if (fact.CommandeId.HasValue)
+                    {
+                        var commande = await ctx.Commandes
+                            .Include(c => c.Details)
+                            .FirstOrDefaultAsync(c => c.CommandeId == fact.CommandeId.Value);
+
+                        if (commande != null)
+                        {
+                            commande.MontantPaye += _amount;
+                            commande.MontantRest = commande.MontantTotal - commande.MontantPaye;
+                            if (commande.MontantRest < 0) commande.MontantRest = 0;
+
+                            var allLivPaid = await ctx.Livraisons
+                                .Where(l => l.CommandeId == commande.CommandeId)
+                                .AllAsync(l => l.Status == 2);
+                            var toutLivre = commande.Details.All(d => (d.QteRest ?? 0) <= 0);
+
+                            if (allLivPaid && toutLivre)
+                                commande.Status = 3;
+                        }
+                    }
+
+                    if (fact.LivraisonId.HasValue)
+                    {
+                        var liv = await ctx.Livraisons.FindAsync(fact.LivraisonId.Value);
+                        if (liv != null && liv.Status < 2)
+                            liv.Status = 2;
+                    }
+                }
+            }
+
+            await ctx.SaveChangesAsync();
+
+            Snackbar.Add($"{CurrencyFormat.Fact(_amount, _isUsd, _fact?.Taux ?? 0)} enregistré pour la facture N°{FactId}.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            _showError = true;
+            _errorMsg = $"Erreur : {ex.Message}";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

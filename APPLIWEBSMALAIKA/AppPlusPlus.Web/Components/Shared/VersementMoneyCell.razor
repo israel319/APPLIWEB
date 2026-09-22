@@ -1,0 +1,35 @@
+@implements IDisposable
+@inject IUserCurrencyPreferenceService UserCurrency
+@using AppPlusPlus.Domain.Common
+@using AppPlusPlus.Domain.Entities.Approvisionnement
+
+<span class="@CssClass">@Text</span>
+
+@code {
+    [Parameter] public ApproExpense Item { get; set; } = null!;
+    [Parameter] public decimal FallbackTaux { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+
+    string Text
+    {
+        get
+        {
+            var v = Item;
+            if (v.AmountUSD is > 0)
+                return UserCurrency.FormatBusiness(v.AmountUSD.Value, FallbackTaux);
+            if (v.AmountCDF is > 0)
+                return UserCurrency.FormatFromFcStored(v.AmountCDF.Value, FallbackTaux);
+            if (v.Montant is > 0)
+                return UserCurrency.FormatFromSnapshot(
+                    v.Montant, v.MoneyId, v.Taux, v.MontantApresConversion,
+                    v.Montant.Value, v.MoneyId ?? CurrencyDefaults.MoneyIdCdf, FallbackTaux);
+            return "—";
+        }
+    }
+
+    protected override void OnInitialized() => UserCurrency.OnChanged += Refresh;
+
+    void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => UserCurrency.OnChanged -= Refresh;
+}

@@ -1,0 +1,233 @@
+/* ═══════════════════════════════════════════════════════════════
+   MALAIKA KIDS — système de couleurs
+   · Une seule couleur d’action (--g-brand = rose) : CTA, liens actifs, badges
+   · Chrome neutre (blanc, slate) : header, cartes, champs
+   · Rose / bleu = repères Filles / Garçons uniquement (bordure, pastille)
+   · Orange = éviter en aplats larges (header, bannières)
+   ═══════════════════════════════════════════════════════════════ */
+.landing-shell {
+    --g-rose: #db2777;
+    --g-rose-dark: #be185d;
+    --g-rose-hover: #9d174d;
+    --g-rose-bg: #fdf2f8;
+    --g-rose-soft: rgba(219, 39, 119, 0.12);
+    --g-rose-ring: rgba(219, 39, 119, 0.35);
+
+    --g-orange: #ea580c;
+    --g-orange-dark: #c2410c;
+    --g-orange-hover: #9a3412;
+    --g-orange-bg: #fff7ed;
+    --g-orange-soft: rgba(234, 88, 12, 0.12);
+    --g-orange-ring: rgba(234, 88, 12, 0.35);
+
+    --g-blue: #2563eb;
+    --g-blue-dark: #1d4ed8;
+    --g-blue-hover: #1e40af;
+    --g-blue-light: #60a5fa;
+    --g-blue-bg: #eff6ff;
+    --g-blue-soft: rgba(37, 99, 235, 0.12);
+    --g-blue-ring: rgba(37, 99, 235, 0.35);
+
+    /* Actions & focus (marque) */
+    --g-brand: var(--g-rose);
+    --g-brand-dark: var(--g-rose-dark);
+    --g-brand-hover: var(--g-rose-hover);
+    --g-brand-light: #f472b6;
+    --g-brand-soft: var(--g-rose-soft);
+    --g-brand-ring: var(--g-rose-ring);
+    --g-brand-bg: var(--g-rose-bg);
+    --g-girls: var(--g-rose);
+    --g-girls-dark: var(--g-rose-dark);
+    --g-girls-bg: var(--g-rose-bg);
+    --g-girls-soft: var(--g-rose-soft);
+    --g-boys: var(--g-blue);
+    --g-boys-dark: var(--g-blue-dark);
+    --g-boys-hover: var(--g-blue-hover);
+    --g-boys-soft: var(--g-blue-soft);
+    --g-boys-bg: var(--g-blue-bg);
+
+    --g-cream: #f8fafc;
+    --g-dark: #0f172a;
+    background: var(--g-cream);
+}
+
+.landing-shell .landing-header-link:hover,
+.landing-shell .landing-header-link--active,
+.landing-shell .landing-header-link--scroll-active {
+    color: var(--g-brand-dark) !important;
+    background: var(--g-brand-soft);
+}
+.landing-shell .landing-header-link--scroll-active::after { background: var(--g-brand); }
+.landing-shell .landing-header-drawer__link.landing-header-link--scroll-active {
+    box-shadow: inset 3px 0 0 var(--g-brand);
+}
+.landing-shell .landing-header-back:active { color: var(--g-brand-dark); }
+.landing-shell .landing-header-icon-btn:hover {
+    color: var(--g-brand-dark);
+    border-color: var(--g-brand-ring);
+    background: var(--g-brand-bg);
+}
+.landing-shell .landing-header-btn--primary {
+    background: var(--g-brand);
+    border-color: var(--g-brand);
+    box-shadow: 0 4px 14px rgba(190, 24, 93, 0.18);
+}
+.landing-shell .landing-header-btn--primary:hover {
+    background: var(--g-brand-hover);
+    border-color: var(--g-brand-hover);
+}
+.landing-shell .landing-header-drawer__link:hover,
+.landing-shell .landing-header-drawer__link.landing-header-link--active {
+    color: var(--g-brand-dark);
+    background: var(--g-brand-soft);
+}
+.landing-shell .landing-header-drawer__user > i { color: var(--g-brand); }
+.landing-shell .landing-header-link--account i { color: var(--g-brand); }
+.landing-shell .landing-footer-compact__links a:hover,
+.landing-shell .landing-footer-inner a { color: var(--g-brand-dark); }
+.landing-shell .landing-mobile-bar__item--active,
+.landing-shell .landing-mobile-menu-sheet__item--accent i { color: var(--g-brand-dark); }
+
+.landing-shell--home.landing-shell--scrolled .landing-header-link:hover,
+.landing-shell--home.landing-shell--scrolled .landing-header-link--active {
+    color: var(--g-brand-dark);
+    background: var(--g-brand-soft);
+}
+.landing-shell--home.landing-shell--menu-open .landing-header-drawer__link:hover,
+.landing-shell--home.landing-shell--menu-open .landing-header-drawer__link.landing-header-link--active {
+    color: var(--g-brand-dark);
+    background: var(--g-brand-soft);
+}
+
+.landing-shell .landing-btn--primary { color: var(--g-brand-dark); }
+.landing-shell .landing-btn--solid {
+    background: var(--g-brand);
+    border-color: var(--g-brand);
+    color: #fff;
+}
+.landing-shell .landing-btn--solid:hover {
+    background: var(--g-brand-hover);
+    border-color: var(--g-brand-hover);
+}
+.landing-shell .landing-hero-bg {
+    background: var(--g-brand-dark);
+}
+
+.landing-shell .landing-catalog {
+    background: var(--g-cream);
+}
+.landing-shell .landing-catalog--home-embed {
+    background: transparent;
+}
+.landing-shell .landing-catalog-breadcrumb { color: var(--g-brand-dark); }
+.landing-shell .landing-catalog-count {
+    color: var(--g-brand-dark);
+    background: var(--g-brand-soft);
+}
+.landing-shell .landing-catalog-search:focus-within {
+    border-color: var(--g-brand-ring);
+    box-shadow: 0 0 0 3px var(--g-brand-soft);
+}
+.landing-shell .landing-catalog-search__reset { color: var(--g-brand-dark); }
+.landing-shell .landing-catalog-back:hover {
+    background: var(--g-brand-bg);
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
+}
+.landing-shell .landing-catalog-empty a { color: var(--g-brand-dark); }
+
+.landing-shell .landing-category-card__arc {
+    background: #e2e8f0;
+}
+.landing-shell .landing-category-card__placeholder i { color: #94a3b8; }
+.landing-shell .landing-category-card__media,
+.landing-shell .landing-category-card--has-image .landing-category-card__media {
+    background: #f1f5f9;
+}
+
+.landing-shell .landing-product-tile__cat,
+.landing-shell .landing-product-tile__price { color: var(--g-brand-dark); }
+.landing-shell .landing-product-tile--in-cart {
+    border-color: var(--g-brand);
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+.landing-shell .landing-product-tile__cta {
+    background: var(--g-brand-bg);
+    color: var(--g-brand-dark);
+    border-color: rgba(190, 24, 93, 0.2);
+}
+.landing-shell .landing-product-tile--in-cart .landing-product-tile__cta,
+.landing-shell .landing-product-tile:hover .landing-product-tile__cta,
+.landing-shell .landing-product-tile:focus-visible .landing-product-tile__cta {
+    background: var(--g-brand);
+    color: #fff;
+    border-color: var(--g-brand);
+}
+
+.landing-shell .landing-cart-badge,
+.landing-shell .landing-panier-count,
+.landing-shell .landing-panier-tab__badge {
+    background: var(--g-brand);
+    box-shadow: 0 1px 4px rgba(37, 99, 235, 0.35);
+}
+
+.landing-shell .landing-auth {
+    background: var(--g-cream);
+}
+.landing-shell .landing-auth-back:hover,
+.landing-shell .landing-auth-footer a { color: var(--g-brand-dark); }
+.landing-shell .landing-auth-icon {
+    background: var(--g-brand-soft);
+    color: var(--g-brand-dark);
+}
+.landing-shell .landing-auth-tabs__btn--active { color: var(--g-brand-dark); }
+.landing-shell .landing-auth-tabs__btn--active i { color: var(--g-brand); }
+.landing-shell .landing-auth-choice--client {
+    border-color: rgba(190, 24, 93, 0.2);
+    background: var(--g-brand-bg);
+}
+.landing-shell .landing-auth-choice--client .landing-auth-choice__icon {
+    color: var(--g-brand-dark);
+    border-color: rgba(37, 99, 235, 0.2);
+}
+.landing-shell .landing-auth .landing-btn--primary {
+    background: var(--g-brand);
+    color: #fff;
+}
+.landing-shell .landing-auth .form-control:focus,
+.landing-shell .landing-auth .form-select:focus {
+    border-color: var(--g-brand-ring);
+    box-shadow: 0 0 0 0.2rem var(--g-brand-soft);
+}
+
+.landing-shell .landing-panier { background: var(--g-cream); }
+.landing-shell .landing-panier-back:hover {
+    background: var(--g-brand-bg);
+    border-color: rgba(190, 24, 93, 0.2);
+}
+.landing-shell .landing-panier-line__total { color: var(--g-brand-dark); }
+.landing-shell .landing-panier-qty-btn { color: var(--g-brand-dark); }
+.landing-shell .landing-panier-client--connected {
+    border-color: rgba(37, 99, 235, 0.25);
+    background: var(--g-brand-bg);
+}
+.landing-shell .landing-panier-client__row i { color: var(--g-brand-dark); }
+.landing-shell .landing-panier-client a,
+.landing-shell .landing-panier-signup a { color: var(--g-brand-dark); }
+.landing-shell .landing-panier-tab--active {
+    background: var(--g-brand-bg);
+    color: var(--g-brand-dark);
+    box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.22);
+}
+.landing-shell .landing-profile-list__row--highlight {
+    background: var(--g-brand-bg);
+    border-color: rgba(37, 99, 235, 0.18);
+}
+.landing-shell .landing-profile-list__phone { color: var(--g-brand-dark); }
+.landing-shell .landing-cmd-card__summary strong { color: var(--g-brand-dark); }
+.landing-shell .landing-cmd-delivery__fill {
+    background: var(--g-brand);
+}
+
+body:has(.landing-shell) #app-nav-progress {
+    background: var(--g-brand-dark);
+}

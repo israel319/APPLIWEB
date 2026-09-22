@@ -1,0 +1,177 @@
+@page "/grh/paie/composante/form"
+@page "/grh/paie/composante/form/{Id:int}"
+@rendermode InteractiveServer
+@inject ISalaryComponentService SalaryComponentService
+@inject ISnackbar               Snackbar
+@inject NavigationManager       Nav
+
+<PageTitle>@AppSettings.AppName — @(_isEdit ? "Modifier composante" : "Nouvelle composante")</PageTitle>
+
+@if (!_loaded)
+{
+    <div class="aw-page">
+        <div class="aw-loading" style="min-height:200px;">
+            <span class="aw-spinner" role="status" aria-hidden="true"></span>
+            <span>Chargement…</span>
+        </div>
+    </div>
+}
+else
+{
+    <div class="aw-page">
+        <div class="aw-form aw-form--wide">
+            <header class="aw-form__head">
+                <div>
+                    <p class="aw-form__eyebrow">GRH · Paie</p>
+                    <h1 class="aw-form__title">@(_isEdit ? "Modifier la composante" : "Nouvelle composante salariale")</h1>
+                </div>
+                <div class="aw-form__actions">
+                    <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                        <i class="bi bi-arrow-left"></i> Annuler
+                    </button>
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="SaveAsync" disabled="@_saving">
+                        <i class="bi bi-check-lg"></i> @(_saving ? "Enregistrement…" : "Enregistrer")
+                    </button>
+                </div>
+            </header>
+            <div class="aw-form__body">
+                <div class="aw-form__grid">
+                    <div class="aw-field">
+                        <label class="aw-field__label">Code <span class="text-danger">*</span></label>
+                        <input class="aw-input" @bind="_form.ComponentCode" placeholder="COMP001" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Libellé <span class="text-danger">*</span></label>
+                        <input class="aw-input" @bind="_form.ComponentName" placeholder="Nom de la composante" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Type <span class="text-danger">*</span></label>
+                        <select class="aw-input" @bind="_form.ComponentType">
+                            <option value="Base">Salaire de base</option>
+                            <option value="Allowance">Prime / Indemnité</option>
+                            <option value="Deduction">Retenue</option>
+                            <option value="Bonus">Bonus</option>
+                        </select>
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Méthode de calcul</label>
+                        <select class="aw-input" @bind="_form.CalculationMethod">
+                            <option value="Fixed">Montant fixe</option>
+                            <option value="Percentage">Pourcentage</option>
+                        </select>
+                    </div>
+                    @if (_form.CalculationMethod == "Fixed")
+                    {
+                        <div class="aw-field">
+                            <label class="aw-field__label">Montant par défaut (TND)</label>
+                            <input type="number" step="0.001" class="aw-input" @bind="_form.DefaultAmount" />
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="aw-field">
+                            <label class="aw-field__label">Pourcentage (%)</label>
+                            <input type="number" step="0.01" class="aw-input" @bind="_form.Percentage" />
+                        </div>
+                    }
+                    <div class="aw-field aw-form__span-2">
+                        <label class="aw-field__label">Description</label>
+                        <input class="aw-input" @bind="_form.Description" placeholder="Description de la composante" />
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    bool _loaded;
+    bool _saving;
+    bool _isEdit => Id > 0;
+
+    SalaryCompFormData _form = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (_isEdit)
+        {
+            try
+            {
+                var sc = await SalaryComponentService.GetByIdAsync(Id);
+                _form = new SalaryCompFormData
+                {
+                    ComponentCode     = sc.ComponentCode,
+                    ComponentName     = sc.ComponentName,
+                    ComponentType     = sc.ComponentType,
+                    CalculationMethod = sc.CalculationMethod,
+                    DefaultAmount     = sc.DefaultAmount,
+                    Percentage        = sc.Percentage,
+                    Description       = sc.Description
+                };
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Erreur : {ex.Message}", Severity.Error);
+                Nav.NavigateTo("/grh?tab=3");
+            }
+        }
+        _loaded = true;
+    }
+
+    async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_form.ComponentCode)) { Snackbar.Add("Le code est obligatoire.", Severity.Warning); return; }
+        if (string.IsNullOrWhiteSpace(_form.ComponentName)) { Snackbar.Add("Le libellé est obligatoire.", Severity.Warning); return; }
+
+        _saving = true;
+        try
+        {
+            if (_isEdit)
+            {
+                var sc = await SalaryComponentService.GetByIdAsync(Id);
+                sc.ComponentCode     = _form.ComponentCode.Trim();
+                sc.ComponentName     = _form.ComponentName.Trim();
+                sc.ComponentType     = _form.ComponentType;
+                sc.CalculationMethod = _form.CalculationMethod;
+                sc.DefaultAmount     = _form.DefaultAmount;
+                sc.Percentage        = _form.Percentage;
+                sc.Description       = _form.Description;
+                await SalaryComponentService.UpdateAsync(sc);
+                Snackbar.Add("Composante mise à jour.", Severity.Success);
+            }
+            else
+            {
+                await SalaryComponentService.AddAsync(new SalaryComponent
+                {
+                    ComponentCode     = _form.ComponentCode.Trim(),
+                    ComponentName     = _form.ComponentName.Trim(),
+                    ComponentType     = _form.ComponentType,
+                    CalculationMethod = _form.CalculationMethod,
+                    DefaultAmount     = _form.DefaultAmount,
+                    Percentage        = _form.Percentage,
+                    Description       = _form.Description,
+                    IsActive          = true
+                });
+                Snackbar.Add("Composante créée.", Severity.Success);
+            }
+            Nav.NavigateTo("/grh?tab=3");
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    void Cancel() => Nav.NavigateTo("/grh?tab=3");
+
+    class SalaryCompFormData
+    {
+        public string   ComponentCode     { get; set; } = "";
+        public string   ComponentName     { get; set; } = "";
+        public string   ComponentType     { get; set; } = "Base";
+        public string   CalculationMethod { get; set; } = "Fixed";
+        public decimal? DefaultAmount     { get; set; }
+        public decimal? Percentage        { get; set; }
+        public string?  Description       { get; set; }
+    }
+}

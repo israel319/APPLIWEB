@@ -1,0 +1,429 @@
+@page "/dashboard"
+@using MudBlazor
+@using AppPlusPlus.Application.DTOs.Dashboard
+@using AppPlusPlus.Application.Services.Administration
+@using AppPlusPlus.Domain.Common
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@rendermode InteractiveServer
+@implements IDisposable
+@inject IDashboardService DashboardService
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+
+<PageTitle>@AppSettings.AppName — Tableau de bord</PageTitle>
+
+@if (!_loaded)
+{
+    <div class="aw-page">
+        <AwSkeleton Variant="page" Rows="6" />
+    </div>
+}
+else
+{
+<div class="aw-page aw-dash">
+    <header class="aw-object-head">
+        <div class="aw-object-head__identity">
+            <h1 class="aw-object-head__title">Tableau de bord</h1>
+            <p class="aw-object-head__desc">
+                @DateTime.Today.ToString("dddd dd MMMM yyyy", new System.Globalization.CultureInfo("fr-FR"))
+                · Devise d'affichage : <strong>@(UserCurrency.IsUsdDisplay ? "USD" : "FC")</strong>
+            </p>
+        </div>
+        <div class="aw-object-head__actions">
+            @if (_canRapports)
+            {
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="@(() => Navigation.NavigateTo("/rapports"))">
+                    <i class="bi bi-bar-chart"></i> Rapports
+                </button>
+            }
+            @if (_canNewFacture)
+            {
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="@(() => Navigation.NavigateTo("/vente/facturation"))">
+                    <i class="bi bi-plus-lg"></i> Nouvelle facture
+                </button>
+            }
+        </div>
+    </header>
+
+    <section class="aw-overview" aria-label="Indicateurs clés">
+        <div class="aw-overview__metrics">
+            @foreach (var kpi in _kpis)
+            {
+                <article class="aw-overview__metric">
+                    <div class="aw-overview__metric-body">
+                        <span class="aw-overview__metric-label">@kpi.Label</span>
+                        <span class="aw-overview__metric-value" style="@kpi.ValueStyle">
+                            @if (kpi.IsCount)
+                            {
+                                @kpi.Amount.ToString("N0")
+                                <span class="aw-overview__metric-unit">@kpi.Unit</span>
+                            }
+                            else
+                            {
+                                <CurrencyText Inline="true" Mode="@kpi.Mode" Amount="@kpi.Amount" Format="@kpi.Format" />
+                            }
+                        </span>
+                        <span class="aw-overview__metric-hint">
+                            @if (!string.IsNullOrEmpty(kpi.Trend))
+                            {
+                                @kpi.Trend <text> vs mois dernier</text>
+                            }
+                            else if (kpi.ShowFcBase && _factsTodayCount > 0)
+                            {
+                                @_factsTodayCount <text> facture(s)</text>
+                            }
+                            else
+                            {
+                                @kpi.SubLabel
+                            }
+                        </span>
+                    </div>
+                </article>
+            }
+        </div>
+    </section>
+
+    <div class="aw-dash__main">
+        <div class="aw-ref-card aw-dash__chart">
+            <div class="aw-ref-card__head">
+                <h3 class="aw-ref-card__title">Ventes vs approvisionnements</h3>
+                <span class="aw-ref-card__meta">12 derniers mois</span>
+            </div>
+            <div class="aw-ref-card__body">
+                <MudChart @key="@UserCurrency.DisplayRevision"
+                          ChartType="ChartType.Bar"
+                          ChartSeries="@_barSeries"
+                          XAxisLabels="@_barLabels"
+                          Width="100%"
+                          Height="240px"
+                          ChartOptions="@_barOptions" />
+            </div>
+        </div>
+
+        <div class="aw-ref-card aw-dash__side">
+            <div class="aw-ref-card__head">
+                <h3 class="aw-ref-card__title">Factures du mois</h3>
+            </div>
+            <div class="aw-ref-card__body aw-dash-chart-center">
+                @if (_donutData.Length == 0)
+                {
+                    <div class="aw-empty aw-empty--compact">
+                        <i class="bi bi-pie-chart"></i>
+                        <p>Aucune facture ce mois</p>
+                    </div>
+                }
+                else
+                {
+                    <MudChart ChartType="ChartType.Donut"
+                              InputData="@_donutData"
+                              InputLabels="@_donutLabels"
+                              Width="200px"
+                              Height="200px" />
+                }
+            </div>
+            <ul class="aw-dash-legend">
+                <li><span>Factures émises</span><strong>@_factsMonthCount</strong></li>
+                <li><span>Revenus année</span><strong><CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Business" Amount="_totalRevenueYear" Format="N0" /></strong></li>
+                <li><span>Stock faible</span><strong>@_lowStockArticles.Count</strong></li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="aw-dash-grid aw-dash-grid--3">
+        <div class="aw-ref-card">
+            <div class="aw-ref-card__head">
+                <h3 class="aw-ref-card__title">Top articles</h3>
+                <span class="aw-ref-card__meta">Ce mois</span>
+            </div>
+            @if (!_topArticles.Any())
+            {
+                <div class="aw-empty aw-empty--compact"><i class="bi bi-inbox"></i><p>Aucune vente</p></div>
+            }
+            else
+            {
+                <ul class="aw-dash-list">
+                    @foreach (var a in _topArticles.Take(5))
+                    {
+                        <li class="aw-dash-list__item">
+                            <span class="@($"aw-dash-rank {(a.Rank <= 3 ? "aw-dash-rank--top" : "")}")">@a.Rank</span>
+                            <div class="aw-dash-list__body">
+                                <span class="aw-dash-list__title">@a.Description</span>
+                                <span class="aw-dash-list__meta">
+                                    <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Dashboard" Amount="@((decimal)a.Montant)" />
+                                    · @a.QteVendue.ToString("N0") u.
+                                </span>
+                            </div>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+
+        <div class="aw-ref-card">
+            <div class="aw-ref-card__head">
+                <h3 class="aw-ref-card__title">Alertes stock</h3>
+                @if (_lowStockArticles.Any())
+                {
+                    <span class="aw-badge aw-badge--accent">@_lowStockArticles.Count</span>
+                }
+            </div>
+            @if (!_lowStockArticles.Any())
+            {
+                <div class="aw-empty aw-empty--compact"><i class="bi bi-check-circle"></i><p>Stock OK</p></div>
+            }
+            else
+            {
+                <ul class="aw-dash-list">
+                    @foreach (var a in _lowStockArticles.Take(5))
+                    {
+                        <li class="aw-dash-list__item">
+                            <div class="aw-dash-list__body">
+                                <span class="aw-dash-list__title">@a.Description</span>
+                                <span class="aw-dash-list__meta">Min @a.Seuil</span>
+                            </div>
+                            <div class="aw-dash-list__side">
+                                <strong>@a.Qte.ToString("N0")</strong>
+                                <span>en stock</span>
+                            </div>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+
+        <div class="aw-ref-card">
+            <div class="aw-ref-card__head">
+                <h3 class="aw-ref-card__title">Dernières ventes</h3>
+                @if (_canVente)
+                {
+                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="@(() => Navigation.NavigateTo(_venteRoute))">
+                        Voir
+                    </button>
+                }
+            </div>
+            <ul class="aw-dash-list">
+                @foreach (var f in _recentFacts.Take(5))
+                {
+                    <li class="aw-dash-list__item">
+                        <div class="aw-dash-list__body">
+                            <span class="aw-dash-list__title">@f.Client</span>
+                            <span class="aw-dash-list__meta">
+                                <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Dashboard" Amount="@f.Total" />
+                                · @f.Date.ToString("dd/MM")
+                            </span>
+                        </div>
+                        <span class="@GetStatusBadgeClass(f.StatusLabel)">@f.StatusLabel</span>
+                    </li>
+                }
+            </ul>
+        </div>
+    </div>
+
+    <nav class="aw-dash__shortcuts" aria-label="Accès rapides">
+        @foreach (var shortcut in _shortcuts)
+        {
+            <button type="button" class="aw-btn aw-btn--ghost aw-dash-shortcut"
+                    @onclick="@(() => Navigation.NavigateTo(shortcut.Path))">
+                <i class="ti @shortcut.TablerIcon"></i>
+                <span>@shortcut.Label</span>
+            </button>
+        }
+    </nav>
+</div>
+}
+
+@code {
+    record KpiData(
+        string Label,
+        decimal Amount,
+        CurrencyText.DisplayMode Mode,
+        string Format,
+        string SubLabel,
+        string Color,
+        string ValueStyle = "",
+        string Trend = "",
+        bool TrendUp = true,
+        bool ShowFcBase = false,
+        bool IsCount = false,
+        string Unit = "");
+
+    record ShortcutItem(string Label, string TablerIcon, string Path);
+
+    bool _loaded;
+    bool _canRapports;
+    bool _canNewFacture;
+    bool _canVente;
+    string _venteRoute = "/vente";
+    PermissionSnapshot _perms = PermissionSnapshot.Empty;
+    List<KpiData> _kpis = new();
+    decimal _totalRevenueYear;
+    int _factsMonthCount;
+    int _factsTodayCount;
+    int _cmdsEnAttente;
+    List<StockAlertDto> _lowStockArticles = new();
+    List<TopArticleDto> _topArticles = new();
+    List<RecentFactDto> _recentFacts = new();
+    List<ShortcutItem> _shortcuts = new();
+    List<MonthlyDataDto> _revenueDataRaw = new();
+
+    string[] _barLabels = Array.Empty<string>();
+    List<ChartSeries> _barSeries = new();
+    ChartOptions _barOptions = new() { YAxisTicks = 5 };
+
+    double[] _donutData = Array.Empty<double>();
+    string[] _donutLabels = Array.Empty<string>();
+
+    string GetStatusBadgeClass(string status) => status switch
+    {
+        "Nouvelle" => "aw-badge aw-badge--brand",
+        "Validée"  => "aw-badge aw-badge--accent",
+        "Payée"    => "aw-badge aw-badge--brand",
+        "Annulée"  => "aw-badge aw-badge--danger",
+        _          => "aw-badge aw-badge--muted"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        UserCurrency.OnChanged += OnCurrencyPreferenceChanged;
+        await UserCurrency.EnsureLoadedAsync();
+
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            var login = user.FindFirst("login")?.Value
+                ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!string.IsNullOrEmpty(login))
+            {
+                _perms = await PermissionResolver.GetPermissionsAsync(login);
+                if (_perms.HasHierarchicalGrants)
+                {
+                    _canRapports = _perms.CanAccessTab("rapports");
+                    _canNewFacture = _perms.CanPerformAction("vente.facturation.write");
+                    _canVente = PermissionCatalog.FirstAccessibleVenteRoute(_perms.Grants) is not null;
+                    _venteRoute = PermissionCatalog.FirstAccessibleVenteRoute(_perms.Grants) ?? _perms.HomeRoute();
+                }
+                else
+                {
+                    var isAdmin = AppFunctions.Normalize(user.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+                    _canRapports = isAdmin || _perms.CanRead(AppFunctions.Rapports);
+                    _canNewFacture = isAdmin || _perms.CanWrite(AppFunctions.Facturation);
+                    _canVente = isAdmin || _perms.CanRead(AppFunctions.Vente);
+                }
+            }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _dataLoaded)
+            return;
+
+        _dataLoaded = true;
+        await LoadDataAsync();
+        _loaded = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    bool _dataLoaded;
+
+    async Task LoadDataAsync()
+    {
+        var data = await DashboardService.GetDashboardDataAsync();
+
+        _factsTodayCount = data.FactsTodayCount;
+        _factsMonthCount = data.FactsMonthCount;
+        _cmdsEnAttente = data.CmdsEnAttente;
+        _totalRevenueYear = data.TotalRevenueYear;
+
+        _kpis =
+        [
+            new("Ventes du jour", data.VentesToday, CurrencyText.DisplayMode.Dashboard, "N2",
+                "Encaissement journalier", "#009e84", ShowFcBase: true),
+            new("Ventes du mois", data.VentesMois, CurrencyText.DisplayMode.Dashboard, "N2",
+                $"{data.FactsMonthCount} facture(s)", "#009e84",
+                Trend: data.TrendVente, TrendUp: data.TrendVenteUp),
+            new("Commandes en attente", data.CmdsEnAttente, CurrencyText.DisplayMode.Business, "N0",
+                "À traiter", "#a67235", IsCount: true, Unit: "cmd"),
+        ];
+
+        _revenueDataRaw = data.RevenueData;
+        _barLabels = data.RevenueData.Select(r => r.Month).ToArray();
+        RebuildBarSeries();
+
+        _donutData = data.StatusData.Select(s => (double)s.Count).ToArray();
+        _donutLabels = data.StatusData.Select(s => s.Label).ToArray();
+
+        _topArticles = data.TopArticles;
+        _lowStockArticles = data.LowStockArticles;
+        _recentFacts = data.RecentFacts;
+
+        _shortcuts = BuildShortcuts();
+    }
+
+    List<ShortcutItem> BuildShortcuts()
+    {
+        var all = new (string Label, string Icon, string Path, Func<bool> Visible)[]
+        {
+            ("Nouvelle facture", "ti-plus", "/vente/facturation",
+                () => !_perms.HasHierarchicalGrants || _perms.CanPerformAction("vente.facturation.write")),
+            ("Stock", "ti-box-seam", PermissionCatalog.FirstAccessibleArticlesRoute(_perms.Grants) ?? "/stock",
+                () => !_perms.HasHierarchicalGrants
+                    || PermissionCatalog.FirstAccessibleArticlesRoute(_perms.Grants) is not null),
+            ("Commandes", "ti-shopping-cart", PermissionCatalog.FirstAccessibleCommandesRoute(_perms.Grants) ?? "/commandes",
+                () => !_perms.HasHierarchicalGrants
+                    || PermissionCatalog.FirstAccessibleCommandesRoute(_perms.Grants) is not null),
+            ("Rapports", "ti-chart-bar", "/rapports",
+                () => !_perms.HasHierarchicalGrants || _perms.CanAccessTab("rapports")),
+        };
+
+        return all.Where(s => s.Visible())
+            .Select(s => new ShortcutItem(s.Label, s.Icon,
+                _perms.HasHierarchicalGrants ? _perms.SafeRoute(s.Path) : s.Path))
+            .ToList();
+    }
+
+    void RebuildBarSeries()
+    {
+        if (!_revenueDataRaw.Any())
+        {
+            _barSeries = new();
+            return;
+        }
+
+        if (UserCurrency.IsUsdDisplay)
+        {
+            _barSeries =
+            [
+                new ChartSeries { Name = "Ventes", Data = _revenueDataRaw.Select(r => (double)r.Ventes).ToArray() },
+                new ChartSeries { Name = "Appros", Data = _revenueDataRaw.Select(r => (double)r.Appros).ToArray() },
+            ];
+            return;
+        }
+
+        var taux = UserCurrency.CachedTaux;
+        _barSeries =
+        [
+            new ChartSeries
+            {
+                Name = "Ventes",
+                Data = _revenueDataRaw.Select(r => (double)CurrencyFormat.ToCdf(r.Ventes, true, taux)).ToArray()
+            },
+            new ChartSeries
+            {
+                Name = "Appros",
+                Data = _revenueDataRaw.Select(r => (double)CurrencyFormat.ToCdf(r.Appros, true, taux)).ToArray()
+            },
+        ];
+    }
+
+    void OnCurrencyPreferenceChanged()
+    {
+        RebuildBarSeries();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => UserCurrency.OnChanged -= OnCurrencyPreferenceChanged;
+}

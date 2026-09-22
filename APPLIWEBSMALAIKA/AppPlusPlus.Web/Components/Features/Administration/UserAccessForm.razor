@@ -1,0 +1,216 @@
+@inject IUserAdminService UserAdminService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        @if (!_loaded)
+        {
+            <div class="d-flex align-items-center justify-content-center" style="min-height:220px;">
+                <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Chargement...</span></div>
+            </div>
+        }
+        else
+        {
+            <div class="aw-dialog">
+                <header class="aw-dialog__head">
+                    <div class="aw-dialog__title-wrap">
+                        <i class="bi bi-person-gear" aria-hidden="true"></i>
+                        <h2 class="aw-dialog__title">Droits utilisateur</h2>
+                    </div>
+                </header>
+                <div class="aw-dialog__body">
+                    <div class="aw-dialog__meta" style="margin-bottom:0.85rem;">
+                        <div>
+                            <span class="aw-dialog__meta-label">Utilisateur</span>
+                            <span class="aw-dialog__meta-value">@_userLogin</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Rôle</span>
+                            <MudSelect T="int?" Value="_selectedRoleId" ValueChanged="@(async (int? v) => { _selectedRoleId = v; await OnRoleChanged(); })"
+                                       Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                                       Placeholder="Sélectionner un rôle" Style="min-width:240px;">
+                                @foreach (var role in _roles)
+                                {
+                                    <MudSelectItem T="int?" Value="@role.RoleId">@role.DescriptionRole</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </div>
+                    </div>
+
+                    <p class="aw-field__hint" style="margin-bottom:0.75rem;">
+                        Les activités sont précochées automatiquement selon le rôle. Ensuite, coche/décoche ce que cet utilisateur peut faire ou voir.
+                    </p>
+
+                    <div class="aw-field" style="margin-bottom:0.55rem;">
+                        <input type="text" class="aw-input" @bind="_filter" @bind:event="oninput"
+                               placeholder="Filtrer fonctions / activités…" />
+                    </div>
+
+                    @if (_loadingRows)
+                    {
+                        <div class="text-center py-3">
+                            <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-table-wrap" style="max-height:360px;overflow:auto;">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Fonction</th>
+                                            <th>Activité</th>
+                                            <th>Code</th>
+                                            <th style="width:5rem;">Autorisé</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var row in FilteredRows)
+                                        {
+                                            <tr style="cursor:default;">
+                                                <td><span class="aw-table__meta">@row.FonctionLabel</span></td>
+                                                <td><span class="aw-table__title">@row.ActivityLabel</span></td>
+                                                <td><span class="aw-table__meta">@row.ActivityCode</span></td>
+                                                <td>
+                                                    <MudCheckBox @bind-Value="row.IsGranted" T="bool" Dense="true" />
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;">
+            <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                <i class="bi bi-x-lg"></i> Annuler
+            </button>
+            <button type="button" class="aw-btn aw-btn--primary" @onclick="Save">
+                <i class="bi bi-check-lg"></i> Enregistrer
+            </button>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string? UserLogin { get; set; }
+
+    bool _loaded;
+    bool _loadingRows;
+    string _userLogin = string.Empty;
+    string _filter = string.Empty;
+    int? _selectedRoleId;
+
+    List<Role> _roles = new();
+    List<Activity> _activities = new();
+    List<UserAccessRow> _rows = new();
+
+    IEnumerable<UserAccessRow> FilteredRows
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_filter))
+                return _rows;
+            var q = _filter.Trim();
+            return _rows.Where(r =>
+                (r.FonctionLabel?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (r.ActivityLabel?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (r.ActivityCode?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+    }
+
+    void Cancel() => MudDialog.Close();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (string.IsNullOrWhiteSpace(UserLogin))
+        {
+            MudDialog.Close();
+            return;
+        }
+
+        _userLogin = UserLogin;
+
+        var user = await UserAdminService.GetUserByLoginAsync(_userLogin);
+        if (user is null)
+        {
+            MudDialog.Close();
+            return;
+        }
+
+        _selectedRoleId = user.RoleId;
+
+        _roles = await UserAdminService.GetActiveRolesAsync();
+        _activities = await UserAdminService.GetActiveActivitiesWithFonctionAsync();
+
+        await LoadRows(useUserAssignmentsIfExists: true);
+        _loaded = true;
+    }
+
+    async Task OnRoleChanged()
+    {
+        await LoadRows(useUserAssignmentsIfExists: false);
+    }
+
+    async Task LoadRows(bool useUserAssignmentsIfExists)
+    {
+        _loadingRows = true;
+
+        var roleDefaults = await UserAdminService.GetRoleDefaultActivityIdsAsync(_selectedRoleId);
+
+        var userAssignments = await UserAdminService.GetUserGrantedActivityIdsAsync(_userLogin);
+
+        var hasUserAssignments = userAssignments.Any();
+        var userSet = userAssignments.ToHashSet();
+
+        _rows = _activities.Select(a => new UserAccessRow
+        {
+            ActivityId = a.ActivityId,
+            FonctionLabel = a.Fonction?.DescriptionFonction ?? "-",
+            ActivityLabel = a.DescriptionActivity,
+            ActivityCode = a.Code,
+            IsGranted = useUserAssignmentsIfExists && hasUserAssignments
+                ? userSet.Contains(a.ActivityId)
+                : roleDefaults.Contains(a.ActivityId)
+        }).ToList();
+
+        _loadingRows = false;
+    }
+
+    async Task Save()
+    {
+        try
+        {
+            var grantedIds = _rows
+                .Where(r => r.IsGranted)
+                .Select(r => r.ActivityId)
+                .ToList();
+
+            await UserAdminService.SaveUserAccessAsync(_userLogin, _selectedRoleId, grantedIds);
+
+            Snackbar.Add("Rôle et activités enregistrés.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            var message = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(message, Severity.Error);
+        }
+    }
+
+    class UserAccessRow
+    {
+        public int ActivityId { get; set; }
+        public string FonctionLabel { get; set; } = string.Empty;
+        public string ActivityLabel { get; set; } = string.Empty;
+        public string ActivityCode { get; set; } = string.Empty;
+        public bool IsGranted { get; set; }
+    }
+}

@@ -1,0 +1,75 @@
+@* Search / filter input with debounce to avoid re-filtering on every keystroke. *@
+@implements IDisposable
+
+<input type="@Type"
+       class="@CssClass"
+       placeholder="@Placeholder"
+       aria-label="@AriaLabel"
+       value="@_display"
+       disabled="@Disabled"
+       @oninput="OnInput"
+       @onkeydown="OnKeyDown" />
+
+@code {
+    [Parameter] public string Value { get; set; } = "";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public string Type { get; set; } = "search";
+    [Parameter] public string? Placeholder { get; set; }
+    [Parameter] public string? AriaLabel { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public int DelayMs { get; set; } = 220;
+
+    string _display = "";
+    CancellationTokenSource? _cts;
+    bool _syncing;
+
+    protected override void OnParametersSet()
+    {
+        if (_syncing) return;
+        if (!string.Equals(_display, Value, StringComparison.Ordinal))
+            _display = Value ?? "";
+    }
+
+    async Task OnInput(ChangeEventArgs e)
+    {
+        _display = e.Value?.ToString() ?? "";
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = new CancellationTokenSource();
+        var token = _cts.Token;
+        try
+        {
+            await Task.Delay(DelayMs, token);
+            if (token.IsCancellationRequested) return;
+            _syncing = true;
+            await ValueChanged.InvokeAsync(_display);
+        }
+        catch (TaskCanceledException) { }
+        finally
+        {
+            _syncing = false;
+        }
+    }
+
+    async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter") return;
+        _cts?.Cancel();
+        _syncing = true;
+        try
+        {
+            await ValueChanged.InvokeAsync(_display);
+        }
+        finally
+        {
+            _syncing = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+    }
+}

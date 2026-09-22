@@ -1,0 +1,409 @@
+@namespace AppPlusPlus.Web.Components.Shared
+@using System.Globalization
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+@using Microsoft.JSInterop
+
+<div class="aw-dd aw-daterange @(_open ? "aw-dd--open" : null) @(Compact ? "aw-daterange--compact" : null)"
+     @onkeydown="OnRootKeyDown">
+    <button type="button"
+            @ref="_triggerRef"
+            class="aw-dd__trigger"
+            aria-haspopup="dialog"
+            aria-expanded="@_open"
+            aria-label="@AriaLabel"
+            @onclick="ToggleAsync"
+            @onclick:stopPropagation="true">
+        <i class="bi bi-calendar3" aria-hidden="true"></i>
+        <span class="aw-dd__value @(HasValue ? null : "aw-dd__value--placeholder")">@DisplayText</span>
+        <i class="bi @(_open ? "bi-chevron-up" : "bi-chevron-down")" aria-hidden="true"></i>
+    </button>
+
+    @if (_open)
+    {
+        <div @ref="_backdropRef" class="aw-daterange__backdrop aw-float-backdrop"></div>
+        <div @ref="_panelRef" class="aw-daterange__panel aw-float-panel" role="dialog" aria-modal="true" aria-label="@AriaLabel"
+             @onclick:stopPropagation="true">
+            <div class="aw-daterange__presets" role="group" aria-label="Périodes rapides">
+                @foreach (var p in ActivePresets)
+                {
+                    var active = IsPresetActive(p);
+                    <button type="button"
+                            class="aw-daterange__preset @(active ? "aw-daterange__preset--active" : null)"
+                            @onclick="@(() => ApplyPresetAsync(p))">
+                        @p.Label
+                    </button>
+                }
+            </div>
+
+            <div class="aw-daterange__cal">
+                <div class="aw-daterange__cal-head">
+                    <button type="button" class="aw-daterange__nav" aria-label="Mois précédent" @onclick="PrevMonth">
+                        <i class="bi bi-chevron-left" aria-hidden="true"></i>
+                    </button>
+                    <div class="aw-daterange__month" aria-live="polite">@_viewMonth.ToString("MMMM yyyy", Fr)</div>
+                    <button type="button" class="aw-daterange__nav" aria-label="Mois suivant" @onclick="NextMonth">
+                        <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                    </button>
+                </div>
+
+                <div class="aw-daterange__weekdays" aria-hidden="true">
+                    @foreach (var d in WeekdayLabels)
+                    {
+                        <span>@d</span>
+                    }
+                </div>
+
+                <div class="aw-daterange__grid" role="grid">
+                    @foreach (var cell in _cells)
+                    {
+                        <button type="button"
+                                class="@DayClass(cell)"
+                                disabled="@(!cell.InMonth && !AllowOutsideMonth)"
+                                aria-label="@cell.Date.ToString("dddd d MMMM yyyy", Fr)"
+                                aria-selected="@(IsSelected(cell.Date) ? "true" : "false")"
+                                @onclick="@(() => OnDayClick(cell.Date))">
+                            <span>@cell.Date.Day</span>
+                        </button>
+                    }
+                </div>
+            </div>
+
+            <div class="aw-daterange__footer">
+                <div class="aw-daterange__summary">
+                    @if (SingleDay)
+                    {
+                        <span>@(DraftFrom?.ToString("dd/MM/yyyy") ?? "—")</span>
+                    }
+                    else
+                    {
+                        <span>@((DraftFrom ?? DateTime.Today).ToString("dd/MM/yyyy"))</span>
+                        <i class="bi bi-arrow-right" aria-hidden="true"></i>
+                        <span>@((DraftTo ?? DraftFrom ?? DateTime.Today).ToString("dd/MM/yyyy"))</span>
+                    }
+                </div>
+                <div class="aw-daterange__actions">
+                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="Close">Annuler</button>
+                    <button type="button" class="aw-btn aw-btn--primary aw-btn--sm" @onclick="ApplyAsync">Appliquer</button>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    static readonly CultureInfo Fr = CultureInfo.GetCultureInfo("fr-FR");
+    static readonly string[] WeekdayLabels = ["Lu", "Ma", "Me", "Je", "Ve", "Sa", "Di"];
+
+    [Parameter] public DateTime? From { get; set; }
+    [Parameter] public DateTime? To { get; set; }
+    [Parameter] public EventCallback<DateTime?> FromChanged { get; set; }
+    [Parameter] public EventCallback<DateTime?> ToChanged { get; set; }
+    [Parameter] public EventCallback Changed { get; set; }
+    [Parameter] public string AriaLabel { get; set; } = "Période";
+    [Parameter] public string? Placeholder { get; set; }
+    [Parameter] public bool SingleDay { get; set; }
+    [Parameter] public bool ApplyOnSelect { get; set; }
+    [Parameter] public string? PersistKey { get; set; }
+    [Parameter] public bool Compact { get; set; }
+    [Parameter] public bool AllowOutsideMonth { get; set; } = true;
+
+    ElementReference _triggerRef;
+    ElementReference _panelRef;
+    ElementReference _backdropRef;
+    bool _open;
+    bool _pickingEnd;
+    bool _persistLoaded;
+    bool _placePending;
+    int? _watchId;
+    DotNetObjectReference<AwDateRange>? _overlayRef;
+    DateTime? DraftFrom;
+    DateTime? DraftTo;
+    DateTime _viewMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    List<DayCell> _cells = new();
+
+    bool HasValue => From.HasValue || To.HasValue;
+
+    string DisplayText
+    {
+        get
+        {
+            if (!HasValue && !string.IsNullOrWhiteSpace(Placeholder))
+                return Placeholder!;
+            var from = From ?? DateTime.Today;
+            var to = To ?? from;
+            if (SingleDay || from.Date == to.Date)
+                return from.ToString("dd/MM/yyyy");
+            return $"{from:dd/MM/yyyy} → {to:dd/MM/yyyy}";
+        }
+    }
+
+    sealed record Preset(string Id, string Label, Func<(DateTime From, DateTime To)> Resolve);
+    sealed record DayCell(DateTime Date, bool InMonth);
+
+    IEnumerable<Preset> ActivePresets
+    {
+        get
+        {
+            var today = DateTime.Today;
+            if (SingleDay)
+            {
+                yield return new("today", "Aujourd'hui", () => (today, today));
+                yield return new("yesterday", "Hier", () => (today.AddDays(-1), today.AddDays(-1)));
+                yield return new("tomorrow", "Demain", () => (today.AddDays(1), today.AddDays(1)));
+                yield break;
+            }
+
+            var startWeek = today.AddDays(-(((int)today.DayOfWeek + 6) % 7));
+            yield return new("today", "Aujourd'hui", () => (today, today));
+            yield return new("yesterday", "Hier", () => (today.AddDays(-1), today.AddDays(-1)));
+            yield return new("7d", "7 jours", () => (today.AddDays(-6), today));
+            yield return new("week", "Cette semaine", () => (startWeek, startWeek.AddDays(6)));
+            yield return new("month", "Ce mois", () => (new DateTime(today.Year, today.Month, 1), new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month))));
+            yield return new("lastMonth", "Mois préc.", () =>
+            {
+                var first = new DateTime(today.Year, today.Month, 1).AddMonths(-1);
+                return (first, first.AddMonths(1).AddDays(-1));
+            });
+        }
+    }
+
+    protected override void OnInitialized() => RebuildCells();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_persistLoaded || string.IsNullOrWhiteSpace(PersistKey))
+            return;
+        _persistLoaded = true;
+        try
+        {
+            var raw = await JS.InvokeAsync<string?>("awDateRange.load", PersistKey);
+            if (string.IsNullOrWhiteSpace(raw)) return;
+            var parts = raw.Split('|');
+            if (parts.Length != 2) return;
+            if (!DateTime.TryParse(parts[0], CultureInfo.InvariantCulture, DateTimeStyles.None, out var from)) return;
+            if (!DateTime.TryParse(parts[1], CultureInfo.InvariantCulture, DateTimeStyles.None, out var to)) return;
+            if (From.HasValue || To.HasValue) return;
+            await FromChanged.InvokeAsync(from.Date);
+            await ToChanged.InvokeAsync(to.Date);
+            await Changed.InvokeAsync();
+        }
+        catch { /* ignore */ }
+    }
+
+    async Task ToggleAsync()
+    {
+        if (_open) { await CloseAsync(); return; }
+        _open = true;
+        DraftFrom = From ?? DateTime.Today;
+        DraftTo = To ?? DraftFrom;
+        _pickingEnd = false;
+        var focus = (DraftFrom ?? DateTime.Today).Date;
+        _viewMonth = new DateTime(focus.Year, focus.Month, 1);
+        RebuildCells();
+        _placePending = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_placePending || !_open) return;
+        _placePending = false;
+        await StartWatchAsync();
+    }
+
+    async Task StartWatchAsync()
+    {
+        await StopWatchAsync();
+        try
+        {
+            var width = Compact ? 284 : 296;
+            _overlayRef ??= DotNetObjectReference.Create(this);
+            _watchId = await JS.InvokeAsync<int>("awOverlay.watch", _triggerRef, _panelRef, new
+            {
+                align = "start",
+                width,
+                minWidth = width,
+                maxWidth = width,
+                maxHeight = 420,
+                estimatedHeight = 360,
+                gap = 4
+            }, _backdropRef, _overlayRef);
+        }
+        catch { /* ignore */ }
+    }
+
+    async Task StopWatchAsync()
+    {
+        if (_watchId is null) return;
+        var id = _watchId.Value;
+        _watchId = null;
+        try
+        {
+            await JS.InvokeVoidAsync("awOverlay.unwatch", id);
+        }
+        catch { /* ignore */ }
+    }
+
+    void Close() => _ = CloseAsync();
+
+    async Task CloseAsync()
+    {
+        if (!_open) return;
+        await StopWatchAsync();
+        _open = false;
+        _pickingEnd = false;
+        _placePending = false;
+    }
+
+    void PrevMonth()
+    {
+        _viewMonth = _viewMonth.AddMonths(-1);
+        RebuildCells();
+    }
+
+    void NextMonth()
+    {
+        _viewMonth = _viewMonth.AddMonths(1);
+        RebuildCells();
+    }
+
+    void RebuildCells()
+    {
+        var first = _viewMonth;
+        var offset = ((int)first.DayOfWeek + 6) % 7;
+        var start = first.AddDays(-offset);
+        var list = new List<DayCell>(42);
+        for (var i = 0; i < 42; i++)
+        {
+            var d = start.AddDays(i);
+            list.Add(new DayCell(d, d.Month == first.Month));
+        }
+        _cells = list;
+    }
+
+    async Task OnDayClick(DateTime day)
+    {
+        day = day.Date;
+        if (SingleDay)
+        {
+            DraftFrom = day;
+            DraftTo = day;
+            if (ApplyOnSelect)
+                await ApplyAsync();
+            return;
+        }
+
+        if (!_pickingEnd || DraftFrom is null)
+        {
+            DraftFrom = day;
+            DraftTo = day;
+            _pickingEnd = true;
+            return;
+        }
+
+        if (day < DraftFrom)
+        {
+            DraftTo = DraftFrom;
+            DraftFrom = day;
+        }
+        else
+        {
+            DraftTo = day;
+        }
+        _pickingEnd = false;
+    }
+
+    async Task ApplyPresetAsync(Preset preset)
+    {
+        var (from, to) = preset.Resolve();
+        DraftFrom = from.Date;
+        DraftTo = to.Date;
+        _viewMonth = new DateTime(from.Year, from.Month, 1);
+        _pickingEnd = false;
+        RebuildCells();
+        await ApplyAsync();
+    }
+
+    async Task ApplyAsync()
+    {
+        if (SingleDay)
+        {
+            var day = (DraftFrom ?? DateTime.Today).Date;
+            await FromChanged.InvokeAsync(day);
+            await ToChanged.InvokeAsync(day);
+            await CloseAsync();
+            await Changed.InvokeAsync();
+            await PersistAsync(day, day);
+            return;
+        }
+
+        var from = (DraftFrom ?? DateTime.Today).Date;
+        var to = (DraftTo ?? from).Date;
+        if (to < from) (from, to) = (to, from);
+        await FromChanged.InvokeAsync(from);
+        await ToChanged.InvokeAsync(to);
+        await CloseAsync();
+        await Changed.InvokeAsync();
+        await PersistAsync(from, to);
+    }
+
+    async Task PersistAsync(DateTime from, DateTime to)
+    {
+        if (string.IsNullOrWhiteSpace(PersistKey)) return;
+        try
+        {
+            await JS.InvokeVoidAsync("awDateRange.save", PersistKey,
+                from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                to.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        }
+        catch { /* ignore */ }
+    }
+
+    bool IsPresetActive(Preset preset)
+    {
+        var (from, to) = preset.Resolve();
+        var df = (DraftFrom ?? From)?.Date;
+        var dt = (DraftTo ?? To)?.Date;
+        return df == from.Date && dt == to.Date;
+    }
+
+    bool IsSelected(DateTime day)
+    {
+        var from = DraftFrom?.Date;
+        var to = (DraftTo ?? DraftFrom)?.Date;
+        if (from is null) return false;
+        if (SingleDay) return day.Date == from;
+        return day.Date >= from && day.Date <= to;
+    }
+
+    bool IsRangeStart(DateTime day) => DraftFrom?.Date == day.Date;
+    bool IsRangeEnd(DateTime day) => (DraftTo ?? DraftFrom)?.Date == day.Date;
+
+    string DayClass(DayCell cell)
+    {
+        var cls = "aw-daterange__day";
+        if (!cell.InMonth) cls += " aw-daterange__day--muted";
+        if (cell.Date.Date == DateTime.Today) cls += " aw-daterange__day--today";
+        if (IsSelected(cell.Date)) cls += " aw-daterange__day--selected";
+        if (!SingleDay && IsSelected(cell.Date) && !IsRangeStart(cell.Date) && !IsRangeEnd(cell.Date))
+            cls += " aw-daterange__day--inrange";
+        if (IsRangeStart(cell.Date)) cls += " aw-daterange__day--start";
+        if (IsRangeEnd(cell.Date)) cls += " aw-daterange__day--end";
+        return cls;
+    }
+
+    void OnRootKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && _open)
+            Close();
+    }
+
+    [JSInvokable]
+    public Task OnOverlayDismiss() => CloseAsync();
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopWatchAsync();
+        _overlayRef?.Dispose();
+    }
+}

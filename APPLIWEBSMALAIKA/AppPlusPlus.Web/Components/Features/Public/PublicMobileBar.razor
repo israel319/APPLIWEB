@@ -1,0 +1,166 @@
+@inject NavigationManager Navigation
+@implements IDisposable
+
+@if (_menuOpen)
+{
+    <div class="landing-mobile-menu-layer" @onclick="CloseMenu">
+        <div class="landing-mobile-menu-sheet" role="dialog" aria-label="Menu" @onclick:stopPropagation="true">
+            <div class="landing-mobile-menu-sheet__handle" aria-hidden="true"></div>
+            @if (IsClient)
+            {
+                <div class="landing-mobile-menu-sheet__user">
+                    <i class="bi bi-person-circle"></i>
+                    <div>
+                        <strong>@ClientName</strong>
+                        @if (!string.IsNullOrWhiteSpace(ClientContact))
+                        {
+                            <span>@ClientContact</span>
+                        }
+                    </div>
+                </div>
+                <a href="/client/compte" class="landing-mobile-menu-sheet__item" @onclick="CloseMenu">
+                    <i class="bi bi-shield-check"></i>
+                    <span>Vérifier mon numéro</span>
+                </a>
+                <a href="/auth/client/logout" class="landing-mobile-menu-sheet__item landing-mobile-menu-sheet__item--danger" @onclick="CloseMenu">
+                    <i class="bi bi-box-arrow-right"></i>
+                    <span>Déconnexion</span>
+                </a>
+            }
+            else
+            {
+                <a href="/auth/connexion" class="landing-mobile-menu-sheet__item" @onclick="CloseMenu">
+                    <i class="bi bi-box-arrow-in-right"></i>
+                    <span>Se connecter</span>
+                </a>
+                <a href="/client/inscription" class="landing-mobile-menu-sheet__item landing-mobile-menu-sheet__item--accent" @onclick="CloseMenu">
+                    <i class="bi bi-person-plus"></i>
+                    <span>S'inscrire</span>
+                </a>
+            }
+        </div>
+    </div>
+}
+
+<nav class="landing-mobile-bar d-md-none" aria-label="Navigation principale">
+    <a href="/"
+       data-enhance-nav="false"
+       class="landing-mobile-bar__item @ItemClass("accueil")"
+       @onclick="CloseMenu">
+        <i class="bi bi-house"></i>
+        <span>Accueil</span>
+    </a>
+    <a href="/catalogue"
+       data-enhance-nav="false"
+       class="landing-mobile-bar__item @ItemClass("catalogue")"
+       @onclick="CloseMenu">
+        <i class="bi bi-grid"></i>
+        <span>Catalogue</span>
+    </a>
+    <a href="/client/panier"
+       class="landing-mobile-bar__item @ItemClass("panier")"
+       @onclick="CloseMenu">
+        <span class="landing-cart-icon-wrap">
+            <i class="bi bi-cart-check"></i>
+            @if (CartQty > 0)
+            {
+                <span class="landing-cart-badge">@CartQty</span>
+            }
+        </span>
+        <span>Commander</span>
+    </a>
+    <button type="button"
+            class="landing-mobile-bar__item landing-mobile-bar__item--btn @ItemClass("menu")"
+            aria-expanded="@_menuOpen"
+            aria-haspopup="true"
+            aria-label="Menu"
+            @onclick="ToggleMenu">
+        <i class="bi bi-list"></i>
+        <span>Menu</span>
+    </button>
+</nav>
+
+@code {
+    string _section = "";
+    bool _menuOpen;
+
+    [Parameter]
+    public int CartQty { get; set; }
+
+    [Parameter]
+    public bool IsClient { get; set; }
+
+    [Parameter]
+    public string ClientName { get; set; } = "";
+
+    [Parameter]
+    public string ClientContact { get; set; } = "";
+
+    protected override void OnInitialized()
+    {
+        _section = ResolveSection(Navigation.Uri);
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    void OnLocationChanged(object? sender, LocationChangedEventArgs e) =>
+        _ = InvokeAsync(() =>
+        {
+            try
+            {
+                _menuOpen = false;
+                _section = ResolveSection(e.Location);
+                StateHasChanged();
+            }
+            catch
+            {
+            }
+        });
+
+    static string GetPathFromUri(string uri)
+    {
+        var relative = new Uri(uri).AbsolutePath.Trim('/');
+        return relative.ToLowerInvariant();
+    }
+
+    static string ResolveSection(string uri)
+    {
+        var path = GetPathFromUri(uri);
+        if (path is "" or "index")
+            return "accueil";
+        if (path is "catalogue" || path.StartsWith("catalogue/c/"))
+            return "catalogue";
+        if (path.StartsWith("client/panier"))
+            return "panier";
+        if (path.StartsWith("client/compte"))
+            return "compte";
+        if (path is "auth/connexion" or "client/connexion")
+            return "connexion";
+        if (path.StartsWith("client/inscription"))
+            return "inscription";
+        if (path.StartsWith("login"))
+            return "staff";
+        return "";
+    }
+
+    string ItemClass(string section) =>
+        _section == section || (section == "menu" && _menuOpen)
+            ? "landing-mobile-bar__item--active"
+            : "";
+
+    void ToggleMenu()
+    {
+        _menuOpen = !_menuOpen;
+        _section = _menuOpen ? "menu" : ResolveSection(Navigation.Uri);
+    }
+
+    void CloseMenu()
+    {
+        if (!_menuOpen)
+            return;
+
+        _menuOpen = false;
+        _section = ResolveSection(Navigation.Uri);
+    }
+
+    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
+}

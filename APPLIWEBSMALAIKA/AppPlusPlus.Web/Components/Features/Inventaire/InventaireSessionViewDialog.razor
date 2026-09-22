@@ -1,0 +1,250 @@
+@using MudBlazor
+@using AppPlusPlus.Application.DTOs.Inventaire
+@using AppPlusPlus.Application.Services.Inventaire
+@using AppPlusPlus.Domain.Common
+@using System.Globalization
+@inject IInventaireService InventaireService
+@inject IDialogService DialogService
+@inject IJSRuntime JS
+
+<MudDialog Class="inventaire-session-view-dialog">
+    <DialogContent>
+        @if (_loading)
+        {
+            <div class="aw-dialog"><div class="aw-dialog__body"><AwSkeleton Variant="table" Rows="8" /></div></div>
+        }
+        else if (_session is null)
+        {
+            <div class="aw-empty aw-empty--compact"><p>Session introuvable</p></div>
+        }
+        else
+        {
+            <div class="aw-dialog aw-dialog--inventaire-session">
+                <header class="aw-dialog__head">
+                    <div class="aw-dialog__title-wrap">
+                        <i class="bi bi-calendar-check" aria-hidden="true"></i>
+                        <h2 class="aw-dialog__title">@_session.Nom</h2>
+                    </div>
+                    <span class="aw-badge @(_session.Statut == InventaireStatut.Cloture ? "aw-badge--brand" : "aw-badge--accent")">@_session.StatutLabel</span>
+                </header>
+                <div class="aw-dialog__body">
+                    <div class="aw-dialog__meta aw-inventaire-view-meta">
+                        <div>
+                            <span class="aw-dialog__meta-label">Magasin</span>
+                            <span class="aw-dialog__meta-value">@_session.NomMagasin</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Période</span>
+                            <span class="aw-dialog__meta-value">@_session.DateDebut.ToString("dd/MM/yyyy")@(_session.DateFin.HasValue ? $" → {_session.DateFin:dd/MM/yyyy}" : "")</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Réceptions</span>
+                            <span class="aw-dialog__meta-value">@_session.NbReceptionsCloturees clôturée(s)</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Ventes / dépenses</span>
+                            <span class="aw-dialog__meta-value">@_session.NbVentes saisie(s)</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Ouvert par</span>
+                            <span class="aw-dialog__meta-value">@UserDisplayNames.Format(_session.CreePar)</span>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(_session.CloturePar))
+                        {
+                            <div>
+                                <span class="aw-dialog__meta-label">Clôturé par</span>
+                                <span class="aw-dialog__meta-value">@UserDisplayNames.Format(_session.CloturePar)</span>
+                            </div>
+                        }
+                    </div>
+
+                    <div class="aw-inventaire-session-summary">
+                        <article class="aw-inventaire-session-summary__item">
+                            <span>Départ</span>
+                            <strong>@CurrencyFormat.Cdf(_session.MontantInitial, "N0")</strong>
+                        </article>
+                        <article class="aw-inventaire-session-summary__item aw-inventaire-session-summary__item--plus">
+                            <span>Réceptions</span>
+                            <strong>+ @CurrencyFormat.Cdf(_session.MontantReceptions, "N0")</strong>
+                        </article>
+                        <article class="aw-inventaire-session-summary__item aw-inventaire-session-summary__item--minus">
+                            <span>Ventes / dépenses</span>
+                            <strong>− @CurrencyFormat.Cdf(_session.MontantVentes, "N0")</strong>
+                        </article>
+                        <article class="aw-inventaire-session-summary__item aw-inventaire-session-summary__item--result">
+                            <span>Reste</span>
+                            <strong>@CurrencyFormat.Cdf(_session.MontantTheorique, "N0")</strong>
+                        </article>
+                    </div>
+
+                    <div class="aw-dialog__section">Ventes et dépenses</div>
+                    @if (_ventes.Any())
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th class="aw-table__num">Ventes</th>
+                                            <th class="aw-table__num">Dépenses</th>
+                                            <th class="aw-table__num">Total</th>
+                                            <th>Par</th>
+                                            <th>Commentaire</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var v in _ventes)
+                                        {
+                                            <tr>
+                                                <td>@v.DateVente.ToString("dd/MM/yyyy")</td>
+                                                <td class="aw-table__num">@CurrencyFormat.Cdf(v.MontantVentes, "N0")</td>
+                                                <td class="aw-table__num">@CurrencyFormat.Cdf(v.MontantDepenses, "N0")</td>
+                                                <td class="aw-table__num">− @CurrencyFormat.Cdf(v.Montant, "N0")</td>
+                                                <td><span class="aw-table__meta">@v.CreeParLabel</span></td>
+                                                <td>
+                                                    @if (!string.IsNullOrWhiteSpace(v.Observation))
+                                                    {
+                                                        <span class="aw-inventaire-observation">@v.Observation</span>
+                                                    }
+                                                    else if (v.MontantDepenses > 0)
+                                                    {
+                                                        <span class="aw-inventaire-observation aw-inventaire-observation--missing">Sans commentaire</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="aw-table__meta">—</span>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                    <tfoot>
+                                        <tr>
+                                            <td class="aw-table__num"><strong>Total</strong></td>
+                                            <td class="aw-table__num"><strong>@CurrencyFormat.Cdf(_ventes.Sum(x => x.MontantVentes), "N0")</strong></td>
+                                            <td class="aw-table__num"><strong>@CurrencyFormat.Cdf(_ventes.Sum(x => x.MontantDepenses), "N0")</strong></td>
+                                            <td class="aw-table__num"><strong>− @CurrencyFormat.Cdf(_ventes.Sum(x => x.Montant), "N0")</strong></td>
+                                            <td></td>
+                                            <td></td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="aw-table__meta">Aucune vente ou dépense saisie</p>
+                    }
+
+                    <div class="aw-dialog__section aw-dialog__section--spaced">Réceptions</div>
+                    @if (_receptions.Any())
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Jour</th>
+                                            <th>Statut</th>
+                                            <th>Par</th>
+                                            <th class="aw-table__num">Lignes</th>
+                                            <th class="aw-table__num">Montant</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var r in _receptions)
+                                        {
+                                            <tr class="aw-table__row--clickable" @onclick="() => OpenReceptionAsync(r.IdReception)">
+                                                <td>
+                                                    <span class="aw-table__title">@r.DateJour.ToString("dddd dd/MM/yyyy", CultureInfo.GetCultureInfo("fr-FR"))</span>
+                                                </td>
+                                                <td>
+                                                    <span class="aw-badge @(r.Statut == InventaireReceptionStatut.Cloture ? "aw-badge--brand" : "aw-badge--accent")">@r.StatutLabel</span>
+                                                </td>
+                                                <td><span class="aw-table__meta">@r.ResponsableLabel</span></td>
+                                                <td class="aw-table__num">@r.NbLignes</td>
+                                                <td class="aw-table__num">+ @CurrencyFormat.Cdf(r.MontantTotal, "N0")</td>
+                                                <td @onclick:stopPropagation="true">
+                                                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" title="Imprimer" @onclick="() => PrintReceptionAsync(r.IdReception)">
+                                                        <i class="bi bi-printer"></i>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="aw-table__meta">Aucune réception</p>
+                    }
+                </div>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (!_loading && _session is not null)
+        {
+            <div class="aw-dialog__footer">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="@(() => MudDialog.Close())">
+                    <i class="bi bi-x-lg"></i> Fermer
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="PrintSessionAsync">
+                    <i class="bi bi-printer"></i> Imprimer la situation
+                </button>
+            </div>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int SessionId { get; set; }
+
+    InventaireSessionDto? _session;
+    List<InventaireReceptionDto> _receptions = new();
+    List<InventaireVenteDto> _ventes = new();
+    bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _session = await InventaireService.GetSessionAsync(SessionId);
+        if (_session is not null)
+        {
+            _receptions = await InventaireService.GetReceptionsAsync(SessionId);
+            _ventes = await InventaireService.GetVentesAsync(SessionId);
+        }
+        _loading = false;
+    }
+
+    async Task OpenReceptionAsync(int receptionId)
+    {
+        var parameters = new DialogParameters<InventaireReceptionViewDialog>
+        {
+            { x => x.ReceptionId, receptionId }
+        };
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            NoHeader = true,
+            CloseOnEscapeKey = true
+        };
+        await DialogService.ShowAsync<InventaireReceptionViewDialog>("", parameters, options);
+    }
+
+    async Task PrintReceptionAsync(int receptionId)
+    {
+        await JS.InvokeVoidAsync("open", $"/stock/inventaire/reception/print/{receptionId}/true", "_blank");
+    }
+
+    async Task PrintSessionAsync()
+    {
+        await JS.InvokeVoidAsync("open", $"/stock/inventaire/session/print/{SessionId}/true", "_blank");
+    }
+}

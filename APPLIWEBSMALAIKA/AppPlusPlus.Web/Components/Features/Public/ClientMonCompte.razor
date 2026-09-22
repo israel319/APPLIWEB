@@ -1,0 +1,104 @@
+@page "/client/compte"
+@attribute [AllowAnonymous]
+@layout PublicLayout
+@rendermode PublicRenderMode.Instance
+@using System.Security.Claims
+@using AppPlusPlus.Application.Services.Clients
+@using AppPlusPlus.Domain.Entities.Clients
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ICustomerService CustomerService
+@inject NavigationManager Navigation
+
+<PageTitle>Mon compte — @AppSettings.AppName</PageTitle>
+
+<div class="landing-auth">
+    <div class="landing-auth-card landing-auth-card--profile">
+        <a href="/client/panier" class="landing-auth-back"><i class="bi bi-arrow-left me-1"></i>Retour au panier</a>
+        <div class="landing-auth-icon"><i class="bi bi-person-circle"></i></div>
+        <h1 class="landing-auth-title">Mon compte</h1>
+
+        @if (_loading)
+        {
+            <PublicPageSkeleton Variant="panel" />
+        }
+        else if (!_isClient)
+        {
+            <p class="landing-auth-sub">Connectez-vous pour consulter vos informations.</p>
+            <a href="@ConnexionUrl" class="landing-btn landing-btn--primary landing-btn--block">Se connecter</a>
+        }
+        else if (_customer is null)
+        {
+            <div class="alert alert-warning py-2">Compte introuvable. Reconnectez-vous.</div>
+            <a href="/auth/client/logout" class="landing-btn landing-btn--outline landing-btn--block">Changer de compte</a>
+        }
+        else
+        {
+            <p class="landing-auth-sub mb-3">Voici le numéro enregistré pour vos commandes en ligne.</p>
+
+            <dl class="landing-profile-list">
+                <div class="landing-profile-list__row">
+                    <dt>Nom</dt>
+                    <dd>@(_customer.CustomerName ?? "—")</dd>
+                </div>
+                <div class="landing-profile-list__row landing-profile-list__row--highlight">
+                    <dt><i class="bi bi-phone me-1"></i>Téléphone</dt>
+                    <dd class="landing-profile-list__phone">@(_customer.Contact ?? "—")</dd>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_customer.Adress))
+                {
+                    <div class="landing-profile-list__row">
+                        <dt>Adresse</dt>
+                        <dd>@_customer.Adress</dd>
+                    </div>
+                }
+            </dl>
+
+            <p class="landing-profile-hint">
+                <i class="bi bi-info-circle me-1"></i>
+                Ce numéro est utilisé pour vous identifier lors de la validation de commande.
+                S'il est incorrect, déconnectez-vous et reconnectez-vous avec le bon numéro, ou créez un nouveau compte.
+            </p>
+
+            <div class="d-grid gap-2 mt-3">
+                <a href="/client/panier" class="landing-btn landing-btn--solid">Retour au panier</a>
+                <a href="/auth/client/logout" class="landing-btn landing-btn--outline">Changer de compte</a>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    bool _loading = true;
+    bool _initialized;
+    bool _isClient;
+    Customer? _customer;
+
+    string ConnexionUrl => $"/auth/connexion?returnUrl={Uri.EscapeDataString("/client/compte")}";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _initialized)
+            return;
+
+        _initialized = true;
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = auth.User;
+            _isClient = AppFunctions.IsClientRole(user.FindFirst(ClaimTypes.Role)?.Value);
+
+            if (_isClient && int.TryParse(user.FindFirst(ClientAuth.CustomerIdClaim)?.Value, out var customerId))
+                _customer = await CustomerService.GetByIdAsync(customerId);
+        }
+        catch
+        {
+            _isClient = false;
+            _customer = null;
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+}

@@ -1,0 +1,1589 @@
+@page "/vente/facturation"
+@page "/vente/facturation/{IdFacture:int}"
+@rendermode InteractiveServer
+@using System.Globalization
+@using System.Text
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject MudBlazor.IDialogService Dialog
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+@inject INumberToWordsConverter NumberToWords
+@inject IClotureService ClotureService
+@inject IFinanceService FinanceService
+@inject IUserCurrencyPreferenceService UserCurrency
+@using AppPlusPlus.Application.Services.Finance
+@using AppPlusPlus.Domain.Entities.Finance
+@inject AppPlusPlus.Infrastructure.Services.StockMovementService StockMovement
+@using AppPlusPlus.Application.Services.Stock
+@using AppPlusPlus.Domain.Entities.Stock
+@using AppPlusPlus.Domain.Common
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+
+<PageTitle>Facturation</PageTitle>
+
+<div class="aw-page fact-shell">
+    <!-- ═══ Header ═══ -->
+    <header class="aw-object-head fact-header">
+        <div class="fact-header-left">
+            <button type="button" class="aw-btn aw-btn--ghost aw-btn--icon aw-btn--sm"
+                    @onclick="@(() => Navigation.NavigateTo(_backRoute))" title="Retour">
+                <i class="bi bi-arrow-left"></i>
+            </button>
+            <div class="aw-object-head__identity">
+                <p class="aw-object-head__eyebrow">@(_isEdit ? "Modifier" : "Nouvelle")</p>
+                <h1 class="aw-object-head__title">Facture @(_isEdit ? $"N°{_facture.Id}" : "")</h1>
+            </div>
+        </div>
+        <div class="fact-header-right" style="display:inline-flex;align-items:center;gap:0.45rem;">
+            @if (_isEdit)
+            {
+                <span class="aw-badge aw-badge--muted">FAC-@_facture.Id</span>
+            }
+            <span class="aw-badge aw-badge--accent">
+                @(DateTime.Today.ToString("dd MMM yyyy", new System.Globalization.CultureInfo("fr-FR")))
+            </span>
+        </div>
+    </header>
+
+    <!-- ═══ Two-column body ═══ -->
+    <div class="fact-body">
+
+        <!-- ── LEFT : Articles ── -->
+        <div class="fact-left">
+
+            <!-- Client bar -->
+            <div class="fact-client-bar">
+                @if (!string.IsNullOrEmpty(_facture.DescriptionName))
+                {
+                    <div class="fact-client-pill">
+                        <MudIcon Icon="@Icons.Material.Filled.Person" Style="font-size:15px;" />
+                        <span class="fact-client-pill-name">@_facture.DescriptionName</span>
+                        @if (!string.IsNullOrEmpty(_facture.Telephone))
+                        {
+                            <span class="fact-client-pill-phone">@_facture.Telephone</span>
+                        }
+                        <button class="fact-client-pill-x" @onclick="RetirerClient">
+                            <MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:14px;" />
+                        </button>
+                    </div>
+                }
+                else
+                {
+                    <div class="fact-client-search">
+                        <MudIcon Icon="@Icons.Material.Filled.PersonAdd" Style="font-size:16px;color:var(--rz-text-tertiary-color,#9ca3af);flex-shrink:0;" />
+                        <MudAutocomplete T="Customer" Value="_selectedCustomer"
+                                         ValueChanged="@OnClientSelected"
+                                         SearchFunc="@SearchCustomers"
+                                         ToStringFunc="@(c => c?.Contact ?? "")"
+                                         Placeholder="Rechercher un client…"
+                                         Style="flex:1;border:none;background:transparent;"
+                                         CoerceText="true" CoerceValue="true">
+                            <ItemTemplate>
+                                <div style="display:flex;align-items:center;gap:6px;">
+                                    <MudIcon Icon="@Icons.Material.Filled.Phone" Style="font-size:14px;opacity:.5;" />
+                                    <strong>@context.Contact</strong>
+                                    <span style="opacity:.5;font-size:12px;">— @context.CustomerName</span>
+                                </div>
+                            </ItemTemplate>
+                        </MudAutocomplete>
+                        @if (_canAddCustomer)
+                        {
+                        <button type="button" class="aw-btn aw-btn--primary aw-btn--icon aw-btn--sm" style="flex-shrink:0;"
+                                @onclick="OnAddCustomer" title="Nouveau client">
+                            <i class="bi bi-plus-lg"></i>
+                        </button>
+                        }
+                    </div>
+                }
+            </div>
+
+            @if (!SalesAllowed)
+            {
+                <div class="fact-period-block" role="alert">
+                    <i class="bi bi-calendar-x" aria-hidden="true"></i>
+                    <div>
+                        <strong>Vente impossible</strong>
+                        <p>@_periodeBlockMessage</p>
+                    </div>
+                </div>
+            }
+
+            <!-- Search bar -->
+            <div class="fact-search-bar">
+                <div class="fact-search-wrapper">
+                    <div class="fact-search-icon-wrap">
+                        <MudIcon Icon="@Icons.Material.Filled.Search" Style="font-size:18px;color:var(--rz-text-tertiary-color,#9ca3af);" />
+                    </div>
+                    <input type="text" @bind="_barcode" @bind:event="oninput" @bind:after="UpdateSearchResults"
+                           @onkeydown="OnSearchKeyDown" @onkeydown:preventDefault="@_preventEnterDefault"
+                           @ref="_barcodeInputRef" autocomplete="off" autofocus
+                           placeholder="@(SalesAllowed ? "Rechercher ou scanner un produit…" : "Activez une période pour vendre")"
+                           disabled="@(!SalesAllowed)"
+                           class="fact-search-input" />
+                    @if (_searchOpen)
+                    {
+                        <div class="fact-suggestions">
+                            @foreach (var p in _searchResults)
+                            {
+                                var product = p;
+                                <button class="fact-suggestion-item" @onmousedown="@(async () => await SelectProduct(product))">
+                                    <div class="fact-suggestion-left">
+                                        <div class="fact-suggestion-icon">
+                                            <MudIcon Icon="@Icons.Material.Filled.Inventory2" />
+                                        </div>
+                                        <div>
+                                            <div class="fact-suggestion-name">@p.Description</div>
+                                            <div class="fact-suggestion-meta">@p.IdArticle · Stock (@LocLabel): @GetStockAffiche(p.IdArticle).ToString("N0")</div>
+                                        </div>
+                                    </div>
+                                    <span class="fact-suggestion-price">@CurrencyFormat.FactWithEquiv(ArticlePriceToFc(p), IsUsd, _facture.Taux, "N0")</span>
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Articles list -->
+            <div class="fact-items-area">
+                @if (!_details.Any())
+                {
+                    <div class="fact-empty">
+                        <div class="fact-empty-circle">
+                            <MudIcon Icon="@Icons.Material.Filled.ShoppingBag" />
+                        </div>
+                        <p class="fact-empty-title">Aucun article ajouté</p>
+                        <p class="fact-empty-hint">Recherchez ou scannez un produit pour commencer</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="fact-items-list">
+                        @{ int rowIdx = 0; }
+                        @foreach (var item in _details)
+                        {
+                            rowIdx++;
+                            var current = item;
+                            <div class="fact-item-card">
+                                <div class="fact-item-main">
+                                    <span class="fact-item-idx">@rowIdx</span>
+                                    <div class="fact-item-info">
+                                        <p class="fact-item-name">@item.Description</p>
+                                        <p class="fact-item-meta">
+                                            <span class="aw-badge aw-badge--muted">@item.IdArticle</span>
+                                            @if (item.Localisationid.HasValue)
+                                            {
+                                                <span class="aw-badge aw-badge--muted" title="Localisation">@GetLocName(item.Localisationid)</span>
+                                            }
+                                            @{
+                                                var puDual = CurrencyFormat.FactLineDualParts(
+                                                    null, null, null, null,
+                                                    (decimal)item.Pu, 1, _selectedMoneyId, _facture.Taux);
+                                            }
+                                            <span>@puDual.Primary / unité · @puDual.Equivalent</span>
+                                            @if (!string.IsNullOrWhiteSpace(item.IdArticle))
+                                            {
+                                                var stockOk = item.Qte <= item.StockDispo + 0.0001;
+                                                <span class="aw-badge @(stockOk ? "aw-badge--muted" : "aw-badge--danger")" title="Quantité disponible en base (T_Stock)">
+                                                    Stock BD : @FormatQty(item.StockDispo)
+                                                </span>
+                                            }
+                                        </p>
+                                    </div>
+                                </div>
+                                <div class="fact-item-actions">
+                                    <div class="fact-qty">
+                                        <button class="fact-qty-btn" disabled="@(item.Qte <= MinQte)"
+                                                @onclick="@(async () => await ModifierQteAsync(current, -1))">
+                                            <MudIcon Icon="@Icons.Material.Filled.Remove" />
+                                        </button>
+                                        <input type="text"
+                                               class="fact-qty-input"
+                                               inputmode="decimal"
+                                               autocomplete="off"
+                                               value="@GetQtyDisplay(current)"
+                                               @oninput="e => OnQtyInput(current, e)"
+                                               @onkeydown="OnQtyKeyDown"
+                                               @onkeydown:preventDefault="@_preventQtyKey"
+                                               @onblur="@(async () => await OnQtyBlurAsync(current))" />
+                                        <button class="fact-qty-btn"
+                                                @onclick="@(async () => await ModifierQteAsync(current, 1))">
+                                            <MudIcon Icon="@Icons.Material.Filled.Add" />
+                                        </button>
+                                    </div>
+                                    @{
+                                        var lineDual = CurrencyFormat.FactLineDualParts(
+                                            item.Montant, item.MoneyId, item.Taux, item.MontantApresConversion,
+                                            (decimal)item.Pu, (decimal)item.Qte, _selectedMoneyId, _facture.Taux);
+                                    }
+                                    <div class="fact-item-total-block">
+                                        <span class="fact-item-total">@lineDual.Primary</span>
+                                        <span class="fact-item-total-equiv">@lineDual.Equivalent</span>
+                                    </div>
+                                    <button class="fact-del-btn" @onclick="@(() => Supprimer(current))">
+                                        <MudIcon Icon="@Icons.Material.Filled.Delete" />
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- ── RIGHT : Sidebar ── -->
+        <div class="fact-right">
+            <div class="fact-right-scroll">
+                <!-- Localisation + config -->
+                <div class="fact-sb-section">
+                    <label class="aw-field__label">Magasin</label>
+                    @if (_localisations.Count <= 1)
+                    {
+                        <div class="fact-loc-readonly">
+                            <i class="bi bi-geo-alt me-1"></i>@LocLabel
+                        </div>
+                    }
+                    else
+                    {
+                        <MudSelect T="int?" Value="_selectedLocalisation" ValueChanged="OnLocalisationChanged"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense"
+                                   Style="width:100%;" Required="true" RequiredError="Choisissez une localisation">
+                            @foreach (var loc in _localisations)
+                            {
+                                <MudSelectItem T="int?" Value="@loc.IdLocalisation">@loc.DescriptionLocalisation</MudSelectItem>
+                            }
+                        </MudSelect>
+                    }
+                    <div class="fact-sb-two-cols" style="margin-top:0.55rem;">
+                        <div class="aw-field">
+                            <label class="aw-field__label">Devise</label>
+                            <MudSelect Value="_selectedMoneyId" ValueChanged="@OnMoneyChanged" T="int"
+                                       Variant="Variant.Outlined" Margin="Margin.Dense" Style="width:100%;">
+                                @foreach (var m in _monnaies)
+                                {
+                                    <MudSelectItem T="int" Value="m.IdMonais">@m.DescriptionMonais</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </div>
+                        <div class="aw-field">
+                            <label class="aw-field__label">Paiement</label>
+                            <MudSelect @bind-Value="_modePaiement" T="string"
+                                       Variant="Variant.Outlined" Margin="Margin.Dense" Style="width:100%;">
+                                @foreach (var mode in _modesPaiement)
+                                {
+                                    <MudSelectItem T="string" Value="mode">@mode</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Reduction -->
+                <div class="fact-sb-section">
+                    <label class="aw-field__label">Réduction</label>
+                    <div class="fact-reduction-row">
+                        <MudSelect Value="_selectedReductionId" ValueChanged="@OnReductionDropdownChanged" T="int?"
+                                   Clearable="true" Placeholder="Choisir…" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                   Style="flex:1;min-width:0;">
+                            @foreach (var r in _reductions)
+                            {
+                                <MudSelectItem T="int?" Value="@((int?)r.Key)">@r.Value</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudNumericField Value="_facture.Reduction" T="decimal?" Min="0" Max="100" Placeholder="0"
+                                         Variant="Variant.Outlined" Margin="Margin.Dense" Style="width:4.5rem;"
+                                         ValueChanged="@((decimal? v) => { _facture.Reduction = v; _selectedReductionId = null; Recalculer(); })" />
+                        <span class="aw-badge aw-badge--muted">%</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sticky: totals + actions always visible -->
+            <div class="fact-right-sticky">
+                <div class="fact-sb-totals">
+                    <div class="fact-sb-row">
+                        <span>Articles</span>
+                        <span class="fact-sb-val">@_details.Count</span>
+                    </div>
+                    <div class="fact-sb-row">
+                        <span>Sous-total</span>
+                        <span class="fact-sb-val">@CurrencyFormat.Fact(_facture.Total ?? 0, IsUsd, _facture.Taux)</span>
+                    </div>
+                    @if ((_facture.Reduction ?? 0) > 0)
+                    {
+                        <div class="fact-sb-row">
+                            <span>Réduction (@((_facture.Reduction ?? 0).ToString("0.##"))%)</span>
+                            <span class="fact-sb-val" style="color:var(--aw-danger);">-@CurrencyFormat.Fact(ReductionMontant, IsUsd, _facture.Taux)</span>
+                        </div>
+                    }
+                    @if (HasRoundingAdjustment)
+                    {
+                        <div class="fact-sb-row fact-rounding-row">
+                            <span>Arrondi</span>
+                            <span class="fact-sb-val">@CurrencyFormat.Fact(RoundingAdjustment, IsUsd, _facture.Taux)</span>
+                        </div>
+                    }
+                    <div class="fact-sb-divider"></div>
+                    <div class="fact-sb-row fact-sb-net">
+                        <span>Net à payer</span>
+                        <span class="fact-net-amount">@CurrencyFormat.Fact(_facture.TotalApresReduction ?? 0, IsUsd, _facture.Taux)</span>
+                    </div>
+                    @if (_facture.Taux > 0)
+                    {
+                        <div class="fact-amount-equiv">
+                            Taux @_facture.Taux.ToString("N0")
+                            @if (!IsUsd)
+                            {
+                                <text> · USD @CurrencyFormat.Usd(CurrencyFormat.CdfStoredToUsd(_facture.TotalApresReduction ?? 0, _facture.Taux))</text>
+                            }
+                            else
+                            {
+                                <text> · FC @CurrencyFormat.Cdf(CurrencyFormat.NormalizeLegacyFactCdf(_facture.TotalApresReduction ?? 0, _facture.Taux), "N0")</text>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <div class="fact-sb-actions">
+                    <button type="button" class="aw-btn aw-btn--primary fact-sb-actions__primary"
+                            @onclick="@ImprimerFacture" disabled="@(_saving || !SalesAllowed || !_details.Any() || HasStockConflictForValidation)">
+                        <i class="bi bi-check-lg"></i> Valider
+                    </button>
+                    <button type="button" class="aw-btn aw-btn--ghost"
+                            @onclick="@Brouillon" disabled="@(_saving || !SalesAllowed)" title="Enregistrer en brouillon">
+                        <i class="bi bi-floppy"></i> Brouillon
+                    </button>
+                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--icon"
+                            @onclick="@Annuler" title="Annuler">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public int? IdFacture { get; set; }
+
+    bool _isEdit => IdFacture.HasValue;
+
+    // ── En-tête facture (T_Facts) ──
+    Fact _facture = new()
+    {
+        DescriptionName = "",
+        Date = DateOnly.FromDateTime(DateTime.Today),
+        Taux = 2800,
+        Reduction = 0,
+        Status = 0,
+        Type = 0,
+        DateSys = DateTime.Now,
+        User = "",
+        Cumputer = Environment.MachineName,
+    };
+    DateTime? _dateValue = DateTime.Today;
+    int? _selectedLocalisation;
+    bool _saving = false;
+    bool _scannerProcessing = false;
+
+    // ── Auth / Localisation filtering ──
+    string _currentLogin = "";
+    bool _isAdmin;
+    string _backRoute = "/vente";
+    bool _canAddCustomer;
+    PermissionSnapshot _perms = PermissionSnapshot.Empty;
+    List<int> _currentUserLocalisations = new();
+
+    // ── Suggestions produits (recherche temps réel) ──
+    bool _searchOpen;
+    IEnumerable<Article> _searchResults = Enumerable.Empty<Article>();
+
+    // ── Client (recherche par numéro) ──
+    List<Customer> _allCustomers = new();
+    Customer? _selectedCustomer;
+    int? _selectedCustomerId;
+
+    string _barcode = "";
+    string _modePaiement = "Cash";
+    List<string> _modesPaiement = new() { "Cash", "Carte", "Mobile Money", "Virement" };
+
+    // ── Devise (T_Moneys) ──
+    List<Money> _monnaies = new();
+    Dictionary<int, string?> _moneyById = new();
+    int _selectedMoneyId = CurrencyDefaults.MoneyIdCdf; // facture : défaut franc congolais
+    bool IsUsd => _monnaies.FirstOrDefault(m => m.IdMonais == _selectedMoneyId)?.DescriptionMonais == "USD";
+    bool IsArticleUsd(Article article) =>
+        CurrencyFormat.IsUsd(article.IdMonais, _moneyById)
+        || article.IdMonais == CurrencyDefaults.MoneyIdUsd;
+    decimal ArticlePriceToFc(Article article) =>
+        CurrencyFormat.ArticleToFc((decimal)article.Price, IsArticleUsd(article), _facture.Taux);
+    double NativePriceToPuFc(double nativePrice, int idMonais) =>
+        (double)CurrencyFormat.ArticleToFc((decimal)nativePrice, CurrencyFormat.IsUsd(idMonais, _moneyById), _facture.Taux);
+    /// <summary>Convertit un montant FC en montant affiché selon la devise sélectionnée.</summary>
+    decimal MontantAffiche(decimal montantFC) =>
+        IsUsd && _facture.Taux > 0
+            ? Math.Round(montantFC / _facture.Taux, 2)
+            : montantFC;
+    double MontantAfficheDouble(double montantFC) =>
+        IsUsd && _facture.Taux > 0
+            ? Math.Round(montantFC / (double)_facture.Taux, 2)
+            : montantFC;
+
+    List<KeyValuePair<int, string>> _types = new()
+    {
+        new(0, "Facture"),
+        new(1, "Proforma"),
+    };
+
+    // ── Données chargées depuis la BD ──
+    List<Localisation> _localisations = new();
+    Dictionary<string, decimal> _stockAtLocation = new();
+    List<Article> _catalogue = new();
+    string LocLabel => GetLocName(_selectedLocalisation);
+    List<KeyValuePair<int, string>> _reductions = new();
+    int? _selectedReductionId;
+
+    // ── Lignes de détail (T_Fact_Details) ──
+    List<FactDetailLine> _details = new();
+    ElementReference _barcodeInputRef;
+    bool _focusBarcodePending = true;
+    int _focusBarcodeDelayMs = 50;
+    bool _preventEnterDefault;
+    bool _preventQtyKey;
+
+    decimal ReductionMontant => (_facture.Total ?? 0) * (_facture.Reduction ?? 0) / 100m;
+    decimal NetApresReductionBrut => (_facture.Total ?? 0) - ReductionMontant;
+    decimal RoundingAdjustment => (_facture.TotalApresReduction ?? 0) - NetApresReductionBrut;
+    bool HasRoundingAdjustment => Math.Abs(RoundingAdjustment) > 0.001m;
+
+    const double MinQte = 0.001;
+
+    /// <summary>True si une ligne catalogue dépasse le stock lu en BD (T_Stock).</summary>
+    bool HasStockConflictForValidation =>
+        _details.Any(d => !string.IsNullOrWhiteSpace(d.IdArticle) && d.Qte > d.StockDispo + 0.0001);
+
+    Periode? _activePeriode;
+    string _periodeBlockMessage = "";
+    bool SalesAllowed => string.IsNullOrEmpty(_periodeBlockMessage);
+    readonly Dictionary<FactDetailLine, string> _qtyTexts = new();
+
+    void OnMoneyChanged(int moneyId)
+    {
+        _selectedMoneyId = moneyId;
+        Recalculer();
+    }
+
+    void OnReductionDropdownChanged(int? val)
+    {
+        _selectedReductionId = val;
+        if (_selectedReductionId.HasValue)
+        {
+            var item = _reductions.FirstOrDefault(r => r.Key == _selectedReductionId.Value);
+            // Parse the numeric value from the description like "10%"
+            var valeur = _reductionValues.GetValueOrDefault(_selectedReductionId.Value, 0);
+            _facture.Reduction = valeur;
+        }
+        else
+        {
+            _facture.Reduction = 0;
+        }
+        Recalculer();
+    }
+    Dictionary<int, int> _reductionValues = new();
+
+    async Task<IEnumerable<Customer>> SearchCustomers(string filter, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+            return Enumerable.Empty<Customer>();
+
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        return await ctx.Customers
+            .Where(c => c.Contact != null && c.Contact.Contains(filter))
+            .OrderBy(c => c.Contact)
+            .Take(20)
+            .ToListAsync(ct);
+    }
+
+    void OnClientSelected(Customer? customer)
+    {
+        _selectedCustomer = customer;
+        if (customer != null)
+        {
+            _selectedCustomerId = customer.CustomerId;
+            _facture.DescriptionName = customer.CustomerName ?? "";
+            _facture.Telephone = customer.Contact;
+            _facture.Email = customer.Email;
+            _facture.Adresse = customer.Adress;
+        }
+        else
+        {
+            _selectedCustomerId = null;
+            _facture.DescriptionName = "";
+            _facture.Telephone = null;
+            _facture.Email = null;
+            _facture.Adresse = null;
+        }
+    }
+
+    // ── Recherche produit temps réel ──
+    void UpdateSearchResults()
+    {
+        if (string.IsNullOrWhiteSpace(_barcode) || _barcode.Length < 2)
+        {
+            _searchOpen = false;
+            _searchResults = Enumerable.Empty<Article>();
+            return;
+        }
+        _searchResults = _catalogue
+            .Where(a => a.IdArticle.Contains(_barcode, StringComparison.OrdinalIgnoreCase) ||
+                        a.Description.Contains(_barcode, StringComparison.OrdinalIgnoreCase))
+            .Take(8);
+        _searchOpen = _searchResults.Any();
+    }
+
+    async Task OnSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            _preventEnterDefault = true;
+            _searchOpen = false;
+            var code = await TryReadBarcodeFromDomAsync();
+            if (!string.IsNullOrWhiteSpace(code))
+            {
+                _barcode = code;
+                await OnScanner(code);
+            }
+            _preventEnterDefault = false;
+        }
+        else if (e.Key == "Escape")
+        {
+            _searchOpen = false;
+        }
+    }
+
+    async Task SelectProduct(Article product)
+    {
+        _barcode = product.IdArticle;
+        _searchOpen = false;
+        await OnScanner();
+    }
+
+    void RetirerClient()
+    {
+        _selectedCustomerId = null;
+        _selectedCustomer = null;
+        _facture.DescriptionName = "";
+        _facture.Telephone = null;
+        _facture.Email = null;
+        _facture.Adresse = null;
+    }
+
+    void OnAddCustomer()
+    {
+        if (!_canAddCustomer) return;
+        Navigation.NavigateTo("/commandes/client/nouveau?returnUrl=/vente/facturation");
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+
+        // ── Résoudre l'utilisateur connecté ──
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = user.FindFirst("login")?.Value
+                ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+            _isAdmin = AppFunctions.Normalize(user.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+
+            if (!string.IsNullOrEmpty(_currentLogin))
+            {
+                _perms = await PermissionResolver.GetPermissionsAsync(_currentLogin);
+                _backRoute = _perms.HasHierarchicalGrants
+                    ? PermissionCatalog.TabHubRoute("vente", _perms.Grants)
+                    : "/vente";
+                _canAddCustomer = PermissionGate.DoAction(_perms, "commandes.clients.write",
+                    () => _isAdmin || _perms.CanWrite(AppFunctions.CommandesClients));
+            }
+
+            if (!_isAdmin && !string.IsNullOrEmpty(_currentLogin))
+            {
+                _currentUserLocalisations = await ctx.UserLocalisations
+                    .Where(ul => ul.UserId != null
+                        && ul.UserId.ToLower() == _currentLogin.ToLower()
+                        && ul.Activate == true
+                        && ul.LocalisationId.HasValue)
+                    .Select(ul => ul.LocalisationId!.Value)
+                    .ToListAsync();
+            }
+        }
+
+        _facture.User = _currentLogin;
+
+        await RefreshActivePeriodeAsync(ctx);
+
+        // Les clients sont chargés dynamiquement via SearchCustomers (recherche par numéro)
+        _allCustomers = await ctx.Customers.ToListAsync();
+
+        // Charger l'ID du client anonyme (IsPermanent = false, ou « Client Anonyme »)
+        var anon = _allCustomers.FirstOrDefault(c => c.IsPermanent == false)
+                ?? _allCustomers.FirstOrDefault(c => c.CustomerName == "Client Anonyme");
+        _anonymousCustomerId = anon?.CustomerId ?? 0;
+
+        // Charger les localisations (filtrées pour non-admin)
+        if (_isAdmin || !_currentUserLocalisations.Any())
+        {
+            _localisations = await ctx.Localisations.OrderBy(l => l.DescriptionLocalisation).ToListAsync();
+        }
+        else
+        {
+            _localisations = await ctx.Localisations
+                .Where(l => _currentUserLocalisations.Contains(l.IdLocalisation))
+                .OrderBy(l => l.DescriptionLocalisation)
+                .ToListAsync();
+        }
+
+        // Pré-sélectionner la localisation avec du stock (évite rupture fictive sur la 1ère loc alphabétique)
+        if (_localisations.Any() && !IdFacture.HasValue)
+        {
+            var locIds = _localisations.Select(l => l.IdLocalisation).ToList();
+            var bestLoc = await ctx.Stocks.AsNoTracking()
+                .Where(s => locIds.Contains(s.IdLocalisation) && s.Qte > 0)
+                .GroupBy(s => s.IdLocalisation)
+                .Select(g => new { LocId = g.Key, Total = g.Sum(s => s.Qte) })
+                .OrderByDescending(x => x.Total)
+                .FirstOrDefaultAsync();
+
+            if (bestLoc != null)
+                _selectedLocalisation = bestLoc.LocId;
+            else if (_currentUserLocalisations.Any())
+                _selectedLocalisation = _localisations
+                    .FirstOrDefault(l => _currentUserLocalisations.Contains(l.IdLocalisation))?.IdLocalisation
+                    ?? _localisations[0].IdLocalisation;
+            else
+                _selectedLocalisation = _localisations[0].IdLocalisation;
+        }
+
+        await RefreshStockCacheAsync();
+
+        // Charger les monnaies (devises)
+        _monnaies = await ctx.Moneys.OrderBy(m => m.IdMonais).ToListAsync();
+        _moneyById = _monnaies.ToDictionary(m => m.IdMonais, m => m.DescriptionMonais);
+
+        await UserCurrency.EnsureLoadedAsync();
+        if (!IdFacture.HasValue)
+            _selectedMoneyId = UserCurrency.PreferredMoneyId;
+
+        // Charger le catalogue d'articles (filtré par localisation pour non-admin)
+        if (_isAdmin || !_currentUserLocalisations.Any())
+        {
+            _catalogue = await ctx.Articles.OrderBy(a => a.Description).ToListAsync();
+        }
+        else
+        {
+            var articleIdsWithStock = await ctx.Stocks
+                .Where(s => _currentUserLocalisations.Contains(s.IdLocalisation))
+                .Select(s => s.IdArticle)
+                .Distinct()
+                .ToListAsync();
+
+            _catalogue = await ctx.Articles
+                .Where(a => articleIdsWithStock.Contains(a.IdArticle))
+                .OrderBy(a => a.Description)
+                .ToListAsync();
+        }
+
+        // Charger les réductions prédéfinies
+        var reductionList = await ctx.Reductions.OrderBy(r => r.Valeur).ToListAsync();
+        _reductions = reductionList.Select(r => new KeyValuePair<int, string>(r.IdReduction, $"{r.DescriptionReduction} ({r.Valeur}%)")).ToList();
+        _reductionValues = reductionList.ToDictionary(r => r.IdReduction, r => r.Valeur ?? 0);
+
+        // Charger le taux du jour (le plus récent)
+        var taux = await ctx.TauxChanges.OrderByDescending(t => t.Id).FirstOrDefaultAsync();
+        if (taux != null)
+            _facture.Taux = taux.TauxValue;
+
+        // ── Mode édition : charger la facture existante ──
+        if (IdFacture.HasValue)
+        {
+            var existing = await ctx.Facts
+                .Include(f => f.Details)
+                .FirstOrDefaultAsync(f => f.Id == IdFacture.Value);
+
+            if (existing != null && existing.Status == 0) // brouillon uniquement
+            {
+                _facture = existing;
+                _dateValue = existing.Date.ToDateTime(TimeOnly.MinValue);
+                _selectedMoneyId = existing.MoneyId ?? CurrencyDefaults.MoneyIdCdf;
+                _details = existing.Details.Select(d => new FactDetailLine
+                {
+                    IdArticle = d.IdArticle ?? "",
+                    Description = _catalogue.FirstOrDefault(a => a.IdArticle == d.IdArticle)?.Description
+                        ?? d.DescriptionLine ?? d.IdArticle ?? "",
+                    DescriptionLine = d.DescriptionLine,
+                    Pu = d.Pu ?? 0,
+                    Qte = d.Qte ?? 0,
+                    Localisationid = d.Localisationid,
+                    Montant = d.Montant,
+                    MoneyId = d.MoneyId,
+                    Taux = d.Taux,
+                    MontantApresConversion = d.MontantApresConversion,
+                }).ToList();
+
+                var draftLoc = _details.FirstOrDefault(d => d.Localisationid.HasValue)?.Localisationid;
+                if (draftLoc.HasValue && _localisations.Any(l => l.IdLocalisation == draftLoc.Value))
+                    _selectedLocalisation = draftLoc;
+            }
+            else
+            {
+                Snackbar.Add("Seuls les brouillons peuvent être modifiés.", Severity.Warning);
+                Navigation.NavigateTo(_backRoute);
+                return;
+            }
+        }
+
+        Recalculer();
+        SyncAllQtyTexts();
+    }
+
+    void SyncAllQtyTexts()
+    {
+        foreach (var d in _details)
+            SyncQtyText(d);
+    }
+
+    string GetLocName(int? locId) =>
+        locId.HasValue
+            ? _localisations.FirstOrDefault(l => l.IdLocalisation == locId.Value)?.DescriptionLocalisation ?? $"Loc. {locId}"
+            : "—";
+
+    decimal GetStockAffiche(string idArticle) =>
+        _stockAtLocation.GetValueOrDefault(idArticle, 0);
+
+    async Task OnLocalisationChanged(int? locId)
+    {
+        if (!locId.HasValue || locId == _selectedLocalisation) return;
+        _selectedLocalisation = locId;
+        await RefreshStockCacheAsync();
+        foreach (var d in _details)
+            d.StockDispo = (double)GetStockAffiche(d.IdArticle);
+        StateHasChanged();
+    }
+
+    async Task RefreshStockCacheAsync()
+    {
+        _stockAtLocation.Clear();
+        if (!_selectedLocalisation.HasValue) return;
+
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        var stocks = await ctx.Stocks.AsNoTracking()
+            .Where(s => s.IdLocalisation == _selectedLocalisation.Value)
+            .ToListAsync();
+
+        foreach (var s in stocks.Where(s => StockScope(s.IdLocalisation)))
+            _stockAtLocation[s.IdArticle] = s.Qte;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusBarcodePending) return;
+
+        _focusBarcodePending = false;
+        var delay = _focusBarcodeDelayMs;
+        _focusBarcodeDelayMs = 50;
+        if (delay > 0)
+            await Task.Delay(delay);
+
+        await FocusBarcodeInputAsync();
+    }
+
+    void RequestBarcodeFocus(int delayMs = 50)
+    {
+        _focusBarcodeDelayMs = delayMs;
+        _focusBarcodePending = true;
+        StateHasChanged();
+    }
+
+    async Task FocusBarcodeInputAsync()
+    {
+        try
+        {
+            await _barcodeInputRef.FocusAsync();
+            await JS.InvokeVoidAsync("eval", "document.querySelector('.fact-search-input')?.select?.()");
+        }
+        catch
+        {
+            // Ignore si le DOM n'est pas encore prêt
+        }
+    }
+
+    async Task<string> TryReadBarcodeFromDomAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("ensureAppliWebInterop");
+            var code = await JS.InvokeAsync<string>("barcodeScanner.readValue", _barcodeInputRef);
+            if (!string.IsNullOrWhiteSpace(code))
+                return code.Trim();
+        }
+        catch (JSException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        return _barcode?.Trim() ?? "";
+    }
+
+    void Recalculer()
+    {
+        foreach (var d in _details)
+        {
+            var snap = CurrencyFormat.ComputeMonetarySnapshot(
+                (decimal)d.Pu, (decimal)d.Qte, _selectedMoneyId, _facture.Taux, puStoredInCdf: true);
+            d.Montant = snap.Montant;
+            d.MoneyId = snap.MoneyId;
+            d.Taux = snap.Taux;
+            d.MontantApresConversion = snap.MontantApresConversion;
+        }
+
+        _facture.Total = (decimal)_details.Sum(d => d.Pu * d.Qte);
+        var brut = (_facture.Total ?? 0) - ReductionMontant;
+        _facture.TotalApresReduction = CurrencyFormat.RoundInvoicePayable(brut, IsUsd);
+        _facture.TotalReduit = (_facture.Total ?? 0) * ((_facture.Reduction ?? 0) / 100m);
+
+        _details = _details.ToList();
+    }
+
+    static string FormatQty(double q) => QtyFormat.InputValue(q);
+
+    string GetQtyDisplay(FactDetailLine line) =>
+        _qtyTexts.TryGetValue(line, out var text)
+            ? text
+            : FormatQty(line.Qte);
+
+    void SyncQtyText(FactDetailLine line) => _qtyTexts[line] = FormatQty(line.Qte);
+
+    static string FilterQtyInput(string raw)
+    {
+        var sb = new StringBuilder();
+        var hasSep = false;
+        foreach (var c in raw)
+        {
+            if (char.IsDigit(c))
+                sb.Append(c);
+            else if ((c == '.' || c == ',') && !hasSep)
+            {
+                sb.Append(c);
+                hasSep = true;
+            }
+        }
+        return sb.ToString();
+    }
+
+    static bool TryParseQty(string? raw, out double qte)
+    {
+        qte = 0;
+        if (string.IsNullOrWhiteSpace(raw)) return false;
+        var normalized = raw.Trim().Replace(',', '.');
+        return double.TryParse(normalized, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out qte)
+               && qte > 0;
+    }
+
+    void OnQtyInput(FactDetailLine line, ChangeEventArgs e)
+    {
+        _qtyTexts[line] = FilterQtyInput(e.Value?.ToString() ?? "");
+        StateHasChanged();
+    }
+
+    void OnQtyKeyDown(KeyboardEventArgs e) => _preventQtyKey = ShouldPreventQtyKey(e);
+
+    static bool ShouldPreventQtyKey(KeyboardEventArgs e)
+    {
+        if (e.CtrlKey || e.AltKey || e.MetaKey) return false;
+        return e.Key switch
+        {
+            "Backspace" or "Delete" or "Tab" or "Enter"
+                or "ArrowLeft" or "ArrowRight" or "ArrowUp" or "ArrowDown"
+                or "Home" or "End" => false,
+            _ when e.Key.Length == 1 && (char.IsDigit(e.Key[0]) || e.Key[0] is '.' or ',') => false,
+            _ => true
+        };
+    }
+
+    async Task OnQtyBlurAsync(FactDetailLine line)
+    {
+        var raw = _qtyTexts.GetValueOrDefault(line, FormatQty(line.Qte));
+        if (!TryParseQty(raw, out var qte))
+        {
+            SyncQtyText(line);
+            StateHasChanged();
+            return;
+        }
+
+        await SetQteAsync(line, qte);
+    }
+
+    async Task OnScanner(string? codeOverride = null)
+    {
+        if (_scannerProcessing) return;
+        _scannerProcessing = true;
+
+        try
+        {
+        if (!SalesAllowed)
+        {
+            Snackbar.Add(_periodeBlockMessage, Severity.Error);
+            return;
+        }
+
+        var code = (codeOverride ?? _barcode)?.Trim();
+        if (string.IsNullOrWhiteSpace(code)) return;
+        if (!_selectedLocalisation.HasValue)
+        {
+            Snackbar.Add("Sélectionnez une localisation de vente avant d'ajouter des articles.", Severity.Warning);
+            return;
+        }
+
+        // ── Résoudre l'article (catalogue local pour les infos, mais stock = BD) ──
+        var article = _catalogue.FirstOrDefault(a => a.IdArticle == code)
+                   ?? _catalogue.FirstOrDefault(a => a.Description.Contains(code, StringComparison.OrdinalIgnoreCase));
+
+        // Si pas trouvé → chercher par code-barres dans T_Stock (localisation courante en priorité)
+        if (article == null)
+        {
+            await using var ctxLookup = await DbFactory.CreateDbContextAsync();
+            var stock = await ctxLookup.Stocks
+                .FirstOrDefaultAsync(s => s.CodeBar == code && s.IdLocalisation == _selectedLocalisation.Value)
+                ?? await ctxLookup.Stocks.FirstOrDefaultAsync(s => s.CodeBar == code);
+            if (stock != null)
+                article = _catalogue.FirstOrDefault(a => a.IdArticle == stock.IdArticle);
+        }
+
+        if (article == null)
+        {
+            Snackbar.Add($"Code ou nom « {code} » non trouvé dans le catalogue.", Severity.Warning);
+            _barcode = "";
+            await FocusBarcodeInputAsync();
+            return;
+        }
+
+        // ── Vérifier le stock DIRECTEMENT EN BD (T_Stock par localisation) ──
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        var stockBd = await GetStockDisponibleAsync(ctx, article.IdArticle, _selectedLocalisation);
+
+        if (stockBd < MinQte)
+        {
+            var stockAutresLocs = await GetStockAutresLocalisationsMessageAsync(ctx, article.IdArticle);
+            Snackbar.Add(
+                $"« {article.Description} » : rupture à {LocLabel} (stock BD: {stockBd:N2}).{stockAutresLocs} Approvisionnez ou changez la localisation.",
+                Severity.Error);
+            _barcode = "";
+            await FocusBarcodeInputAsync();
+            return;
+        }
+
+        if (stockBd > 0 && _selectedLocalisation.HasValue)
+        {
+            var stockRec = await ctx.Stocks.AsNoTracking()
+                .FirstOrDefaultAsync(s => s.IdArticle == article.IdArticle && s.IdLocalisation == _selectedLocalisation.Value);
+            if (stockRec != null && stockRec.Seuil > 0 && stockBd <= stockRec.Seuil)
+            {
+                Snackbar.Add($"L'article « {article.Description} » a un stock bas ({stockBd:N0} restant, seuil: {stockRec.Seuil}).", Severity.Warning);
+            }
+        }
+
+        // ── Ajouter ou incrémenter (par article + localisation) ──
+        var existant = _details.FirstOrDefault(d =>
+            d.IdArticle == article.IdArticle && d.Localisationid == _selectedLocalisation);
+        if (existant != null)
+        {
+            // Si le stock restant est inférieur à 1, on autorise l'ajout fractionné.
+            // On cappe la quantité à la quantité disponible.
+            var cible = Math.Min(existant.Qte + 1, stockBd);
+            if (cible + 0.0000001 < MinQte)
+            {
+                Snackbar.Add($"Stock BD de « {article.Description} » : {stockBd:N2}. Impossible d'ajouter.", Severity.Error);
+                _barcode = "";
+                await FocusBarcodeInputAsync();
+                return;
+            }
+            existant.Qte = Math.Round(cible, 3, MidpointRounding.AwayFromZero);
+            existant.StockDispo = stockBd;
+            SyncQtyText(existant);
+        }
+        else
+        {
+            // Valeur initiale = 1 si stock suffisant, sinon quantité disponible (fraction).
+            var qteInit = Math.Min(1, stockBd);
+            if (qteInit < MinQte)
+            {
+                var stockAutresLocs = await GetStockAutresLocalisationsMessageAsync(ctx, article.IdArticle);
+                Snackbar.Add(
+                    $"« {article.Description} » : stock insuffisant à {LocLabel} (stock BD: {stockBd:N2}).{stockAutresLocs}",
+                    Severity.Error);
+                _barcode = "";
+                await FocusBarcodeInputAsync();
+                return;
+            }
+            var line = new FactDetailLine
+            {
+                IdArticle = article.IdArticle,
+                Description = article.Description,
+                Pu = NativePriceToPuFc(article.Price, article.IdMonais),
+                Qte = Math.Round(qteInit, 3, MidpointRounding.AwayFromZero),
+                StockDispo = stockBd,
+                Localisationid = _selectedLocalisation,
+            };
+            _details.Add(line);
+            SyncQtyText(line);
+        }
+        Recalculer();
+        _barcode = "";
+        await FocusBarcodeInputAsync();
+        }
+        finally
+        {
+            _scannerProcessing = false;
+        }
+    }
+
+    async Task ModifierQteAsync(FactDetailLine ligne, double delta)
+    {
+        await SetQteAsync(ligne, Math.Max(MinQte, ligne.Qte + delta));
+    }
+
+    async Task SetQteAsync(FactDetailLine ligne, double nouvelleQte)
+    {
+        nouvelleQte = Math.Round(nouvelleQte, 3, MidpointRounding.AwayFromZero);
+        if (nouvelleQte < MinQte)
+        {
+            SyncQtyText(ligne);
+            return;
+        }
+
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        var locId = ligne.Localisationid ?? _selectedLocalisation;
+        var stockBd = await GetStockDisponibleAsync(ctx, ligne.IdArticle, locId);
+        var autresLignes = _details
+            .Where(d => d.IdArticle == ligne.IdArticle && d != ligne && d.Localisationid == locId)
+            .Sum(d => d.Qte);
+
+        if (!string.IsNullOrWhiteSpace(ligne.IdArticle) && nouvelleQte + autresLignes > stockBd + 0.0001)
+        {
+            Snackbar.Add(
+                $"Stock BD de « {ligne.Description} » : {FormatQty(stockBd)}. Déjà {FormatQty(autresLignes)} sur d'autres lignes.",
+                Severity.Error);
+            SyncQtyText(ligne);
+            return;
+        }
+
+        ligne.Qte = nouvelleQte;
+        ligne.StockDispo = stockBd;
+        SyncQtyText(ligne);
+        Recalculer();
+    }
+
+    void Supprimer(FactDetailLine ligne)
+    {
+        _qtyTexts.Remove(ligne);
+        _details.Remove(ligne);
+        Recalculer();
+        RequestBarcodeFocus();
+    }
+
+    void Annuler()
+    {
+        Navigation.NavigateTo(_backRoute);
+    }
+
+    /// <summary>Enregistre la facture en brouillon (Status = 0) sans imprimer.</summary>
+    async Task Brouillon()
+    {
+        await Enregistrer(status: 0, stayOnPage: false);
+    }
+
+    /// <summary>Enregistre la facture (Status = 1) puis lance l'impression directe et reste sur la page.</summary>
+    async Task ImprimerFacture()
+    {
+        var id = await Enregistrer(status: 1, stayOnPage: true);
+        if (id > 0)
+        {
+            ResetFormForNewInvoice();
+            _ = TryPrintFactureAsync(id);
+        }
+    }
+
+    async Task TryPrintFactureAsync(int id)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("ensureAppliWebInterop");
+            await JS.InvokeVoidAsync("printFacture", id);
+        }
+        catch (JSException)
+        {
+            await JS.InvokeVoidAsync("open", $"/vente/facture/print/{id}/true", "_blank");
+        }
+        catch (InvalidOperationException)
+        {
+            await JS.InvokeVoidAsync("open", $"/vente/facture/print/{id}/true", "_blank");
+        }
+    }
+
+    void ResetFormForNewInvoice()
+    {
+        _facture = new Fact
+        {
+            DescriptionName = "",
+            Date = DateOnly.FromDateTime(DateTime.Today),
+            Taux = _facture.Taux, // Garder le taux actuel
+            Reduction = 0,
+            Status = 0,
+            Type = 0,
+            DateSys = DateTime.Now,
+            User = _currentLogin,
+            Cumputer = Environment.MachineName,
+        };
+        _details.Clear();
+        _selectedCustomer = null;
+        _selectedCustomerId = null;
+        _selectedReductionId = null;
+        _barcode = "";
+        Recalculer();
+        RequestBarcodeFocus(150);
+    }
+
+    /// <summary>ID du client anonyme en base (chargé au démarrage).</summary>
+    int _anonymousCustomerId;
+
+    /// <summary>Persiste la facture dans la BD et retourne l'Id créé/mis à jour (0 si échec).</summary>
+    async Task<int> Enregistrer(int status, bool stayOnPage = false)
+    {
+        // S'assurer qu'un code-barres déjà saisi est traité avant l'enregistrement
+        var pendingCode = await TryReadBarcodeFromDomAsync();
+        if (!_scannerProcessing && !string.IsNullOrWhiteSpace(pendingCode))
+        {
+            _searchOpen = false;
+            await OnScanner(pendingCode);
+        }
+
+        if (!_details.Any())
+        {
+            Snackbar.Add("Ajoutez au moins un article.", Severity.Warning);
+            RequestBarcodeFocus();
+            return 0;
+        }
+
+        Recalculer();
+
+        var hasStockLines = _details.Any(d => !string.IsNullOrWhiteSpace(d.IdArticle));
+        if (hasStockLines && !_selectedLocalisation.HasValue)
+        {
+            Snackbar.Add("Sélectionnez une localisation de vente.", Severity.Warning);
+            return 0;
+        }
+
+        if (status == 1 && hasStockLines)
+        {
+            if (!await RefreshAndVerifyStockFromDatabaseAsync())
+                return 0;
+        }
+
+        _saving = true;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            _facture.Status = status;
+            _facture.Date = DateOnly.FromDateTime(_dateValue ?? DateTime.Today);
+            _facture.DateSys = DateTime.Now;
+
+            // ── Devise et montant en lettres ──
+            _facture.MoneyId = _selectedMoneyId;
+            CurrencyFormat.ApplySnapshot(_facture, CurrencyFormat.FromFactStoredTotal(
+                _facture.TotalApresReduction ?? _facture.Total ?? 0, _selectedMoneyId, _facture.Taux));
+            _facture.MontantEnLettres = NumberToWords.Convert(
+                IsUsd
+                    ? MontantAffiche(_facture.TotalApresReduction ?? _facture.Total ?? 0)
+                    : (_facture.TotalApresReduction ?? _facture.Total ?? 0),
+                IsUsd ? "dollars" : "francs",
+                IsUsd ? "cents" : "centimes");
+
+            // ── Client : connu ou anonyme ──
+            if (_selectedCustomerId.HasValue)
+            {
+                _facture.CustomerId = _selectedCustomerId.Value;
+            }
+            else
+            {
+                _facture.CustomerId = _anonymousCustomerId;
+                if (string.IsNullOrWhiteSpace(_facture.DescriptionName))
+                    _facture.DescriptionName = "Client Anonyme";
+            }
+
+            // Construire la description articles pour T_Facts.Description_Article
+            _facture.DescriptionArticle = string.Join(" | ",
+                _details.Select(d => $"{d.Description} x{FormatQty(d.Qte)}"));
+
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+
+            // ── Vérification période active (T_Periodes en BD) ──
+            await RefreshActivePeriodeAsync(ctx);
+            if (!SalesAllowed)
+            {
+                Snackbar.Add(_periodeBlockMessage, Severity.Error);
+                return 0;
+            }
+
+            // ── Vérification clôture journalière ──
+            var hasClosed = await ClotureService.HasUserClosedTodayAsync(_currentLogin, _currentUserLocalisations);
+            if (hasClosed)
+            {
+                Snackbar.Add("Clôture en attente d'approbation admin. Aucune transaction n'est possible.", Severity.Error);
+                return 0;
+            }
+
+            // ══════ VÉRIFICATION CONCURRENTE DU STOCK DIRECTEMENT EN BD ══════
+            // Utilise une transaction SERIALIZABLE + verrouillage (UPDLOCK, ROWLOCK)
+            // pour garantir qu'aucune autre transaction ne modifie le stock entre la lecture et l'écriture.
+            using var transaction = await ctx.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            try
+            {
+                if (status == 1) // Vérification stock en BD (T_Stock) — factures validées uniquement
+                {
+                    var stockLines = _details
+                        .Where(d => !string.IsNullOrWhiteSpace(d.IdArticle))
+                        .Select(d =>
+                        {
+                            d.Localisationid ??= _selectedLocalisation;
+                            return d;
+                        })
+                        .Where(d => d.Localisationid.HasValue)
+                        .ToList();
+
+                    foreach (var d in stockLines)
+                    {
+                        var artDb = await ctx.Articles
+                            .FromSqlRaw("SELECT * FROM T_Arts WITH (UPDLOCK, ROWLOCK) WHERE Id_Article = {0}", d.IdArticle)
+                            .FirstOrDefaultAsync();
+
+                        if (artDb == null)
+                        {
+                            Snackbar.Add($"L'article « {d.Description} » n'existe plus dans la base de données.", Severity.Error);
+                            await transaction.RollbackAsync();
+                            return 0;
+                        }
+
+                        if (!StockScope(d.Localisationid!.Value))
+                        {
+                            Snackbar.Add($"Localisation non autorisée pour « {d.Description} ».", Severity.Error);
+                            await transaction.RollbackAsync();
+                            return 0;
+                        }
+                    }
+
+                    foreach (var group in stockLines.GroupBy(d => (d.IdArticle!, d.Localisationid!.Value)))
+                    {
+                        var demande = group.Sum(x => x.Qte);
+                        var stockBd = await GetStockDisponibleLockedAsync(ctx, group.Key.Item1, group.Key.Item2);
+                        if (demande > stockBd + 0.0001)
+                        {
+                            var label = group.First().Description;
+                            Snackbar.Add(
+                                $"Stock BD insuffisant pour « {label} » : disponible {FormatQty(stockBd)}, demandé {FormatQty(demande)}. Un autre poste a peut-être vendu entre-temps.",
+                                Severity.Error);
+                            await transaction.RollbackAsync();
+                            return 0;
+                        }
+                    }
+                }
+
+            if (_isEdit)
+            {
+                // Nettoyer les propriétés de navigation peuplées par EF fixup
+                // dans le DbContext initial pour éviter les conflits de tracking
+                _facture.Customer = null;
+                _facture.Commande = null;
+                _facture.Livraison = null;
+                _facture.Money = null;
+                _facture.Payments = new List<Payment>();
+                _facture.Details = new List<FactDetail>();
+
+                // Mode édition : mettre à jour la facture existante
+                ctx.Facts.Attach(_facture);
+                ctx.Entry(_facture).State = EntityState.Modified;
+
+                // Supprimer les anciens détails et recréer
+                var oldDetails = await ctx.FactDetails.Where(d => d.IdFact == _facture.Id).ToListAsync();
+                ctx.FactDetails.RemoveRange(oldDetails);
+
+                foreach (var d in _details)
+                {
+                    var detail = new FactDetail
+                    {
+                        IdFact = _facture.Id,
+                        IdArticle = string.IsNullOrWhiteSpace(d.IdArticle) ? null : d.IdArticle,
+                        DescriptionLine = d.DescriptionLine ?? (string.IsNullOrWhiteSpace(d.IdArticle) ? d.Description : null),
+                        Qte = d.Qte,
+                        Pu = d.Pu,
+                        Status = status >= 1 ? 1 : 0,
+                        Localisationid = d.Localisationid ?? _selectedLocalisation,
+                        Montant = d.Montant,
+                        MoneyId = d.MoneyId,
+                        Taux = d.Taux,
+                        MontantApresConversion = d.MontantApresConversion,
+                    };
+                    ctx.FactDetails.Add(detail);
+                }
+            }
+            else
+            {
+                // Mode création
+                _facture.Details = _details.Select(d => new FactDetail
+                {
+                    IdArticle = string.IsNullOrWhiteSpace(d.IdArticle) ? null : d.IdArticle,
+                    DescriptionLine = d.DescriptionLine ?? (string.IsNullOrWhiteSpace(d.IdArticle) ? d.Description : null),
+                    Qte = d.Qte,
+                    Pu = d.Pu,
+                    Status = status >= 1 ? 1 : 0,
+                    Localisationid = d.Localisationid ?? _selectedLocalisation,
+                    Montant = d.Montant,
+                    MoneyId = d.MoneyId,
+                    Taux = d.Taux,
+                    MontantApresConversion = d.MontantApresConversion,
+                }).ToList();
+
+                ctx.Facts.Add(_facture);
+            }
+
+            await ctx.SaveChangesAsync();
+
+            // ── Déduire T_Stock via moteur centralisé ──
+            if (status == 1)
+            {
+                if (_isEdit)
+                {
+                    await StockMovement.TryReverseDocumentAsync(
+                        ctx,
+                        TypesDocument.FACTURE,
+                        _facture.Id,
+                        _currentLogin,
+                        $"Correction facture N°{_facture.Id}",
+                        DateTime.Now);
+                }
+
+                var outboundLines = _details
+                    .Where(d => !string.IsNullOrWhiteSpace(d.IdArticle))
+                    .Select(d => new StockOutboundLineRequest(
+                        d.IdArticle,
+                        QuantityFormat.Normalize((decimal)d.Qte),
+                        d.Localisationid ?? _selectedLocalisation!.Value,
+                        PrixUnitaire: (decimal?)d.Pu))
+                    .ToList();
+
+                try
+                {
+                    await StockMovement.ApplyOutboundAsync(
+                        ctx,
+                        _facture.Id,
+                        TypesDocument.FACTURE,
+                        outboundLines,
+                        _currentLogin,
+                        $"FACT-{_facture.Id}",
+                        "Vente — déduction stock",
+                        DateTime.Now);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Snackbar.Add(ex.Message, Severity.Error);
+                    await transaction.RollbackAsync();
+                    return 0;
+                }
+
+                await ctx.SaveChangesAsync();
+            }
+
+            // ── Insertion automatique du paiement (uniquement facture validée) ──
+            if (status == 1)
+            {
+                var paySnap = CurrencyFormat.FromFactStoredTotal(
+                    _facture.TotalApresReduction ?? _facture.Total ?? 0, _selectedMoneyId, _facture.Taux);
+                var payment = new Payment
+                {
+                    IdFact  = _facture.Id,
+                    Date    = _facture.Date,
+                    Note    = $"Paiement auto — {_modePaiement}",
+                    DateSys = DateTime.Now,
+                    User    = _facture.User
+                };
+                CurrencyFormat.ApplySnapshot(payment, paySnap);
+                ctx.Payments.Add(payment);
+                _facture.Status = 2; // Payée
+                await ctx.SaveChangesAsync();
+            }
+
+            await transaction.CommitAsync();
+            } // fin du bloc try transaction
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+
+            Snackbar.Add($"N°{_facture.Id} — Client: {_facture.DescriptionName} — Total: {CurrencyFormat.Fact(_facture.TotalApresReduction ?? 0, IsUsd, _facture.Taux)}", Severity.Success);
+
+            if (!stayOnPage)
+                Navigation.NavigateTo(_backRoute);
+            return _facture.Id;
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add($"Impossible d'enregistrer la facture : {msg}", Severity.Error);
+            return 0;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    /// <summary>Relit T_Periodes : Activated + dates couvrant aujourd'hui.</summary>
+    async Task RefreshActivePeriodeAsync(AppDbContext? ctx = null)
+    {
+        _activePeriode = await FinanceService.GetActivePeriodeAsync();
+        if (_activePeriode != null)
+        {
+            _periodeBlockMessage = "";
+            return;
+        }
+
+        var dispose = ctx == null;
+        ctx ??= await DbFactory.CreateDbContextAsync();
+        try
+        {
+            var activated = await ctx.Periodes.AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Activated == true);
+            _periodeBlockMessage = activated == null
+                ? "Aucune période active n'est définie. Créez ou activez une période avant de vendre."
+                : "La date du jour n'est pas comprise dans la période active.";
+        }
+        finally
+        {
+            if (dispose)
+                await ctx.DisposeAsync();
+        }
+    }
+
+    /// <summary>Relit T_Stock en BD et refuse si une ligne catalogue dépasse le stock disponible.</summary>
+    async Task<bool> RefreshAndVerifyStockFromDatabaseAsync()
+    {
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        foreach (var d in _details.Where(x => !string.IsNullOrWhiteSpace(x.IdArticle)))
+        {
+            var loc = d.Localisationid ?? _selectedLocalisation;
+            d.StockDispo = await GetStockDisponibleAsync(ctx, d.IdArticle!, loc);
+        }
+
+        foreach (var group in _details
+                     .Where(x => !string.IsNullOrWhiteSpace(x.IdArticle))
+                     .GroupBy(x => (x.IdArticle!, x.Localisationid ?? _selectedLocalisation!.Value)))
+        {
+            var demande = group.Sum(x => x.Qte);
+            var stockBd = await GetStockDisponibleAsync(ctx, group.Key.Item1, group.Key.Item2);
+            if (demande > stockBd + 0.0001)
+            {
+                var label = group.First().Description;
+                Snackbar.Add(
+                    $"Stock BD insuffisant pour « {label} » à {GetLocName(group.Key.Item2)} : disponible {FormatQty(stockBd)}, demandé {FormatQty(demande)}.",
+                    Severity.Error);
+                await InvokeAsync(StateHasChanged);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool StockScope(int localisationId) =>
+        _isAdmin || !_currentUserLocalisations.Any() || _currentUserLocalisations.Contains(localisationId);
+
+    async Task<string> GetStockAutresLocalisationsMessageAsync(AppDbContext ctx, string idArticle)
+    {
+        var stocks = await ctx.Stocks.AsNoTracking()
+            .Where(s => s.IdArticle == idArticle && s.Qte > 0)
+            .ToListAsync();
+        stocks = stocks.Where(s => StockScope(s.IdLocalisation) && s.IdLocalisation != _selectedLocalisation).ToList();
+        if (!stocks.Any()) return " ";
+
+        var parts = stocks.Select(s =>
+        {
+            var nom = GetLocName(s.IdLocalisation);
+            return $"{nom}: {s.Qte:N0}";
+        });
+        return $" Stock disponible ailleurs : {string.Join(", ", parts)}. ";
+    }
+
+    async Task<double> GetStockDisponibleAsync(AppDbContext ctx, string idArticle, int? localisationId)
+    {
+        if (localisationId.HasValue)
+        {
+            if (!StockScope(localisationId.Value)) return 0;
+            var stock = await ctx.Stocks.AsNoTracking()
+                .FirstOrDefaultAsync(s => s.IdArticle == idArticle && s.IdLocalisation == localisationId.Value);
+            return stock != null ? (double)stock.Qte : 0;
+        }
+
+        var stocks = await ctx.Stocks.AsNoTracking()
+            .Where(s => s.IdArticle == idArticle)
+            .ToListAsync();
+        stocks = stocks.Where(s => StockScope(s.IdLocalisation)).ToList();
+        return stocks.Any() ? (double)stocks.Sum(s => s.Qte) : 0;
+    }
+
+    async Task<double> GetStockDisponibleLockedAsync(AppDbContext ctx, string idArticle, int? localisationId)
+    {
+        if (localisationId.HasValue)
+        {
+            if (!StockScope(localisationId.Value)) return 0;
+            var stock = await ctx.Stocks
+                .FromSqlRaw(
+                    "SELECT * FROM T_Stock WITH (UPDLOCK, ROWLOCK) WHERE Id_Article = {0} AND Id_Localisation = {1}",
+                    idArticle, localisationId.Value)
+                .FirstOrDefaultAsync();
+            return stock != null ? (double)stock.Qte : 0;
+        }
+
+        var stocks = await ctx.Stocks
+            .FromSqlRaw("SELECT * FROM T_Stock WITH (UPDLOCK, ROWLOCK) WHERE Id_Article = {0}", idArticle)
+            .ToListAsync();
+        stocks = stocks.Where(s => StockScope(s.IdLocalisation)).ToList();
+        return stocks.Any() ? (double)stocks.Sum(s => s.Qte) : 0;
+    }
+
+    /// <summary>Ligne de détail affichée dans le DataGrid — correspond aux champs de T_Fact_Details.</summary>
+    class FactDetailLine
+    {
+        public string IdArticle { get; set; } = "";
+        public string Description { get; set; } = "";
+        public string? DescriptionLine { get; set; }
+        public bool IsServiceLine => string.IsNullOrWhiteSpace(IdArticle);
+        public double Pu { get; set; }
+        public double Qte { get; set; } = 1;
+        public double StockDispo { get; set; }
+        public int? Localisationid { get; set; }
+        public decimal? Montant { get; set; }
+        public int? MoneyId { get; set; }
+        public decimal? Taux { get; set; }
+        public decimal? MontantApresConversion { get; set; }
+        public double Total => Pu * Qte;
+    }
+}

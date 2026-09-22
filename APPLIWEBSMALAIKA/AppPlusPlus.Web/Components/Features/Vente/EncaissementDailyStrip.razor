@@ -1,0 +1,150 @@
+@using AppPlusPlus.Application.DTOs.Vente
+@using AppPlusPlus.Application.Services.Vente
+@using AppPlusPlus.Application.Services.Shared
+@inject IFacturationService FacturationService
+@inject IUserCurrencyPreferenceService UserCurrency
+@implements IDisposable
+
+@if (!string.IsNullOrEmpty(Login) && _summary != null)
+{
+    var pending = PendingPaymentUsd ?? CurrentSaleUsd ?? 0;
+    var todayAfter = _summary.Today.CollectedUsd + pending;
+    var combinedAfter = _summary.CombinedUsd + pending;
+    var taux = DisplayTaux > 0 ? DisplayTaux : 2800m;
+    var usePrivateShell = Compact;
+
+    <div class="encaissement-daily @(Compact ? "encaissement-daily--compact" : null) @(usePrivateShell ? "encaissement-daily--private" : null)">
+        @if (usePrivateShell)
+        {
+            <div class="encaissement-daily-private-bar">
+                <span class="encaissement-daily-private-label" title="Montants visibles uniquement sur action de l'opérateur">
+                    <i class="bi bi-shield-lock" aria-hidden="true"></i>
+                    Suivi caisse · personnel
+                </span>
+                <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm encaissement-daily-private-toggle"
+                        @onclick="ToggleRevealAsync" aria-expanded="@_revealed">
+                    <i class="bi @(_revealed ? "bi-eye-slash" : "bi-eye")" aria-hidden="true"></i>
+                    @(_revealed ? "Masquer" : "Afficher")
+                </button>
+            </div>
+        }
+        else
+        {
+            <div class="encaissement-daily-title">
+                <i class="bi bi-wallet2" aria-hidden="true"></i>
+                Mes encaissements
+            </div>
+        }
+
+        @if (!usePrivateShell || _revealed)
+        {
+            <div class="encaissement-daily-grid @(usePrivateShell ? "encaissement-daily-grid--discreet" : null)">
+                <div class="encaissement-daily-cell">
+                    <span class="encaissement-daily-cell-label">Hier</span>
+                    <span class="encaissement-daily-cell-value">@UserCurrency.FormatDashboard(_summary.Yesterday.CollectedUsd, taux)</span>
+                </div>
+                <div class="encaissement-daily-cell encaissement-daily-cell--today">
+                    <span class="encaissement-daily-cell-label">Aujourd'hui</span>
+                    <span class="encaissement-daily-cell-value">@UserCurrency.FormatDashboard(_summary.Today.CollectedUsd, taux)</span>
+                </div>
+                <div class="encaissement-daily-cell">
+                    <span class="encaissement-daily-cell-label">Hier + auj.</span>
+                    <span class="encaissement-daily-cell-value">@UserCurrency.FormatDashboard(_summary.CombinedUsd, taux)</span>
+                </div>
+            </div>
+            @if (pending > 0)
+            {
+                <div class="encaissement-daily-projection">
+                    @if (PendingPaymentUsd is > 0)
+                    {
+                        <span>Ce paiement <strong>@UserCurrency.FormatDashboard(PendingPaymentUsd.Value, taux)</strong></span>
+                    }
+                    else
+                    {
+                        <span>Vente en cours <strong>@UserCurrency.FormatDashboard(CurrentSaleUsd!.Value, taux)</strong></span>
+                    }
+                    <span>→ Auj. <strong>@UserCurrency.FormatDashboard(todayAfter, taux)</strong></span>
+                    <span>· Total <strong>@UserCurrency.FormatDashboard(combinedAfter, taux)</strong></span>
+                </div>
+            }
+            @if (usePrivateShell && _revealed)
+            {
+                <p class="encaissement-daily-private-hint">Masquage automatique dans @PrivateRevealSeconds s · ne pas laisser visible en public.</p>
+            }
+        }
+    </div>
+}
+
+@code {
+  [Parameter] public string Login { get; set; } = "";
+  [Parameter] public bool Compact { get; set; }
+  [Parameter] public decimal DisplayTaux { get; set; }
+  [Parameter] public decimal? CurrentSaleUsd { get; set; }
+  [Parameter] public decimal? PendingPaymentUsd { get; set; }
+
+  const int PrivateRevealSeconds = 45;
+
+  OperatorSalesSummaryDto? _summary;
+  bool _revealed;
+  CancellationTokenSource? _autoHideCts;
+
+  protected override async Task OnInitializedAsync()
+  {
+    UserCurrency.OnChanged += OnCurrencyPreferenceChanged;
+    await UserCurrency.EnsureLoadedAsync();
+  }
+
+  protected override async Task OnParametersSetAsync()
+  {
+    if (!string.IsNullOrEmpty(Login))
+      await LoadAsync();
+  }
+
+  public async Task RefreshAsync() => await LoadAsync();
+
+  async Task LoadAsync()
+  {
+    _summary = await FacturationService.GetOperatorSalesSummaryAsync(Login);
+  }
+
+  async Task ToggleRevealAsync()
+  {
+    _revealed = !_revealed;
+    CancelAutoHide();
+    if (_revealed)
+      _ = ScheduleAutoHideAsync();
+    await InvokeAsync(StateHasChanged);
+  }
+
+  async Task ScheduleAutoHideAsync()
+  {
+    CancelAutoHide();
+    _autoHideCts = new CancellationTokenSource();
+    var token = _autoHideCts.Token;
+    try
+    {
+      await Task.Delay(TimeSpan.FromSeconds(PrivateRevealSeconds), token);
+      _revealed = false;
+      await InvokeAsync(StateHasChanged);
+    }
+    catch (TaskCanceledException)
+    {
+      // ignore
+    }
+  }
+
+  void CancelAutoHide()
+  {
+    _autoHideCts?.Cancel();
+    _autoHideCts?.Dispose();
+    _autoHideCts = null;
+  }
+
+  void OnCurrencyPreferenceChanged() => InvokeAsync(StateHasChanged);
+
+  public void Dispose()
+  {
+    CancelAutoHide();
+    UserCurrency.OnChanged -= OnCurrencyPreferenceChanged;
+  }
+}

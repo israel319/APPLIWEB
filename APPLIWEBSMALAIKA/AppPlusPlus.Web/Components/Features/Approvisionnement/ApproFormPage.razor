@@ -1,0 +1,580 @@
+@page "/stock/appro/nouveau"
+@page "/stock/appro/modifier/{ApproId:int}"
+@rendermode InteractiveServer
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using AppPlusPlus.Application.Services.Approvisionnement
+@using AppPlusPlus.Application.Services.Administration
+@using AppPlusPlus.Domain.Common
+@using AppPlusPlus.Web.Services
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject IApproPostingService ApproPosting
+@inject ICurrencyService Currency
+@inject UiNavigationGate NavGate
+
+<PageTitle>@AppSettings.AppName — @(_isEdit ? "Modifier l'approvisionnement" : "Nouvel approvisionnement")</PageTitle>
+
+<div class="aw-page appro-form-page">
+    <div class="aw-form aw-form--xl appro-form-card" @key="@_formKey">
+        <header class="aw-form__head appro-form-card__head">
+            <div>
+                <p class="aw-form__eyebrow">Approvisionnement</p>
+                <h1 class="aw-form__title">@(_isEdit ? "Modifier l'approvisionnement" : "Nouvel approvisionnement")</h1>
+            </div>
+            <div class="aw-form__actions">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="OnCancel" disabled="@_busy">
+                    <i class="bi bi-arrow-left"></i> Annuler
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="OnSave" disabled="@(_busy || !_lines.Any() || !_formReady)">
+                    <i class="bi bi-check-lg"></i> Enregistrer
+                </button>
+            </div>
+        </header>
+        <div class="aw-form__body">
+            @* ── En-tête Appro ── *@
+            <div class="aw-form__grid aw-form__grid--3">
+                <div class="aw-field">
+                    <label class="aw-field__label">Référence</label>
+                    <input type="text" class="aw-input" @bind="_appro.Reference" placeholder="REF-001" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Fournisseur</label>
+                    <SupplierAutocomplete Suppliers="@_suppliers"
+                                          Value="@_appro.SupplierId"
+                                          ValueChanged="@(v => _appro.SupplierId = v)"
+                                          Placeholder="Rechercher…" />
+                </div>
+                <div class="aw-field">
+                    <AwDateField Label="Date" @bind-Value="_dateValue" />
+                </div>
+            </div>
+
+            <div class="aw-form__grid" style="margin-top:0.9rem;">
+                <div class="aw-field">
+                    <label class="aw-field__label">Localisation</label>
+                    <MudSelect T="int?" @bind-Value="_selectedLocalisationId"
+                               Placeholder="Choisir"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                        @foreach (var loc in _localisations)
+                        {
+                            <MudSelectItem T="int?" Value="@loc.IdLocalisation">@loc.DescriptionLocalisation</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Commentaire</label>
+                    <input type="text" class="aw-input" @bind="_appro.Commentaire" placeholder="Optionnel" />
+                </div>
+            </div>
+
+            <hr style="margin:1rem 0;border:0;border-top:1px solid var(--aw-line);" />
+
+            @if (_latestTaux > 0)
+            {
+                <div class="alert alert-light border py-2 px-3 mb-2 small d-flex align-items-center gap-2">
+                    <i class="bi bi-currency-exchange text-primary"></i>
+                    <span>Taux : <strong>@_latestTaux.ToString("N0")</strong> FC/USD — saisissez PA/PV en <strong>FC</strong>, enregistrement en <strong>FC</strong>.</span>
+                </div>
+            }
+
+            @* ── Lignes d'articles ── *@
+            <div class="aw-dialog__section" style="margin-top:0.25rem;"><i class="bi bi-list-ul me-1"></i>Articles</div>
+
+            <div class="appro-article-picker mb-3 p-3" style="border:1px solid var(--aw-line);border-radius:8px;background:#f8fafc;">
+                <label class="aw-field__label" style="margin-bottom:0.35rem;">
+                    <i class="bi bi-search me-1"></i>
+                    @if (_replaceLine != null)
+                    {
+                        <span>Modifier l'article de la ligne</span>
+                    }
+                    else
+                    {
+                        <span>Rechercher un article à ajouter</span>
+                    }
+                </label>
+                <ArticleAutocomplete Articles="@_articles"
+                                     Value="@_pickerArticleId"
+                                     ValueChanged="OnPickerArticleSelected"
+                                     Placeholder="Tapez le nom ou le code…" />
+                <p class="aw-field__hint" style="margin-top:0.35rem;">
+                    La liste s'affiche <strong>en dessous</strong> — sélectionnez un article pour l'ajouter au tableau.
+                </p>
+                @if (_replaceLine != null)
+                {
+                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" style="margin-top:0.35rem;padding-left:0;" @onclick="CancelReplace">
+                        Annuler la modification
+                    </button>
+                }
+            </div>
+
+            <div class="appro-form-articles-slot">
+            @if (!_formReady)
+            {
+                <div class="aw-table-region" style="min-height:6rem;border-style:dashed;">
+                    <AwSkeleton Variant="table" Rows="3" />
+                </div>
+            }
+            else if (_lines.Any())
+            {
+                <div class="appro-article-lines mt-2">
+                    <div class="appro-lines-scroll">
+                        <table class="table table-sm table-bordered mb-0 appro-lines-table">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Article</th>
+                                    <th>Qté</th>
+                                    <th>Exp.</th>
+                                    <th>PA <small class="text-muted d-block">FC</small></th>
+                                    <th>PV <small class="text-muted d-block">FC</small></th>
+                                    <th>Bén.</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var line in _lines)
+                                {
+                                    var artDesc = _articles.FirstOrDefault(a => a.IdArticle == line.IdArticle)?.Description;
+                                    <tr class="appro-line-row">
+                                        <td class="appro-lines-table__article" data-label="Article">
+                                            <div class="lh-sm">
+                                                <div class="fw-medium">@(artDesc ?? line.IdArticle)</div>
+                                                @if (!string.IsNullOrWhiteSpace(line.IdArticle) && artDesc != null)
+                                                {
+                                                    <small class="text-muted">@line.IdArticle</small>
+                                                }
+                                            </div>
+                                            @if (!string.IsNullOrWhiteSpace(line.IdArticle))
+                                            {
+                                                <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" style="padding-left:0;"
+                                                        @onclick="() => StartReplace(line)">
+                                                    <i class="bi bi-pencil"></i> Changer
+                                                </button>
+                                            }
+                                        </td>
+                                        <td data-label="Qté">
+                                            <MudNumericField @bind-Value="line.Qte" T="decimal" Min="1"
+                                                             Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                             Class="appro-lines-table__num-field" />
+                                        </td>
+                                        <td data-label="Exp.">
+                                            <input type="date" class="aw-input aw-input--table aw-input--date appro-lines-table__date"
+                                                   @bind="line.DateExpiration" />
+                                        </td>
+                                        <td data-label="PA (FC)">
+                                            <ApproPriceInput FcValue="@line.PA"
+                                                             FcValueChanged="@(v => { line.PA = v; StateHasChanged(); })"
+                                                             Taux="@_latestTaux" />
+                                        </td>
+                                        <td data-label="PV (FC)">
+                                            <ApproPriceInput FcValue="@line.PV"
+                                                             FcValueChanged="@(v => { line.PV = v; StateHasChanged(); })"
+                                                             Taux="@_latestTaux" />
+                                        </td>
+                                        <td class="appro-lines-table__ben" data-label="Bén.">
+                                            @if (line.PA.HasValue && line.PV.HasValue)
+                                            {
+                                                var ben = (line.PV.Value - line.PA.Value) * line.Qte;
+                                                <ApproMoneyCell Amount="ben" Taux="_latestTaux" Format="N2" />
+                                            }
+                                        </td>
+                                        <td class="appro-lines-table__actions" data-label="">
+                                            <button type="button" class="aw-btn aw-btn--danger aw-btn--icon aw-btn--sm" @onclick="() => RemoveLine(line)">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="appro-form-totals mt-2">
+                    <span class="fw-bold">Total articles: @_lines.Count</span>
+                    <span class="fw-bold">Qté totale: @_lines.Sum(l => l.Qte).ToString("N0")</span>
+                    @if (_lines.All(l => l.PA.HasValue && l.PV.HasValue))
+                    {
+                        var totalBenFc = _lines.Sum(l => (l.PV!.Value - l.PA!.Value) * l.Qte);
+                        <span class="fw-bold @(totalBenFc >= 0 ? "text-success" : "text-danger")">Bénéfice total : @Currency.FormatStoredFc(totalBenFc, _latestTaux, "N2")</span>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="alert alert-info mb-0 mt-2">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Utilisez la barre de recherche ci-dessus pour ajouter des articles à cet approvisionnement.
+                </div>
+            }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public int? ApproId { get; set; }
+    [SupplyParameterFromQuery] public string? PreselectedArticleId { get; set; }
+    [SupplyParameterFromQuery] public int? PreselectedLocalisationId { get; set; }
+
+    bool _isEdit;
+    bool _busy;
+    bool _formReady;
+    bool _referenceLoaded;
+    int _loadGen;
+    string _formKey = "new";
+    string? _loadedFormKey;
+    Appro _appro = new();
+    DateTime? _dateValue = DateTime.Today;
+    int? _selectedLocalisationId;
+
+    List<Article> _articles = new();
+    List<Supplier> _suppliers = new();
+    List<Localisation> _localisations = new();
+    List<ApproDetailLine> _lines = new();
+    Dictionary<int, string?> _moneyById = new();
+    decimal _latestTaux;
+    string _currentLogin = "";
+    string _backRoute = "/stock";
+    PermissionSnapshot _perms = PermissionSnapshot.Empty;
+    string? _pickerArticleId;
+    ApproDetailLine? _replaceLine;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var formKey = ApproId?.ToString() ?? "new";
+        if (string.Equals(_loadedFormKey, formKey, StringComparison.Ordinal))
+            return;
+
+        var gen = ++_loadGen;
+        _formKey = formKey;
+        _formReady = false;
+
+        try
+        {
+            if (!ApproId.HasValue)
+            {
+                await LoadApproDataAsync();
+                if (gen == _loadGen)
+                {
+                    _formReady = true;
+                    _loadedFormKey = formKey;
+                }
+            }
+
+            await EnsureReferenceDataAsync();
+            if (gen != _loadGen) return;
+
+            if (ApproId.HasValue)
+                await LoadApproDataAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Impossible de charger le formulaire : {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            if (gen == _loadGen)
+            {
+                _loadedFormKey = formKey;
+                _formReady = true;
+            }
+        }
+    }
+
+    async Task EnsureReferenceDataAsync()
+    {
+        if (_referenceLoaded) return;
+
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+            var isAdmin = AppFunctions.Normalize(authUser.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+            var perms = await PermissionResolver.GetPermissionsAsync(_currentLogin);
+            _perms = perms;
+            _backRoute = perms.HasHierarchicalGrants
+                ? PermissionCatalog.TabHubRoute("articles", perms.Grants)
+                : "/stock";
+            if (!PermissionGate.DoAction(perms, "articles.approvisionnement.write",
+                    () => isAdmin || perms.CanWrite(AppFunctions.Approvisionnement)))
+            {
+                Navigation.NavigateTo(perms.HomeRoute());
+                return;
+            }
+        }
+
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        _articles = await ctx.Articles.OrderBy(a => a.Description).ToListAsync();
+        _suppliers = await ctx.Suppliers.OrderBy(s => s.SupplierName).ToListAsync();
+        _localisations = await ctx.Localisations.OrderBy(l => l.DescriptionLocalisation).ToListAsync();
+        _moneyById = await ctx.Moneys.ToDictionaryAsync(m => m.IdMonais, m => m.DescriptionMonais);
+        _latestTaux = await Currency.GetLatestTauxAsync();
+        _referenceLoaded = true;
+    }
+
+    async Task LoadApproDataAsync()
+    {
+        _lines.Clear();
+        _replaceLine = null;
+        _pickerArticleId = null;
+        _isEdit = false;
+        _appro = new Appro();
+        _dateValue = DateTime.Today;
+        _selectedLocalisationId = null;
+
+        if (ApproId.HasValue)
+        {
+            _isEdit = true;
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+            var existing = await ctx.Appros
+                .Include(a => a.Details)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(a => a.Id == ApproId.Value);
+
+            if (existing == null)
+            {
+                Snackbar.Add("Approvisionnement introuvable.", Severity.Warning);
+                Navigation.NavigateTo(_backRoute);
+                return;
+            }
+
+            if (existing.StatusId == ApproStatus.Cancelled)
+            {
+                Snackbar.Add("Cet approvisionnement est annulé et ne peut plus être modifié.", Severity.Warning);
+                Navigation.NavigateTo(_backRoute);
+                return;
+            }
+
+            _appro = existing;
+            _dateValue = _appro.Date.ToDateTime(TimeOnly.MinValue);
+            _selectedLocalisationId = _appro.LocalisationId;
+            if (_appro.Taux is > 0)
+                _latestTaux = _appro.Taux.Value;
+
+            var details = existing.Details?.OrderBy(d => d.Id).ToList() ?? new List<ApproDetail>();
+            if (details.Count > 0)
+            {
+                foreach (var detail in details)
+                {
+                    var rowTaux = detail.Taux ?? _appro.Taux ?? _latestTaux;
+                    _lines.Add(new ApproDetailLine
+                    {
+                        Id = detail.Id,
+                        IdArticle = detail.IdArticle,
+                        Qte = detail.Qte > 0 ? detail.Qte : 1,
+                        PA = Currency.NormalizeApproPriceFromStorage(detail.PA, rowTaux, detail.MoneyId),
+                        PV = Currency.NormalizeApproPriceFromStorage(detail.PV, rowTaux, detail.MoneyId),
+                        DateExpiration = detail.DateExpiration,
+                    });
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(existing.IdArticle))
+            {
+                var rowTaux = existing.Taux ?? _latestTaux;
+                _lines.Add(new ApproDetailLine
+                {
+                    IdArticle = existing.IdArticle,
+                    Qte = existing.Qte > 0 ? existing.Qte : 1,
+                    PA = Currency.NormalizeApproPriceFromStorage(existing.PA, rowTaux, existing.MoneyId),
+                    PV = Currency.NormalizeApproPriceFromStorage(existing.PV, rowTaux, existing.MoneyId),
+                });
+            }
+        }
+        else
+        {
+            if (PreselectedLocalisationId.HasValue)
+                _selectedLocalisationId = PreselectedLocalisationId;
+
+            if (!string.IsNullOrEmpty(PreselectedArticleId))
+            {
+                var art = _articles.FirstOrDefault(a => a.IdArticle == PreselectedArticleId);
+                var isArtUsd = art != null && CurrencyFormat.IsUsd(art.IdMonais, _moneyById);
+                var pvFc = art != null
+                    ? CurrencyFormat.ArticleToFc((decimal)art.Price, isArtUsd, _latestTaux)
+                    : (decimal?)null;
+                _lines.Add(new ApproDetailLine
+                {
+                    IdArticle = PreselectedArticleId,
+                    Qte = 1,
+                    PV = pvFc,
+                });
+            }
+        }
+    }
+
+    void OnCancel()
+    {
+        if (_busy || NavGate.IsLocked) return;
+        Navigation.NavigateTo(_backRoute);
+    }
+
+    void ApplyArticleToLine(ApproDetailLine line, Article? art, string idArticle)
+    {
+        line.IdArticle = idArticle;
+        if (art != null)
+        {
+            var isArtUsd = CurrencyFormat.IsUsd(art.IdMonais, _moneyById);
+            line.PV = CurrencyFormat.ArticleToFc((decimal)art.Price, isArtUsd, _latestTaux);
+        }
+        else
+        {
+            line.PV = null;
+        }
+    }
+
+    Article? ResolveArticle(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return _articles.FirstOrDefault(a => a.IdArticle == value)
+            ?? _articles.FirstOrDefault(a => a.Description != null
+                && a.Description.Equals(value.Trim(), StringComparison.OrdinalIgnoreCase));
+    }
+
+    async Task OnPickerArticleSelected(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            _pickerArticleId = null;
+            return;
+        }
+
+        var art = ResolveArticle(value);
+        var idArticle = art?.IdArticle ?? value.Trim();
+
+        if (_replaceLine != null)
+        {
+            ApplyArticleToLine(_replaceLine, art, idArticle);
+            _replaceLine = null;
+        }
+        else
+        {
+            var existing = _lines.FirstOrDefault(l => l.IdArticle == idArticle);
+            if (existing != null)
+            {
+                existing.Qte += 1;
+            }
+            else
+            {
+                var line = new ApproDetailLine { Qte = 1 };
+                ApplyArticleToLine(line, art, idArticle);
+                _lines.Add(line);
+            }
+        }
+
+        _pickerArticleId = null;
+        StateHasChanged();
+        await Task.CompletedTask;
+    }
+
+    void StartReplace(ApproDetailLine line)
+    {
+        _replaceLine = line;
+        _pickerArticleId = line.IdArticle;
+    }
+
+    void CancelReplace()
+    {
+        _replaceLine = null;
+        _pickerArticleId = null;
+    }
+
+    void RemoveLine(ApproDetailLine line)
+    {
+        _lines.Remove(line);
+    }
+
+    async Task OnSave()
+    {
+        if (_busy || !_formReady || NavGate.IsLocked) return;
+        if (!NavGate.TryEnter()) return;
+        _busy = true;
+
+        try
+        {
+            if (!_selectedLocalisationId.HasValue)
+            {
+                Snackbar.Add("Sélectionnez une localisation", Severity.Warning);
+                return;
+            }
+            if (!_lines.Any())
+            {
+                Snackbar.Add("Ajoutez au moins un article", Severity.Warning);
+                return;
+            }
+            if (_lines.Any(l => string.IsNullOrEmpty(l.IdArticle)))
+            {
+                Snackbar.Add("Tous les articles doivent être sélectionnés", Severity.Warning);
+                return;
+            }
+            if (_lines.Any(l => l.Qte <= 0))
+            {
+                Snackbar.Add("Les quantités doivent être > 0", Severity.Warning);
+                return;
+            }
+            if (_lines.Any(l => !l.PA.HasValue))
+            {
+                Snackbar.Add("Le prix d'achat (PA) est obligatoire pour tous les articles", Severity.Warning);
+                return;
+            }
+            if (_lines.Any(l => l.PA.HasValue && l.PV.HasValue && l.PA.Value > l.PV.Value))
+            {
+                Snackbar.Add("Le prix d'achat ne peut pas être supérieur au prix de vente (perte interdite)", Severity.Error);
+                return;
+            }
+
+            var today = DateOnly.FromDateTime(_dateValue ?? DateTime.Today);
+            var request = new DirectApproSaveRequest
+            {
+                ApproId = ApproId,
+                Reference = _appro.Reference,
+                SupplierId = _appro.SupplierId,
+                Date = today,
+                LocalisationId = _selectedLocalisationId!.Value,
+                Commentaire = _appro.Commentaire,
+                UserLogin = _currentLogin,
+                Taux = _latestTaux,
+                Lines = _lines.Select(l => new ApproLineInput
+                {
+                    IdArticle = l.IdArticle,
+                    Qte = l.Qte,
+                    PA = l.PA,
+                    PV = l.PV,
+                    DateExpiration = l.DateExpiration
+                }).ToList()
+            };
+
+            await ApproPosting.SaveDirectApproAsync(request);
+            Snackbar.Add($"Approvisionnement enregistré ({_lines.Count} article(s))", Severity.Success);
+            Navigation.NavigateTo(_backRoute);
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(msg, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+            NavGate.Exit();
+        }
+    }
+
+    class ApproDetailLine
+    {
+        public int Id { get; set; }
+        public string IdArticle { get; set; } = "";
+        public decimal Qte { get; set; }
+        public decimal? PA { get; set; }
+        public decimal? PV { get; set; }
+        public DateOnly? DateExpiration { get; set; }
+    }
+}

@@ -1,0 +1,323 @@
+@* ──────────────────────────────────────────────────────────────
+   Dialog : Créer une livraison à partir d'une commande.
+   Affiche la liste des articles commandés sous forme de checklist.
+   L'utilisateur coche ce qu'il livre et ajuste les quantités.
+   ────────────────────────────────────────────────────────────── *@
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using AppPlusPlus.Application.Services.Commandes
+@using AppPlusPlus.Application.Services.Stock
+@using AppPlusPlus.Domain.Common
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ILivraisonPostingService LivraisonPosting
+@inject IStockAvailabilityService StockAvailability
+
+<MudDialog>
+    <DialogContent>
+        @if (_commande == null)
+        {
+            <div class="aw-dialog">
+                <div class="aw-dialog__body">
+                    <AwSkeleton Variant="table" Rows="4" />
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="aw-dialog">
+                <header class="aw-dialog__head">
+                    <div class="aw-dialog__title-wrap">
+                        <i class="bi bi-truck" aria-hidden="true"></i>
+                        <h2 class="aw-dialog__title">Livraison — Commande N° @_commande.CommandeId</h2>
+                    </div>
+                </header>
+                <div class="aw-dialog__body">
+                    <div class="aw-dialog__meta" style="margin-bottom:0.85rem;">
+                        <div>
+                            <span class="aw-dialog__meta-label">Client</span>
+                            <span class="aw-dialog__meta-value">@(_commande.Customer?.CustomerName ?? "Client")</span>
+                        </div>
+                    </div>
+
+                    <div class="aw-form__grid" style="margin-bottom:0.85rem;">
+                        <div class="aw-field">
+                            <label class="aw-field__label">Localisation (magasin)</label>
+                            @if (_localisations.Count <= 1)
+                            {
+                                <div class="aw-input" style="display:flex;align-items:center;gap:0.35rem;background:var(--aw-surface-muted, #f5f5f5);">
+                                    <i class="bi bi-geo-alt" aria-hidden="true"></i>
+                                    <span>@LocLabel</span>
+                                </div>
+                            }
+                            else
+                            {
+                                <MudSelect T="int?" Value="_selectedLocalisationId"
+                                           ValueChanged="OnLocalisationChanged"
+                                           Placeholder="Choisir un magasin…"
+                                           Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                                           Required="true">
+                                    @foreach (var loc in _localisations)
+                                    {
+                                        <MudSelectItem T="int?" Value="@loc.IdLocalisation">@loc.DescriptionLocalisation</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            }
+                        </div>
+                        <div class="aw-field">
+                            <label class="aw-field__label">Porteur (livreur)</label>
+                            <input type="text" class="aw-input" @bind="_porteur" placeholder="Nom du livreur…" />
+                        </div>
+                    </div>
+
+                    <p class="aw-field__hint" style="margin-bottom:0.55rem;">
+                        Cochez les articles à livrer et ajustez la quantité si nécessaire.
+                    </p>
+
+                    <div class="aw-table-region">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:2.5rem;"></th>
+                                        <th>Article</th>
+                                        <th class="aw-table__num">Commandé</th>
+                                        <th class="aw-table__num">Déjà livré</th>
+                                        <th class="aw-table__num">Stock</th>
+                                        <th class="aw-table__num">À livrer</th>
+                                        <th class="aw-table__num">P.U.</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var line in _lines)
+                                    {
+                                        <tr style="cursor:default;">
+                                            <td>
+                                                <MudCheckBox @bind-Value="line.Selected" T="bool" Dense="true" />
+                                            </td>
+                                            <td><span class="aw-table__title">@(line.ArticleDesc ?? line.ArticleId ?? "—")</span></td>
+                                            <td class="aw-table__num">@((line.QteCommande ?? 0).ToString("N0"))</td>
+                                            <td class="aw-table__num">@line.QteLivree.ToString("N0")</td>
+                                            <td class="aw-table__num">
+                                                <span class="aw-badge @(line.StockDispo > 0 ? "aw-badge--brand" : "aw-badge--danger")">
+                                                    @QuantityFormat.Display(line.StockDispo)
+                                                </span>
+                                            </td>
+                                            <td class="aw-table__num">
+                                                <MudNumericField @bind-Value="line.QteLivraison" T="decimal" Min="0"
+                                                                 Max="@Math.Min(line.QteRestante, line.StockDispo)"
+                                                                 Variant="Variant.Outlined"
+                                                                 Margin="Margin.Dense" Style="width:80px;" />
+                                            </td>
+                                            <td class="aw-table__num">@UserCurrency.FormatBusiness(line.Pu ?? 0)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <p class="aw-table__meta" style="margin-top:0.55rem;">
+                        <strong>@_lines.Count(l => l.Selected)</strong> article(s) sélectionné(s)
+                    </p>
+                </div>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;">
+            <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                <i class="bi bi-x-lg"></i> Annuler
+            </button>
+            <button type="button" class="aw-btn aw-btn--primary" @onclick="OnSave"
+                    disabled="@(!_lines.Any(l => l.Selected && l.QteLivraison > 0))">
+                <i class="bi bi-truck"></i> Créer la livraison
+            </button>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int CommandeId { get; set; }
+
+    Commande? _commande;
+    string? _porteur;
+    List<CheckLine> _lines = new();
+    List<Localisation> _localisations = new();
+    List<int> _currentUserLocalisations = new();
+    string _currentLogin = "";
+    int? _selectedLocalisationId;
+
+    string LocLabel => _localisations.FirstOrDefault(l => l.IdLocalisation == _selectedLocalisationId)?.DescriptionLocalisation
+        ?? (_selectedLocalisationId.HasValue ? $"Loc. {_selectedLocalisationId}" : "—");
+
+    void Cancel() => MudDialog.Close();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+        }
+
+        var isAdmin = AppFunctions.Normalize(authUser.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+
+        _currentUserLocalisations = await ctx.UserLocalisations
+            .Where(ul => ul.UserId == _currentLogin && ul.LocalisationId.HasValue)
+            .Select(ul => ul.LocalisationId!.Value)
+            .ToListAsync();
+
+        if (isAdmin || !_currentUserLocalisations.Any())
+        {
+            _localisations = await ctx.Localisations
+                .OrderBy(l => l.DescriptionLocalisation)
+                .ToListAsync();
+        }
+        else
+        {
+            _localisations = await ctx.Localisations
+                .Where(l => _currentUserLocalisations.Contains(l.IdLocalisation))
+                .OrderBy(l => l.DescriptionLocalisation)
+                .ToListAsync();
+        }
+
+        if (_localisations.Any())
+            _selectedLocalisationId = _localisations[0].IdLocalisation;
+
+        _commande = await ctx.Commandes
+            .Include(c => c.Customer)
+            .Include(c => c.Details)
+            .FirstOrDefaultAsync(c => c.CommandeId == CommandeId);
+
+        if (_commande == null) return;
+
+        var dejaLivre = await ctx.LivraisonDetails
+            .Where(ld => ld.CommandDetailId != null
+                         && ctx.CommandeDetails
+                              .Where(cd => cd.CommandeId == CommandeId)
+                              .Select(cd => cd.Id)
+                              .Contains(ld.CommandDetailId.Value))
+            .GroupBy(ld => ld.CommandDetailId)
+            .Select(g => new { CmdDetailId = g.Key, Total = g.Sum(x => x.Qte ?? 0) })
+            .ToListAsync();
+
+        var dejaMap = dejaLivre.ToDictionary(x => x.CmdDetailId!.Value, x => x.Total);
+
+        var articleIds = _commande.Details.Select(d => d.ArticleId).Where(a => a != null).Distinct().ToList();
+        var articles = await ctx.Articles
+            .Where(a => articleIds.Contains(a.IdArticle))
+            .ToDictionaryAsync(a => a.IdArticle, a => a.Description);
+
+        foreach (var d in _commande.Details)
+        {
+            var livree = dejaMap.GetValueOrDefault(d.Id);
+            var restante = (d.Qte ?? 0) - livree;
+            if (restante <= 0) continue;
+
+            var stock = d.ArticleId != null && _selectedLocalisationId.HasValue
+                ? await StockAvailability.GetAvailableAsync(d.ArticleId, _selectedLocalisationId.Value)
+                : 0;
+
+            _lines.Add(new CheckLine
+            {
+                CommandeDetailId = d.Id,
+                ArticleId = d.ArticleId,
+                ArticleDesc = d.ArticleId != null && articles.TryGetValue(d.ArticleId, out var desc) ? desc : d.ArticleId,
+                QteCommande = d.Qte,
+                QteLivree = livree,
+                QteRestante = restante,
+                QteLivraison = Math.Min(restante, stock),
+                StockDispo = stock,
+                Pu = d.Pu,
+                Selected = stock > 0
+            });
+        }
+    }
+
+    async Task OnLocalisationChanged(int? locId)
+    {
+        if (!locId.HasValue || locId == _selectedLocalisationId)
+            return;
+
+        _selectedLocalisationId = locId;
+        foreach (var line in _lines.Where(l => !string.IsNullOrEmpty(l.ArticleId)))
+        {
+            line.StockDispo = await StockAvailability.GetAvailableAsync(line.ArticleId!, locId.Value);
+            if (line.QteLivraison > line.StockDispo)
+                line.QteLivraison = Math.Min(line.QteRestante, line.StockDispo);
+        }
+        StateHasChanged();
+    }
+
+    async Task OnSave()
+    {
+        var selected = _lines.Where(l => l.Selected && l.QteLivraison > 0).ToList();
+        if (!selected.Any()) return;
+
+        if (!_selectedLocalisationId.HasValue || _selectedLocalisationId.Value <= 0)
+        {
+            Snackbar.Add("Sélectionnez une localisation pour cette livraison.", Severity.Warning);
+            return;
+        }
+
+        foreach (var line in selected)
+        {
+            if (line.QteLivraison > line.StockDispo)
+            {
+                Snackbar.Add($"{line.ArticleDesc} : stock={QuantityFormat.Display(line.StockDispo)}, demandé={QuantityFormat.Display(line.QteLivraison)}", Severity.Warning);
+                return;
+            }
+        }
+
+        try
+        {
+            var livraisonId = await LivraisonPosting.SaveAsync(new LivraisonSaveRequest
+            {
+                CommandeId = CommandeId,
+                ClientId = _commande!.CustomerId,
+                Porteur = _porteur,
+                Date = DateTime.Now,
+                UserLogin = _currentLogin,
+                LocalisationId = _selectedLocalisationId.Value,
+                Lines = selected.Select(l => new LivraisonLineInput
+                {
+                    ArticleId = l.ArticleId!,
+                    Qte = l.QteLivraison,
+                    Pu = l.Pu ?? 0,
+                    CommandDetailId = l.CommandeDetailId
+                }).ToList()
+            });
+
+            Snackbar.Add($"Livraison N° {livraisonId} — {selected.Count} article(s)", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(msg, Severity.Error);
+        }
+    }
+
+    class CheckLine
+    {
+        public int CommandeDetailId { get; set; }
+        public string? ArticleId { get; set; }
+        public string? ArticleDesc { get; set; }
+        public decimal? QteCommande { get; set; }
+        public decimal QteLivree { get; set; }
+        public decimal QteRestante { get; set; }
+        public decimal QteLivraison { get; set; }
+        public decimal StockDispo { get; set; }
+        public decimal? Pu { get; set; }
+        public bool Selected { get; set; }
+    }
+}

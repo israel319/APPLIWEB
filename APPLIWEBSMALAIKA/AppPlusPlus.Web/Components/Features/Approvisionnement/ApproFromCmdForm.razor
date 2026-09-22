@@ -1,0 +1,293 @@
+@* ──────────────────────────────────────────────────────────────
+   Dialog : Réceptionner des articles d'une commande interne.
+   Affiche la checklist des lignes commandées avec progression.
+   L'utilisateur coche, ajuste qté, PA, PV, localisation.
+   Crée les Appros + met à jour stock (Article.Qte, ArticleLocalisation).
+   ────────────────────────────────────────────────────────────── *@
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using AppPlusPlus.Application.Services.Approvisionnement
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IApproPostingService ApproPosting
+@inject ICurrencyService Currency
+
+<MudDialog>
+    <DialogContent>
+        @if (_cmd == null)
+        {
+            <div class="d-flex flex-column align-items-center" style="padding:2rem;">
+                <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            </div>
+        }
+        else
+        {
+            <div class="aw-dialog">
+                <header class="aw-dialog__head">
+                    <div class="aw-dialog__title-wrap">
+                        <i class="bi bi-box-arrow-in-down" aria-hidden="true"></i>
+                        <h2 class="aw-dialog__title">Réception commande N° @_cmd.Id</h2>
+                    </div>
+                </header>
+                <div class="aw-dialog__body">
+                    <p class="aw-dialog__meta-value" style="margin-bottom:0.85rem;">
+                        Commande N° @_cmd.Id — @(_cmd.Supplier?.SupplierName ?? _cmd.Description ?? "Commande interne")
+                    </p>
+
+                    <div class="aw-form__grid" style="margin-bottom:0.85rem;">
+                        <div class="aw-field">
+                            <label class="aw-field__label">Localisation de stockage</label>
+                            <MudSelect T="int?" @bind-Value="_selectedLocalisation"
+                                       Placeholder="Choisir"
+                                       Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Clearable="true">
+                                @foreach (var loc in _localisations)
+                                {
+                                    <MudSelectItem T="int?" Value="@loc.IdLocalisation">@loc.DescriptionLocalisation</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </div>
+                        <div class="aw-field">
+                            <label class="aw-field__label">Fournisseur</label>
+                            <SupplierAutocomplete Suppliers="@_suppliers"
+                                                  Value="@_selectedSupplier"
+                                                  ValueChanged="@(v => _selectedSupplier = v)"
+                                                  Placeholder="Rechercher…" />
+                        </div>
+                    </div>
+
+                    <p class="aw-field__hint" style="margin-bottom:0.55rem;">
+                        Saisissez PA/PV en <strong>FC</strong> (taux @_latestTaux.ToString("N0") FC/USD) — enregistrement en <strong>FC</strong> uniquement.
+                    </p>
+
+                    <div class="aw-table-region">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:2.5rem;"></th>
+                                        <th>Article</th>
+                                        <th class="aw-table__num">Commandé</th>
+                                        <th class="aw-table__num">Déjà reçu</th>
+                                        <th class="aw-table__num">À recevoir</th>
+                                        <th>Exp.</th>
+                                        <th>PA</th>
+                                        <th>PV</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var line in _lines)
+                                    {
+                                        <tr style="cursor:default;">
+                                            <td>
+                                                <MudCheckBox @bind-Value="line.Selected" T="bool" Dense="true" />
+                                            </td>
+                                            <td><span class="aw-table__title">@(line.ArticleDesc ?? line.ArticleId ?? "—")</span></td>
+                                            <td class="aw-table__num">@line.QteOrder.ToString("N0")</td>
+                                            <td class="aw-table__num">@line.QteReceived.ToString("N0")</td>
+                                            <td class="aw-table__num">
+                                                <MudNumericField @bind-Value="line.QteReception" T="decimal" Min="0"
+                                                                 Max="@(line.QteRemaining)"
+                                                                 Variant="Variant.Outlined" Margin="Margin.Dense" Style="width:80px;" />
+                                            </td>
+                                            <td>
+                                                <input type="date" class="aw-input aw-input--table aw-input--date"
+                                                       @bind="line.DateExpiration"
+                                                       disabled="@(!line.Selected)" />
+                                            </td>
+                                            <td>
+                                                <ApproPriceInput FcValue="@line.PA"
+                                                                 FcValueChanged="@(v => line.PA = v)"
+                                                                 Taux="@_latestTaux"
+                                                                 Disabled="@(!line.Selected)" />
+                                            </td>
+                                            <td>
+                                                <ApproPriceInput FcValue="@line.PV"
+                                                                 FcValueChanged="@(v => line.PV = v)"
+                                                                 Taux="@_latestTaux"
+                                                                 Disabled="@(!line.Selected)" />
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <p class="aw-table__meta" style="margin-top:0.55rem;">
+                        <strong>@_lines.Count(l => l.Selected)</strong> article(s) sélectionné(s)
+                    </p>
+                </div>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (_cmd != null)
+        {
+            <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                    <i class="bi bi-x-lg"></i> Annuler
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="OnSave"
+                        disabled="@(!_lines.Any(l => l.Selected && l.QteReception > 0))">
+                    <i class="bi bi-box-arrow-in-down"></i> Réceptionner
+                </button>
+            </div>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int CmdId { get; set; }
+
+    Cmd? _cmd;
+    List<RecLine> _lines = new();
+    List<Localisation> _localisations = new();
+    List<Supplier> _suppliers = new();
+    Dictionary<int, string?> _moneyById = new();
+    decimal _latestTaux;
+    int? _selectedLocalisation;
+    int? _selectedSupplier;
+    string _currentLogin = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+        }
+
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+
+        _localisations = await ctx.Localisations.OrderBy(l => l.DescriptionLocalisation).ToListAsync();
+        _suppliers = await ctx.Suppliers.OrderBy(s => s.SupplierName).ToListAsync();
+        _moneyById = await ctx.Moneys.ToDictionaryAsync(m => m.IdMonais, m => m.DescriptionMonais);
+        _latestTaux = await Currency.GetLatestTauxAsync();
+
+        _cmd = await ctx.Cmds
+            .Include(c => c.Supplier)
+            .Include(c => c.Details)
+            .FirstOrDefaultAsync(c => c.Id == CmdId);
+
+        if (_cmd == null) return;
+
+        _selectedSupplier = _cmd.SupplierId;
+        _selectedLocalisation = _cmd.LocalisationId;
+
+        // On utilise IdCmd + IdArticle pour retrouver les réceptions liées
+        var articleIds = _cmd.Details.Select(d => d.IdArticle).Where(a => a != null).Distinct().ToList();
+        var receivedMap = await ctx.Appros
+            .Where(a => a.IdCmd == CmdId && articleIds.Contains(a.IdArticle) && a.StatusId != ApproStatus.Cancelled)
+            .GroupBy(a => a.IdArticle)
+            .Select(g => new { IdArticle = g.Key, Total = g.Sum(x => x.Qte) })
+            .ToDictionaryAsync(x => x.IdArticle, x => x.Total);
+
+        var articles = await ctx.Articles
+            .Where(a => articleIds.Contains(a.IdArticle))
+            .ToDictionaryAsync(a => a.IdArticle, a => a);
+
+        foreach (var d in _cmd.Details)
+        {
+            var received = d.IdArticle != null ? receivedMap.GetValueOrDefault(d.IdArticle) : 0;
+            var remaining = (decimal)(d.QteOrder ?? 0) - received;
+            if (remaining <= 0) continue;
+
+            var art = d.IdArticle != null && articles.TryGetValue(d.IdArticle, out var a) ? a : null;
+
+            var isArtUsd = art != null && CurrencyFormat.IsUsd(art.IdMonais, _moneyById);
+            var pvFc = art != null
+                ? CurrencyFormat.ArticleToFc((decimal)art.Price, isArtUsd, _latestTaux)
+                : (decimal?)null;
+
+            _lines.Add(new RecLine
+            {
+                CmdDetailId = d.Id,
+                ArticleId = d.IdArticle,
+                ArticleDesc = art?.Description ?? d.IdArticle,
+                QteOrder = (decimal)(d.QteOrder ?? 0),
+                QteReceived = received,
+                QteRemaining = remaining,
+                QteReception = remaining,
+                PA = null,
+                PV = pvFc,
+                Selected = true
+            });
+        }
+    }
+
+    void Cancel() => MudDialog.Close();
+
+    async Task OnSave()
+    {
+        var selected = _lines.Where(l => l.Selected && l.QteReception > 0).ToList();
+        if (!selected.Any()) return;
+
+        if (selected.Any(l => !l.PA.HasValue))
+        {
+            Snackbar.Add("Le prix d'achat (PA) est obligatoire pour tous les articles sélectionnés", Severity.Warning);
+            return;
+        }
+        if (selected.Any(l => l.PA.HasValue && l.PV.HasValue && l.PA.Value > l.PV.Value))
+        {
+            Snackbar.Add("Le prix d'achat ne peut pas être supérieur au prix de vente (perte interdite)", Severity.Error);
+            return;
+        }
+
+        try
+        {
+            if (!_selectedLocalisation.HasValue)
+            {
+                Snackbar.Add("Sélectionnez une localisation de stockage", Severity.Warning);
+                return;
+            }
+
+            var request = new CommandReceptionRequest
+            {
+                CmdId = CmdId,
+                LocalisationId = _selectedLocalisation.Value,
+                SupplierId = _selectedSupplier,
+                UserLogin = _currentLogin,
+                Taux = _latestTaux,
+                Lines = selected.Select(l => new CommandReceptionLineInput
+                {
+                    CmdDetailId = l.CmdDetailId,
+                    IdArticle = l.ArticleId!,
+                    Qte = l.QteReception,
+                    PA = l.PA,
+                    PV = l.PV,
+                    DateExpiration = l.DateExpiration
+                }).ToList()
+            };
+
+            await ApproPosting.ReceiveFromCommandAsync(request);
+            Snackbar.Add($"{selected.Count} article(s) réceptionné(s) en stock", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(msg, Severity.Error);
+        }
+    }
+
+    class RecLine
+    {
+        public int CmdDetailId { get; set; }
+        public string? ArticleId { get; set; }
+        public string? ArticleDesc { get; set; }
+        public decimal QteOrder { get; set; }
+        public decimal QteReceived { get; set; }
+        public decimal QteRemaining { get; set; }
+        public decimal QteReception { get; set; }
+        public decimal? PA { get; set; }
+        public decimal? PV { get; set; }
+        public DateOnly? DateExpiration { get; set; }
+        public bool Selected { get; set; }
+    }
+}

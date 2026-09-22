@@ -1,0 +1,295 @@
+@* ──────────────────────────────────────────────────────────────
+   Dialog : Approvisionner depuis le stock d'une commande interne.
+   Permet de prélever des articles réceptionnés via cette commande
+   pour les transférer vers une localisation de destination.
+   Le stock est lu directement depuis T_Stock (BD).
+   Après prélèvement, le stock source est décrémenté et destination incrémenté.
+   Des MouvementStock sont créés pour la traçabilité.
+   ────────────────────────────────────────────────────────────── *@
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using AppPlusPlus.Application.Services.Stock
+@using AppPlusPlus.Domain.Common
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IStockAvailabilityService StockAvailability
+@inject IInternalTransferService InternalTransfer
+@inject MudBlazor.ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+
+<MudDialog>
+    <DialogContent>
+        @if (_cmd == null)
+        {
+            <div class="d-flex flex-column align-items-center" style="padding:2rem;">
+                <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Chargement...</span></div>
+            </div>
+        }
+        else
+        {
+            <div class="aw-dialog">
+                <header class="aw-dialog__head">
+                    <div class="aw-dialog__title-wrap">
+                        <i class="bi bi-box-arrow-up" aria-hidden="true"></i>
+                        <h2 class="aw-dialog__title">Prélèvement commande N° @_cmd.Id</h2>
+                    </div>
+                </header>
+                <div class="aw-dialog__body">
+                    <p class="aw-dialog__meta-value" style="margin-bottom:0.85rem;">
+                        Approvisionner depuis Commande N° @_cmd.Id
+                        @if (!string.IsNullOrWhiteSpace(_cmd.Supplier?.SupplierName))
+                        {
+                            <span> — @_cmd.Supplier.SupplierName</span>
+                        }
+                    </p>
+
+                    <div class="aw-form__grid" style="margin-bottom:0.85rem;">
+                        <div class="aw-field">
+                            <label class="aw-field__label">Localisation destination</label>
+                            <MudSelect @bind-Value="_destLocalisation" T="int?" Placeholder="Choisir"
+                                       Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Style="width:100%;">
+                                @foreach (var loc in _localisations)
+                                {
+                                    <MudSelectItem T="int?" Value="@loc.IdLocalisation">@loc.DescriptionLocalisation</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </div>
+                        <div class="aw-field">
+                            <label class="aw-field__label">Commentaire</label>
+                            <input type="text" class="aw-input" @bind="_comment" placeholder="Motif du prélèvement" />
+                        </div>
+                    </div>
+
+                    <p class="aw-field__hint" style="margin-bottom:0.55rem;">
+                        Articles de cette commande — stock restant (Reçu − déjà transféré) :
+                    </p>
+
+                    <div class="aw-table-region">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:2.5rem;"></th>
+                                        <th>Article</th>
+                                        <th class="aw-table__num">Commandé</th>
+                                        <th class="aw-table__num">Reçu</th>
+                                        <th class="aw-table__num">Restant</th>
+                                        <th>Localisation</th>
+                                        <th class="aw-table__num">Qté à prélever</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var line in _lines)
+                                    {
+                                        <tr style="cursor:default;">
+                                            <td>
+                                                <MudCheckBox @bind-Value="line.Selected" T="bool" Dense="true" />
+                                            </td>
+                                            <td><span class="aw-table__title">@(line.ArticleDesc ?? line.ArticleId ?? "—")</span></td>
+                                            <td class="aw-table__num"><span class="aw-badge aw-badge--muted">@line.QteCommandee.ToString("N0")</span></td>
+                                            <td class="aw-table__num"><span class="aw-badge aw-badge--brand">@line.QteRecue.ToString("N0")</span></td>
+                                            <td class="aw-table__num"><strong>@line.StockActuel.ToString("N0")</strong></td>
+                                            <td><span class="aw-table__meta">@(line.SourceLocalisation ?? "—")</span></td>
+                                            <td class="aw-table__num">
+                                                <MudNumericField @bind-Value="line.QtePrelevement" T="decimal" Min="0"
+                                                                 Max="@(line.StockActuel)" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                                 Style="width:100px;" />
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <p class="aw-table__meta" style="margin-top:0.55rem;">
+                        <strong>@_lines.Count(l => l.Selected && l.QtePrelevement > 0)</strong> article(s) à transférer
+                    </p>
+                </div>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (_cmd != null)
+        {
+            <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="@(() => MudDialog.Close())">
+                    <i class="bi bi-x-lg"></i> Annuler
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="@OnSave" disabled="@(!CanSave)">
+                    <i class="bi bi-box-arrow-up"></i> Prélever
+                </button>
+            </div>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public int SourceCmdId { get; set; }
+
+    Cmd? _cmd;
+    List<StockLine> _lines = new();
+    List<Localisation> _localisations = new();
+    int? _destLocalisation;
+    string? _comment;
+    string _currentLogin = "";
+
+    bool CanSave => _destLocalisation.HasValue && _lines.Any(l => l.Selected && l.QtePrelevement > 0);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+        }
+
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+
+        _localisations = await ctx.Localisations.OrderBy(l => l.DescriptionLocalisation).ToListAsync();
+
+        // 1. Charger la commande avec ses détails
+        _cmd = await ctx.Cmds
+            .Include(c => c.Supplier)
+            .Include(c => c.Details)
+            .FirstOrDefaultAsync(c => c.Id == SourceCmdId);
+
+        if (_cmd == null) return;
+
+        // 2. Récupérer les articles de cette commande (ceux qui ont été reçus)
+        var cmdDetails = _cmd.Details.Where(d => d.IdArticle != null && (d.QteReceive ?? 0) > 0).ToList();
+        if (!cmdDetails.Any()) return;
+
+        var detailIds = cmdDetails.Select(d => d.Id).ToList();
+        var articleIds = cmdDetails.Select(d => d.IdArticle!).Distinct().ToList();
+
+        // 3. Lire les descriptions des articles + stock global
+        var articles = await ctx.Articles
+            .Where(a => articleIds.Contains(a.IdArticle))
+            .ToDictionaryAsync(a => a.IdArticle, a => a);
+
+        // 4. Calculer ce qui a DÉJÀ été transféré depuis chaque CmdDetail (StatusId = 1)
+        //    On utilise IdCmd + IdArticle pour retrouver les transferts liés
+        var transferredByArticle = await ctx.Appros
+            .Where(a => a.IdCmd == SourceCmdId && a.StatusId == ApproStatus.Transfer)
+            .GroupBy(a => a.IdArticle)
+            .Select(g => new { IdArticle = g.Key, Total = g.Sum(x => x.Qte) })
+            .ToDictionaryAsync(x => x.IdArticle, x => x.Total);
+
+        // 5. Construire les lignes : Stock commande = QteReceive − déjà transféré
+        //    N'afficher QUE les articles ayant encore du stock disponible
+        foreach (var detail in cmdDetails)
+        {
+            var artId = detail.IdArticle!;
+            var desc = articles.GetValueOrDefault(artId)?.Description ?? artId;
+            var qteCmd = (decimal)(detail.QteOrder ?? 0);
+            var qteRecue = (decimal)(detail.QteReceive ?? 0);
+            var dejaTransfere = transferredByArticle.GetValueOrDefault(artId);
+
+            // Stock réel à la localisation source (T_Stock) plafonné par le restant commande
+            var stockLoc = await ctx.Stocks
+                .Where(s => s.IdArticle == artId && s.Qte > 0)
+                .OrderByDescending(s => s.Qte)
+                .FirstOrDefaultAsync();
+            var locName = stockLoc != null
+                ? _localisations.FirstOrDefault(l => l.IdLocalisation == stockLoc.IdLocalisation)?.DescriptionLocalisation ?? "—"
+                : "Non assigné";
+
+            var stockAtLoc = stockLoc?.Qte ?? 0;
+            var stockCommande = qteRecue - dejaTransfere;
+            var stockDispo = StockDomainRules.TransferableQuantity(stockAtLoc, stockCommande);
+
+            if (stockDispo <= 0) continue;
+
+            _lines.Add(new StockLine
+            {
+                CmdDetailId = detail.Id,
+                ArticleId = artId,
+                ArticleDesc = desc,
+                QteCommandee = qteCmd,
+                QteRecue = qteRecue,
+                StockActuel = stockDispo,
+                SourceLocalisationId = stockLoc?.IdLocalisation,
+                SourceLocalisation = locName,
+                QtePrelevement = 0,
+                Selected = false
+            });
+        }
+    }
+
+    async Task OnSave()
+    {
+        if (!_destLocalisation.HasValue) return;
+        var selected = _lines.Where(l => l.Selected && l.QtePrelevement > 0).ToList();
+        if (!selected.Any()) return;
+
+        try
+        {
+            var transferLines = new List<StockTransferLineRequest>();
+            foreach (var line in selected)
+            {
+                if (!line.SourceLocalisationId.HasValue)
+                {
+                    Snackbar.Add($"Localisation source inconnue pour {line.ArticleDesc}.", Severity.Error);
+                    return;
+                }
+
+                if (line.SourceLocalisationId.Value == _destLocalisation.Value)
+                {
+                    Snackbar.Add($"L'article {line.ArticleDesc} est déjà dans cette localisation.", Severity.Warning);
+                    return;
+                }
+
+                if (line.QtePrelevement > line.StockActuel)
+                {
+                    Snackbar.Add($"Quantité demandée supérieure au stock disponible pour {line.ArticleDesc}.", Severity.Error);
+                    return;
+                }
+
+                transferLines.Add(new StockTransferLineRequest(
+                    line.ArticleId!,
+                    line.QtePrelevement,
+                    line.SourceLocalisationId.Value,
+                    _destLocalisation.Value,
+                    line.CmdDetailId));
+            }
+
+            var approId = await InternalTransfer.SaveAsync(new InternalTransferSaveRequest
+            {
+                SourceCmdId = SourceCmdId,
+                DestLocalisationId = _destLocalisation.Value,
+                UserLogin = string.IsNullOrWhiteSpace(_currentLogin) ? "system" : _currentLogin,
+                Commentaire = _comment ?? $"Prélèvement depuis Cmd N°{SourceCmdId}",
+                Reference = $"Transfert Cmd N°{SourceCmdId}",
+                Lines = transferLines
+            });
+
+            Snackbar.Add($"Transfert N° {approId} — {transferLines.Count} article(s) transféré(s)", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(msg, Severity.Error);
+        }
+    }
+
+    class StockLine
+    {
+        public int CmdDetailId { get; set; }
+        public string? ArticleId { get; set; }
+        public string? ArticleDesc { get; set; }
+        public decimal QteCommandee { get; set; }
+        public decimal QteRecue { get; set; }
+        public decimal StockActuel { get; set; }
+        public int? SourceLocalisationId { get; set; }
+        public string? SourceLocalisation { get; set; }
+        public decimal QtePrelevement { get; set; }
+        public bool Selected { get; set; }
+    }
+}

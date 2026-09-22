@@ -1,0 +1,314 @@
+@using AppPlusPlus.Domain.Common
+@inject IStockService StockService
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+@inject IUserCurrencyPreferenceService UserCurrency
+
+<MudDialog>
+    <DialogContent>
+        @if (Article != null)
+        {
+            <div class="aw-dialog">
+                <header class="aw-dialog__head">
+                    <div class="aw-dialog__title-wrap">
+                        <i class="bi bi-box-seam" aria-hidden="true"></i>
+                        <h2 class="aw-dialog__title">@Article.Description</h2>
+                    </div>
+                </header>
+                <div class="aw-dialog__body">
+                    <div class="aw-dialog__meta">
+                        <div>
+                            <span class="aw-dialog__meta-label">Code</span>
+                            <span class="aw-dialog__meta-value">@Article.IdArticle</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Prix</span>
+                            <span class="aw-dialog__meta-value">@FormatArticlePrice()</span>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(Article.DescriptionI))
+                        {
+                            <div style="grid-column: 1 / -1;">
+                                <span class="aw-dialog__meta-label">Description longue</span>
+                                <span class="aw-dialog__meta-value">@Article.DescriptionI</span>
+                            </div>
+                        }
+                    </div>
+
+                    <div class="aw-dialog__section">Stock par localisation</div>
+
+                    @if (Stocks == null || !Stocks.Any())
+                    {
+                        <div class="aw-empty aw-empty--compact">
+                            <i class="bi bi-geo-alt"></i>
+                            <p>Cet article n'est associé à aucune localisation.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <table class="table table-sm table-bordered hub-dialog-table">
+                            <thead>
+                                <tr>
+                                    <th>Localisation</th>
+                                    <th class="text-center">Stock</th>
+                                    <th class="text-center" title="Qté max — objectif">Budget</th>
+                                    <th class="text-center" title="Manquant pour atteindre le budget">Reste</th>
+                                    <th class="text-center">Seuil (min)</th>
+                                    <th class="text-center">État</th>
+                                    @if (!ReadOnly)
+                                    {
+                                        <th class="text-center">Action</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var stock in Stocks)
+                                {
+                                    var stockClass = stock.Qte <= 0 ? "hub-text-danger" : stock.Qte <= stock.Seuil ? "hub-text-warning" : "hub-text-success";
+                                    <tr @key="stock.StockId">
+                                        <td>
+                                            <span class="aw-badge aw-badge--primary">@stock.LocalisationName</span>
+                                        </td>
+                                        <td class="text-center fw-bold @stockClass">
+                                            @if (stock.Qte <= 0)
+                                            {
+                                                <i class="bi bi-exclamation-circle me-1"></i>
+                                            }
+                                            @QuantityFormat.Display(stock.Qte)
+                                        </td>
+                                        <td class="text-center">
+                                            @if (ReadOnly)
+                                            {
+                                                <span>@stock.QteMax</span>
+                                            }
+                                            else
+                                            {
+                                                <div class="d-flex align-items-center justify-content-center gap-1">
+                                                    <MudNumericField @bind-Value="stock.QteMax" T="int" Min="0"
+                                                                     Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                                     Immediate="true"
+                                                                     Style="width:80px;" />
+                                                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--icon aw-btn--sm"
+                                                            title="Enregistrer le budget (qté max)"
+                                                            @onclick="@(() => OnSaveQteMax(stock))">
+                                                        <i class="bi bi-check-lg"></i>
+                                                    </button>
+                                                </div>
+                                            }
+                                        </td>
+                                        <td class="text-center fw-semibold @(stock.ResteBudget > 0 ? "hub-text-warning" : "hub-text-success")">
+                                            @stock.ResteBudget.ToString("N2")
+                                        </td>
+                                        <td class="text-center">
+                                            @if (ReadOnly)
+                                            {
+                                                <span>@stock.Seuil</span>
+                                            }
+                                            else
+                                            {
+                                                <div class="d-flex align-items-center justify-content-center gap-1">
+                                                    <MudNumericField @bind-Value="stock.Seuil" T="int" Min="0"
+                                                                     Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                                     Immediate="true"
+                                                                     Style="width:80px;" />
+                                                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--icon aw-btn--sm"
+                                                            title="Enregistrer le seuil"
+                                                            @onclick="@(() => OnSaveSeuil(stock))">
+                                                        <i class="bi bi-check-lg"></i>
+                                                    </button>
+                                                </div>
+                                            }
+                                        </td>
+                                        <td class="text-center">
+                                            @if (stock.Qte <= 0)
+                                            {
+                                                <span class="aw-badge aw-badge--danger">Rupture</span>
+                                            }
+                                            else if (stock.Qte <= stock.Seuil)
+                                            {
+                                                <span class="aw-badge aw-badge--accent">Bas</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="aw-badge aw-badge--brand">OK</span>
+                                            }
+                                        </td>
+                                        @if (!ReadOnly)
+                                        {
+                                            <td class="text-center">
+                                                <button type="button" class="aw-btn aw-btn--ghost aw-btn--icon aw-btn--sm"
+                                                        title="Approvisionner"
+                                                        @onclick="@(() => OnApproLocation(stock))">
+                                                    <i class="bi bi-cart-plus"></i>
+                                                </button>
+                                            </td>
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr class="table-light fw-semibold">
+                                    <td>Total</td>
+                                    <td class="text-center">@(Stocks?.Sum(s => s.Qte) ?? 0)</td>
+                                    <td class="text-center">@(Stocks?.Sum(s => s.QteMax) ?? 0)</td>
+                                    <td class="text-center hub-text-warning">@(Stocks?.Sum(s => s.ResteBudget) ?? 0)</td>
+                                    <td colspan="@(ReadOnly ? 2 : 3)"></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    }
+                </div>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;justify-content:space-between;">
+            @if (!ReadOnly)
+            {
+                <button type="button" class="aw-btn aw-btn--danger" @onclick="@OnDeleteArticle">
+                    <i class="bi bi-trash"></i> Supprimer
+                </button>
+            }
+            else
+            {
+                <div></div>
+            }
+            <div style="display:inline-flex;gap:0.45rem;">
+                @if (!ReadOnly)
+                {
+                    <button type="button" class="aw-btn aw-btn--ghost" @onclick="@OnEditArticle">
+                        <i class="bi bi-pencil"></i> Modifier
+                    </button>
+                }
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="@Cancel">
+                    <i class="bi bi-x-lg"></i> Fermer
+                </button>
+            </div>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    IMudDialogInstance? MudDialog { get; set; }
+
+    [Parameter]
+    public Article? Article { get; set; }
+
+    [Parameter]
+    public List<StockLocationInfo>? Stocks { get; set; }
+
+    [Parameter]
+    public List<Localisation>? Localisations { get; set; }
+
+    [Parameter]
+    public bool ReadOnly { get; set; }
+
+    string FormatArticlePrice()
+    {
+        if (Article == null) return "—";
+        var isUsd = CurrencyDefaults.IsUsdMoneyId(Article.IdMonais);
+        return UserCurrency.FormatApproNative((decimal)Article.Price, isUsd, "N2");
+    }
+
+    void Cancel() => MudDialog?.Cancel();
+
+    void OnEditArticle()
+    {
+        MudDialog?.Close(DialogResult.Ok(true));
+        Navigation.NavigateTo($"/gestion/article/modifier/{Article?.IdArticle}");
+    }
+
+    async Task OnDeleteArticle()
+    {
+        var confirm = await DialogService.ShowMessageBox("Confirmation",
+            $"Supprimer l'article « {Article?.Description} » et tous ses stocks ?",
+            yesText: "Supprimer", cancelText: "Annuler");
+
+        if (confirm == true && Article != null)
+        {
+            try
+            {
+                await StockService.DeleteArticleWithStocksAsync(Article.IdArticle);
+                Snackbar.Add("Article supprimé", Severity.Success);
+                MudDialog?.Close(DialogResult.Ok(true));
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Erreur lors de la suppression : {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    void OnApproLocation(StockLocationInfo stock)
+    {
+        MudDialog?.Close();
+        Navigation.NavigateTo($"/stock/appro/nouveau?PreselectedArticleId={Article?.IdArticle}&PreselectedLocalisationId={stock.IdLocalisation}");
+    }
+
+    async Task OnSaveSeuil(StockLocationInfo stock)
+    {
+        try
+        {
+            if (stock.StockId <= 0)
+            {
+                Snackbar.Add($"Erreur : identifiant stock invalide ({stock.StockId})", Severity.Error);
+                return;
+            }
+            await StockService.UpdateSeuilAsync(stock.StockId, stock.Seuil);
+            Snackbar.Add($"Seuil mis à jour pour {stock.LocalisationName} : {stock.Seuil}", Severity.Success);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Erreur : {ex.Message}", Severity.Error);
+        }
+    }
+
+    async Task OnSaveQteMax(StockLocationInfo stock)
+    {
+        try
+        {
+            if (stock.StockId <= 0)
+            {
+                Snackbar.Add($"Erreur : identifiant stock invalide ({stock.StockId})", Severity.Error);
+                return;
+            }
+            if (stock.QteMax > 0 && stock.QteMax <= stock.Seuil)
+            {
+                Snackbar.Add("La qté max doit être supérieure au seuil (min).", Severity.Warning);
+                return;
+            }
+            await StockService.UpdateQteMaxAsync(stock.StockId, stock.QteMax);
+            Snackbar.Add($"Qté max mise à jour pour {stock.LocalisationName} : {stock.QteMax}", Severity.Success);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Erreur : {ex.Message}", Severity.Error);
+        }
+    }
+
+    async Task RefreshStockData()
+    {
+        if (Article == null) return;
+
+        var stocks = await StockService.GetStocksByArticleAsync(Article.IdArticle);
+        var locs = Localisations ?? new List<Localisation>();
+
+        Stocks = stocks
+            .Select(s => new StockLocationInfo
+            {
+                StockId = s.Id,
+                IdLocalisation = s.IdLocalisation,
+                LocalisationName = locs.FirstOrDefault(l => l.IdLocalisation == s.IdLocalisation)?.DescriptionLocalisation ?? "?",
+                Qte = s.Qte,
+                Seuil = s.Seuil,
+                QteMax = s.QteMax
+            })
+            .OrderBy(s => s.LocalisationName)
+            .ToList();
+
+        StateHasChanged();
+    }
+}

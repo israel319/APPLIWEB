@@ -1,0 +1,124 @@
+@using MudBlazor
+@inject IEmailSender EmailSvc
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <div class="lov-form-header">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-envelope text-primary"></i>
+                <h5 class="mb-0">Envoyer par email</h5>
+            </div>
+        </div>
+        <div class="lov-form-body">
+        @if (!EmailSvc.IsConfigured)
+        {
+            <div class="alert alert-warning">Configurez la section 'Smtp' dans appsettings.json (Host, Port, User, Password, From) pour activer l'envoi d'emails.</div>
+        }
+        else
+        {
+            <div class="d-flex flex-column gap-3">
+                <div class="lov-field">
+                    <label class="form-label">Adresse email du destinataire</label>
+                    <input type="email" class="form-control" @bind="_model.ToAddress"
+                           placeholder="exemple@domaine.com" />
+                </div>
+
+                <div class="lov-field">
+                    <label class="form-label">Objet</label>
+                    <input type="text" class="form-control" @bind="_model.Subject" />
+                </div>
+
+                <div class="lov-field">
+                    <label class="form-label">Message (optionnel)</label>
+                    <textarea class="form-control" @bind="_model.Message" style="min-height:80px;" placeholder="Votre message…"></textarea>
+                </div>
+
+                @if (ExcelBytes is not null)
+                {
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi bi-paperclip" style="color:var(--bs-success);"></i>
+                        <span class="small mb-0">@ExcelFileName</span>
+                    </div>
+                }
+            </div>
+        }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="hub-dialog-actions px-1 pb-1">
+            <div></div>
+            <div class="hub-dialog-actions-right">
+                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="Cancel">
+                    <i class="bi bi-x-lg me-1"></i>@(EmailSvc.IsConfigured ? "Annuler" : "Fermer")
+                </button>
+                @if (EmailSvc.IsConfigured)
+                {
+                    <button type="button" class="btn btn-primary btn-sm" @onclick="OnSubmit" disabled="@_sending">
+                        <i class="bi bi-send me-1"></i>@(_sending ? "Envoi…" : "Envoyer")
+                    </button>
+                }
+            </div>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string? Subject { get; set; }
+    [Parameter] public byte[]? ExcelBytes { get; set; }
+    [Parameter] public string? ExcelFileName { get; set; }
+
+    bool _sending;
+    EmailFormModel _model = new();
+
+    protected override void OnInitialized()
+    {
+        _model.Subject = Subject ?? "Rapport App++";
+    }
+
+    void Cancel() => MudDialog.Close();
+
+    async Task OnSubmit()
+    {
+        _sending = true;
+        StateHasChanged();
+
+        try
+        {
+            var htmlBody = $@"
+                <div style='font-family:Segoe UI,Arial,sans-serif;'>
+                    <h2 style='color:#333;'>{_model.Subject}</h2>
+                    {(string.IsNullOrWhiteSpace(_model.Message) ? "" : $"<p>{_model.Message.Replace("\n", "<br/>")}</p>")}
+                    <hr style='border:none;border-top:1px solid #ddd;margin:16px 0;'/>
+                    <p style='color:#999;font-size:12px;'>Envoyé depuis {AppSettings.AppName}</p>
+                </div>";
+
+            await EmailSvc.SendAsync(
+                _model.ToAddress!,
+                _model.Subject!,
+                htmlBody,
+                ExcelBytes,
+                ExcelFileName);
+
+            Snackbar.Add($"Le rapport a été envoyé à {_model.ToAddress}.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _sending = false;
+            StateHasChanged();
+        }
+    }
+
+    class EmailFormModel
+    {
+        public string? ToAddress { get; set; }
+        public string? Subject { get; set; }
+        public string? Message { get; set; }
+    }
+}

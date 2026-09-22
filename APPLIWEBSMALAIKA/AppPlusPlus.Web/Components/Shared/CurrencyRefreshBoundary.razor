@@ -1,0 +1,21 @@
+@implements IDisposable
+@inject IUserCurrencyPreferenceService UserCurrency
+
+<CascadingValue Value="@UserCurrency.DisplayRevision" Name="CurrencyRevision">
+    @ChildContent
+</CascadingValue>
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        UserCurrency.OnChanged += OnCurrencyChanged;
+        if (!UserCurrency.IsLoaded)
+            await UserCurrency.EnsureLoadedAsync();
+    }
+
+    void OnCurrencyChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => UserCurrency.OnChanged -= OnCurrencyChanged;
+}

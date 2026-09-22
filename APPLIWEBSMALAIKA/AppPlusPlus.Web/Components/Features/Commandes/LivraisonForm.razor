@@ -1,0 +1,475 @@
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using AppPlusPlus.Application.Services.Commandes
+@using AppPlusPlus.Application.Services.Stock
+@using AppPlusPlus.Domain.Common
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ILivraisonPostingService LivraisonPosting
+@inject IStockAvailabilityService StockAvailability
+
+<MudDialog>
+    <DialogContent>
+        <div class="aw-dialog">
+            <header class="aw-dialog__head">
+                <div class="aw-dialog__title-wrap">
+                    <i class="bi bi-truck" aria-hidden="true"></i>
+                    <h2 class="aw-dialog__title">@(LivraisonId.HasValue ? "Modifier la livraison" : "Nouvelle livraison")</h2>
+                </div>
+            </header>
+            <div class="aw-dialog__body">
+                <div class="aw-form__grid">
+                    <div class="aw-field">
+                        <label class="aw-field__label">Commande (optionnel)</label>
+                        <MudSelect T="int?" Value="_item.CommandeId"
+                                   ValueChanged="@OnCommandeChanged"
+                                   Placeholder="Aucune commande liée…"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Clearable="true">
+                            @foreach (var cmd in _commandeOptions)
+                            {
+                                <MudSelectItem T="int?" Value="@cmd.Key">@cmd.Value</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Client</label>
+                        <MudAutocomplete T="int?" @bind-Value="_item.ClientId"
+                                     SearchFunc="@SearchCustomers"
+                                     ToStringFunc="@(id => _customerOptions.FirstOrDefault(c => c.CustomerId == id)?.CustomerName ?? "")"
+                                         Placeholder="Sélectionner un client..."
+                                         Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Clearable="true"
+                                         CoerceText="true" CoerceValue="true" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Localisation (magasin)</label>
+                        @if (_localisations.Count <= 1)
+                        {
+                            <div class="aw-input" style="display:flex;align-items:center;gap:0.35rem;background:var(--aw-surface-muted, #f5f5f5);">
+                                <i class="bi bi-geo-alt" aria-hidden="true"></i>
+                                <span>@LocLabel</span>
+                            </div>
+                        }
+                        else
+                        {
+                            <MudSelect T="int?" Value="_selectedLocalisationId"
+                                       ValueChanged="OnLocalisationChanged"
+                                       Placeholder="Choisir un magasin…"
+                                       Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                                       Required="true" RequiredError="Choisissez une localisation">
+                                @foreach (var loc in _localisations)
+                                {
+                                    <MudSelectItem T="int?" Value="@loc.IdLocalisation">@loc.DescriptionLocalisation</MudSelectItem>
+                                }
+                            </MudSelect>
+                        }
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Porteur (livreur)</label>
+                        <input type="text" class="aw-input" @bind="_item.Porteur" placeholder="Nom du livreur" />
+                    </div>
+                    <div class="aw-field">
+                        <AwDateField Label="Date" @bind-Value="_dateValue" />
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-between align-items-center" style="margin:0.9rem 0 0.55rem;">
+                    <div class="aw-dialog__section" style="margin:0;">Articles</div>
+                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="@AddLine">
+                        <i class="bi bi-plus-lg"></i> Ajouter un article
+                    </button>
+                </div>
+
+                @if (!_lines.Any())
+                {
+                    <div class="aw-empty aw-empty--compact">
+                        <i class="bi bi-box"></i>
+                        <p>Aucun article. Cliquez sur « Ajouter un article ».</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>Article</th>
+                                        <th class="aw-table__num">Dispo</th>
+                                        <th class="aw-table__num">Quantité</th>
+                                        <th class="aw-table__num">Prix unitaire</th>
+                                        <th class="aw-table__num">Sous-total</th>
+                                        <th style="width:3rem;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var line in _lines)
+                                    {
+                                        <tr style="cursor:default;">
+                                            <td>
+                                                <MudAutocomplete T="string" Value="line.ArticleId"
+                                                                 ValueChanged="@(val => { line.ArticleId = val; OnArticleLineChanged(line); })"
+                                                                 SearchFunc="@SearchArticles"
+                                                                 ToStringFunc="@(id => _articles.FirstOrDefault(a => a.IdArticle == id)?.Description ?? id ?? "")"
+                                                                 Placeholder="Sélectionner..."
+                                                                 Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                                                                 CoerceText="true" CoerceValue="true" />
+                                            </td>
+                                            <td class="aw-table__num">
+                                                <span class="aw-badge @(line.StockDispo > 0 ? "aw-badge--brand" : "aw-badge--danger")">
+                                                    @QuantityFormat.Display(line.StockDispo)
+                                                </span>
+                                            </td>
+                                            <td class="aw-table__num">
+                                                <MudNumericField T="decimal?" Value="line.Qte"
+                                                                 ValueChanged="@(v => { line.Qte = v; RecalcTotal(); })"
+                                                                 Min="0" Max="@line.StockDispo"
+                                                                 Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                            </td>
+                                            <td class="aw-table__num">
+                                                <MudNumericField Value="@line.Pu" T="decimal?" ReadOnly="true"
+                                                                 Variant="Variant.Filled" Margin="Margin.Dense" />
+                                            </td>
+                                            <td class="aw-table__num">
+                                                <strong>@UserCurrency.FormatBusiness((line.Qte ?? 0) * (line.Pu ?? 0))</strong>
+                                            </td>
+                                            <td>
+                                                <button type="button" class="aw-btn aw-btn--ghost aw-btn--icon aw-btn--sm"
+                                                        @onclick="@(() => RemoveLine(line))" title="Retirer" style="color:var(--aw-danger);">
+                                                    <i class="bi bi-x-lg"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div style="display:flex;justify-content:flex-end;margin-top:0.65rem;">
+                        <span class="fw-bold">Total : @UserCurrency.FormatBusiness(_total)</span>
+                    </div>
+                }
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;">
+            <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                <i class="bi bi-x-lg"></i> Annuler
+            </button>
+            <button type="button" class="aw-btn aw-btn--primary" @onclick="OnSave">
+                <i class="bi bi-check-lg"></i> Enregistrer
+            </button>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int? LivraisonId { get; set; }
+
+    Livraison _item = new() { Date = DateTime.Now };
+    DateTime? _dateValue;
+    List<Customer> _customerOptions = new();
+    List<KeyValuePair<int, string>> _commandeOptions = new();
+    List<Commande> _commandes = new();
+    List<Article> _articles = new();
+    List<Localisation> _localisations = new();
+    List<int> _currentUserLocalisations = new();
+    List<LivLine> _lines = new();
+    decimal _total;
+    string _currentLogin = "";
+    int? _selectedLocalisationId;
+    int? _savedLocalisationId;
+
+    string LocLabel => _localisations.FirstOrDefault(l => l.IdLocalisation == _selectedLocalisationId)?.DescriptionLocalisation
+        ?? (_selectedLocalisationId.HasValue ? $"Loc. {_selectedLocalisationId}" : "—");
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+        }
+
+        var isAdmin = AppFunctions.Normalize(authUser.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+
+        _dateValue = _item.Date;
+
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+
+        _currentUserLocalisations = await ctx.UserLocalisations
+            .Where(ul => ul.UserId == _currentLogin && ul.LocalisationId.HasValue)
+            .Select(ul => ul.LocalisationId!.Value)
+            .ToListAsync();
+
+        if (isAdmin || !_currentUserLocalisations.Any())
+        {
+            _localisations = await ctx.Localisations
+                .OrderBy(l => l.DescriptionLocalisation)
+                .ToListAsync();
+        }
+        else
+        {
+            _localisations = await ctx.Localisations
+                .Where(l => _currentUserLocalisations.Contains(l.IdLocalisation))
+                .OrderBy(l => l.DescriptionLocalisation)
+                .ToListAsync();
+        }
+
+        if (_localisations.Any())
+            _selectedLocalisationId = _localisations[0].IdLocalisation;
+
+        _customerOptions = await ctx.Customers.OrderBy(c => c.CustomerName).ToListAsync();
+        _articles = await ctx.Articles.OrderBy(a => a.Description).ToListAsync();
+
+        _commandes = await ctx.Commandes
+            .Include(c => c.Customer)
+            .OrderByDescending(c => c.CreationDate)
+            .ToListAsync();
+        _commandeOptions = _commandes
+            .Select(c => new KeyValuePair<int, string>(c.CommandeId,
+                $"C-{c.CommandeId} — {c.Customer?.CustomerName ?? "?"} ({c.MontantTotal:N0})"))
+            .ToList();
+
+        if (LivraisonId.HasValue)
+        {
+            var existing = await ctx.Livraisons
+                .Include(l => l.Details)
+                .FirstOrDefaultAsync(l => l.LivraisonId == LivraisonId.Value);
+
+            if (existing != null)
+            {
+                _item = existing;
+                _dateValue = _item.Date;
+                if (existing.Details.FirstOrDefault()?.LocalisationId is int loc && loc > 0
+                    && _localisations.Any(l => l.IdLocalisation == loc))
+                {
+                    _selectedLocalisationId = loc;
+                    _savedLocalisationId = loc;
+                }
+
+                _lines = new List<LivLine>();
+                foreach (var d in existing.Details)
+                {
+                    var stockAtLoc = d.ArticleId != null && _selectedLocalisationId.HasValue
+                        ? await StockAvailability.GetAvailableAsync(d.ArticleId, _selectedLocalisationId.Value)
+                        : 0;
+                    var reserved = _savedLocalisationId == _selectedLocalisationId ? (d.Qte ?? 0) : 0;
+                    _lines.Add(new LivLine
+                    {
+                        ExistingId = d.Id,
+                        ArticleId = d.ArticleId,
+                        Qte = d.Qte,
+                        Pu = d.MontantPaye.HasValue && d.Qte.HasValue && d.Qte > 0
+                            ? d.MontantPaye.Value / d.Qte.Value
+                            : 0,
+                        StockDispo = stockAtLoc + reserved
+                    });
+                }
+            }
+        }
+
+        RecalcTotal();
+    }
+
+    private Task<IEnumerable<int?>> SearchCustomers(string value, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(value))
+            return Task.FromResult(_customerOptions.Select(c => (int?)c.CustomerId));
+        return Task.FromResult(_customerOptions
+            .Where(c => c.CustomerName != null && c.CustomerName.Contains(value, StringComparison.OrdinalIgnoreCase))
+            .Select(c => (int?)c.CustomerId));
+    }
+
+    private Task<IEnumerable<string>> SearchArticles(string value, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(value))
+            return Task.FromResult(_articles.Select(a => a.IdArticle));
+        return Task.FromResult(_articles
+            .Where(a => a.Description != null && a.Description.Contains(value, StringComparison.OrdinalIgnoreCase))
+            .Select(a => a.IdArticle));
+    }
+
+    void OnCommandeChanged(int? val)
+    {
+        _item.CommandeId = val;
+        if (val is int cmdId)
+        {
+            var cmd = _commandes.FirstOrDefault(c => c.CommandeId == cmdId);
+            if (cmd != null) _item.ClientId = cmd.CustomerId;
+
+            if (!_lines.Any())
+                _ = LoadCommandeArticles(cmdId);
+        }
+    }
+
+    async Task LoadCommandeArticles(int cmdId)
+    {
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        var details = await ctx.CommandeDetails
+            .Where(d => d.CommandeId == cmdId)
+            .ToListAsync();
+
+        if (!_selectedLocalisationId.HasValue)
+            return;
+
+        _lines = new List<LivLine>();
+        foreach (var d in details)
+        {
+            var stock = d.ArticleId != null
+                ? await StockAvailability.GetAvailableAsync(d.ArticleId, _selectedLocalisationId.Value)
+                : 0;
+            var qte = d.QteRest ?? d.Qte;
+            if (qte > stock) qte = stock;
+            _lines.Add(new LivLine
+            {
+                ArticleId = d.ArticleId,
+                Qte = qte,
+                Pu = d.Pu,
+                StockDispo = stock
+            });
+        }
+
+        RecalcTotal();
+        StateHasChanged();
+    }
+
+    async Task OnLocalisationChanged(int? locId)
+    {
+        if (!locId.HasValue || locId == _selectedLocalisationId)
+            return;
+
+        _selectedLocalisationId = locId;
+        await RefreshLinesStockAsync();
+        StateHasChanged();
+    }
+
+    async Task RefreshLinesStockAsync()
+    {
+        if (!_selectedLocalisationId.HasValue)
+            return;
+
+        foreach (var line in _lines.Where(l => !string.IsNullOrEmpty(l.ArticleId)))
+        {
+            var stockAtLoc = await StockAvailability.GetAvailableAsync(line.ArticleId!, _selectedLocalisationId.Value);
+            var reserved = LivraisonId.HasValue && _savedLocalisationId == _selectedLocalisationId
+                ? (line.Qte ?? 0)
+                : 0;
+            line.StockDispo = stockAtLoc + reserved;
+            if ((line.Qte ?? 0) > line.StockDispo)
+                line.Qte = line.StockDispo > 0 ? line.StockDispo : null;
+        }
+
+        RecalcTotal();
+    }
+
+    void AddLine() => _lines.Add(new LivLine());
+
+    void RemoveLine(LivLine line)
+    {
+        _lines.Remove(line);
+        RecalcTotal();
+    }
+
+    void RecalcTotal()
+    {
+        _total = _lines.Sum(l => (l.Qte ?? 0) * (l.Pu ?? 0));
+    }
+
+    async void OnArticleLineChanged(LivLine line)
+    {
+        var art = _articles.FirstOrDefault(a => a.IdArticle == line.ArticleId);
+        if (art != null && _selectedLocalisationId.HasValue)
+        {
+            line.Pu = (decimal?)art.Price;
+            var stockAtLoc = await StockAvailability.GetAvailableAsync(line.ArticleId!, _selectedLocalisationId.Value);
+            var reserved = LivraisonId.HasValue && _savedLocalisationId == _selectedLocalisationId
+                ? (line.Qte ?? 0)
+                : 0;
+            line.StockDispo = stockAtLoc + reserved;
+        }
+        else
+        {
+            line.Pu = 0;
+            line.StockDispo = 0;
+        }
+        line.Qte = null;
+        RecalcTotal();
+        StateHasChanged();
+    }
+
+    void Cancel() => MudDialog.Close();
+
+    async Task OnSave()
+    {
+        var validLines = _lines.Where(l => !string.IsNullOrEmpty(l.ArticleId) && (l.Qte ?? 0) > 0).ToList();
+
+        foreach (var line in validLines)
+        {
+            if ((line.Qte ?? 0) > line.StockDispo)
+            {
+                var artName = _articles.FirstOrDefault(a => a.IdArticle == line.ArticleId)?.Description ?? line.ArticleId;
+                Snackbar.Add($"{artName} : stock={QuantityFormat.Display(line.StockDispo)}, demandé={QuantityFormat.Display(line.Qte ?? 0)}", Severity.Warning);
+                return;
+            }
+        }
+
+        if (!validLines.Any())
+        {
+            Snackbar.Add("Ajoutez au moins un article avec une quantité > 0.", Severity.Warning);
+            return;
+        }
+
+        if (!_selectedLocalisationId.HasValue || _selectedLocalisationId.Value <= 0)
+        {
+            Snackbar.Add("Sélectionnez une localisation pour cette livraison.", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            var livraisonId = await LivraisonPosting.SaveAsync(new LivraisonSaveRequest
+            {
+                LivraisonId = LivraisonId,
+                Porteur = _item.Porteur,
+                ClientId = _item.ClientId,
+                CommandeId = _item.CommandeId,
+                Date = _dateValue ?? DateTime.Now,
+                UserLogin = _currentLogin,
+                LocalisationId = _selectedLocalisationId.Value,
+                Lines = validLines.Select(l => new LivraisonLineInput
+                {
+                    ArticleId = l.ArticleId!,
+                    Qte = l.Qte ?? 0,
+                    Pu = l.Pu ?? 0
+                }).ToList()
+            });
+
+            Snackbar.Add(LivraisonId.HasValue
+                ? "Livraison mise à jour"
+                : $"Livraison N° {livraisonId} créée • {validLines.Count} article(s)", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(msg, Severity.Error);
+        }
+    }
+
+    class LivLine
+    {
+        public int? ExistingId { get; set; }
+        public string? ArticleId { get; set; }
+        public decimal? Qte { get; set; }
+        public decimal? Pu { get; set; }
+        public decimal StockDispo { get; set; }
+    }
+}

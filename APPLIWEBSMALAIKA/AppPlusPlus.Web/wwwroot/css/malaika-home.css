@@ -1,0 +1,206 @@
+/* Accueil Malaika — catalogue intégré, couleurs plates */
+.landing-shell--home .malaika-home {
+    --mk-primary: var(--g-brand);
+    --mk-primary-dark: var(--g-brand-dark);
+    --mk-girls: var(--g-girls);
+    --mk-girls-bg: var(--g-girls-bg);
+    --mk-boys: var(--g-boys);
+    --mk-boys-bg: var(--g-boys-bg);
+    background: #f1f5f9;
+}
+
+.malaika-home__wrap {
+    width: 100%;
+    max-width: 1140px;
+    margin: 0 auto;
+    padding: 0 1rem;
+}
+
+.malaika-home__intro {
+    background: #fff;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 1.75rem 0 1.5rem;
+}
+
+.malaika-home__eyebrow {
+    margin: 0 0 0.4rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--mk-primary-dark);
+}
+
+.malaika-home__title {
+    margin: 0 0 0.65rem;
+    font-size: clamp(1.45rem, 3.5vw, 2rem);
+    font-weight: 800;
+    line-height: 1.15;
+    color: #0f172a;
+    letter-spacing: -0.02em;
+}
+
+.malaika-home__lead {
+    margin: 0 0 1.1rem;
+    max-width: 40rem;
+    font-size: 0.95rem;
+    line-height: 1.65;
+    color: #475569;
+}
+
+.malaika-home__accent-girls { color: var(--mk-girls); font-weight: 700; }
+.malaika-home__accent-boys { color: var(--mk-boys); font-weight: 700; }
+
+.malaika-home__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+}
+
+.malaika-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.62rem 1.15rem;
+    border-radius: 8px;
+    font-size: 0.84rem;
+    font-weight: 600;
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.malaika-btn--primary {
+    background: var(--mk-primary);
+    color: #fff;
+    border-color: var(--mk-primary);
+}
+.malaika-btn--primary:hover {
+    background: var(--g-brand-hover);
+    border-color: var(--g-brand-hover);
+    color: #fff;
+}
+
+.malaika-btn--outline {
+    background: #fff;
+    color: var(--mk-primary-dark);
+    border-color: #cbd5e1;
+}
+.malaika-btn--outline:hover {
+    border-color: var(--mk-primary);
+    color: var(--mk-primary-dark);
+    background: var(--g-brand-bg);
+}
+
+.malaika-home__lanes {
+    padding: 1rem 0;
+}
+
+.malaika-home__lanes-grid {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: 1fr;
+}
+@media (min-width: 640px) {
+    .malaika-home__lanes-grid { grid-template-columns: 1fr 1fr; }
+}
+
+.malaika-lane {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 1rem 1.1rem;
+    border-radius: 10px;
+    text-decoration: none;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.malaika-lane:hover {
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+}
+.malaika-lane--girls {
+    border-left: 4px solid var(--mk-girls);
+}
+.malaika-lane--girls:hover { border-color: #fbcfe8; }
+.malaika-lane--boys {
+    border-left: 4px solid var(--mk-boys);
+}
+.malaika-lane--boys:hover { border-color: #bfdbfe; }
+
+.malaika-lane__icon {
+    font-size: 1.15rem;
+    line-height: 1;
+}
+.malaika-lane--girls .malaika-lane__icon { color: var(--mk-girls); }
+.malaika-lane--boys .malaika-lane__icon { color: var(--mk-boys); }
+
+.malaika-lane__label {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+.malaika-lane__hint {
+    font-size: 0.8rem;
+    color: #64748b;
+}
+
+.landing-shell--home .malaika-home .landing-catalog {
+    background: #f1f5f9;
+    padding-top: 0.5rem;
+}
+
+.malaika-home__contact {
+    background: #fff;
+    border-top: 1px solid #e2e8f0;
+    padding: 2rem 0 2.5rem;
+    margin-top: 0.5rem;
+}
+
+.malaika-home__contact-title {
+    margin: 0 0 1rem;
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+
+.malaika-home__contact-grid {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: 1fr;
+}
+@media (min-width: 768px) {
+    .malaika-home__contact-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+.malaika-contact-card {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    padding: 0.85rem 1rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #f8fafc;
+}
+.malaika-contact-card > i {
+    font-size: 1.2rem;
+    color: var(--mk-primary);
+    margin-top: 0.1rem;
+}
+.malaika-contact-card strong {
+    display: block;
+    font-size: 0.82rem;
+    color: #0f172a;
+    margin-bottom: 0.15rem;
+}
+.malaika-contact-card p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #475569;
+    line-height: 1.45;
+}
+.malaika-contact-card a {
+    color: var(--mk-primary-dark);
+    text-decoration: none;
+}
+.malaika-contact-card a:hover { text-decoration: underline; }

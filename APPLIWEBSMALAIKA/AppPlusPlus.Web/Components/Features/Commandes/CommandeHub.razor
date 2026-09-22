@@ -1,0 +1,1557 @@
+@page "/commandes"
+@rendermode InteractiveServer
+@using MudBlazor
+@inject ICmdService CmdService
+@inject IDemandeService DemandeService
+@inject ILocalisationService LocalisationService
+@inject ICommandeService CommandeService
+@inject ICustomerService CustomerService
+@inject MudBlazor.IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+@using AppPlusPlus.Application.DTOs.Demandes
+@using AppPlusPlus.Application.Services.Demandes
+@using AppPlusPlus.Domain.Common
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+
+<ModuleGuard ModuleCode="commandes" ModuleName="Commandes">
+
+<PageTitle>@AppSettings.AppName — Commandes & Clients</PageTitle>
+
+@if (!_loaded)
+{
+    <div class="aw-page">
+        <AwSkeleton Variant="page" Rows="7" />
+    </div>
+}
+else
+{
+    @if (!_canCmdInternesRead && !_canDemandesRead && !_canCmdClientsRead)
+    {
+        <div class="aw-page">
+            <div class="aw-shell" style="max-width:720px;margin:1.5rem auto;">
+                <div class="aw-empty">
+                    <i class="bi bi-lock"></i>
+                    <p><strong>Accès refusé</strong><br />Votre rôle ne possède pas les droits d'accès au module Commandes.</p>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+    <div class="aw-page aw-page--workspace">
+        <div class="aw-workspace">
+            <header class="aw-object-head">
+                <div class="aw-object-head__identity">
+                    <h1 class="aw-object-head__title">Commandes</h1>
+                    <p class="aw-object-head__desc">@GetCommandeSectionDescription()</p>
+                </div>
+            </header>
+
+            <nav class="aw-railnav" aria-label="Sections commandes" role="tablist">
+                @if (_canCmdInternesRead)
+                {
+                    <button type="button" role="tab" aria-selected="@(_tab == 0)"
+                            class="aw-railnav__item @(_tab == 0 ? "aw-railnav__item--active" : "")"
+                            title="Commandes internes fournisseurs"
+                            @onclick="@(async () => await OnTabChange(0))">
+                        <i class="bi bi-clipboard-check" aria-hidden="true"></i>
+                        Internes
+                        @if (_cmdData.Count > 0)
+                        {
+                            <span class="aw-railnav__count">@_cmdData.Count</span>
+                        }
+                    </button>
+                }
+                @if (_canDemandesRead)
+                {
+                    <button type="button" role="tab" aria-selected="@(_tab == 1)"
+                            class="aw-railnav__item @(_tab == 1 ? "aw-railnav__item--active" : "")"
+                            title="Demandes génériques dépôt → magasins"
+                            @onclick="@(async () => await OnTabChange(1))">
+                        <i class="bi bi-arrow-left-right" aria-hidden="true"></i>
+                        Demandes
+                        @{
+                            var demandesOuvertes = _demandeData.Count(d => d.Statut is 0 or 1);
+                        }
+                        @if (demandesOuvertes > 0)
+                        {
+                            <span class="aw-railnav__count aw-railnav__count--alert">@demandesOuvertes</span>
+                        }
+                    </button>
+                }
+                @if (_canCmdClientsRead)
+                {
+                    <button type="button" role="tab" aria-selected="@(_tab == 2)"
+                            class="aw-railnav__item @(_tab == 2 ? "aw-railnav__item--active" : "")"
+                            title="Commandes clients & point de vente"
+                            @onclick="@(async () => await OnTabChange(2))">
+                        <i class="bi bi-shop" aria-hidden="true"></i>
+                        Commandes clients
+                        @{
+                            var ventesNouvelles = _venteData.Count(c => (c.Status ?? 0) == 0);
+                        }
+                        @if (ventesNouvelles > 0)
+                        {
+                            <span class="aw-railnav__count aw-railnav__count--alert">@ventesNouvelles</span>
+                        }
+                    </button>
+                    <button type="button" role="tab" aria-selected="@(_tab == 3)"
+                            class="aw-railnav__item @(_tab == 3 ? "aw-railnav__item--active" : "")"
+                            title="Répertoire clients"
+                            @onclick="@(async () => await OnTabChange(3))">
+                        <i class="bi bi-people" aria-hidden="true"></i>
+                        Clients
+                    </button>
+                }
+            </nav>
+
+            <div class="aw-workspace__body">
+
+            @* ══════════════════ COMMANDES INTERNES ══════════════════ *@
+            @if (_tab == 0)
+            {
+                var cmdRecues = _cmdData.Count(r => (r.Cmd.Status ?? 0) == 2);
+                var cmdEnCours = _cmdData.Count(r => (r.Cmd.Status ?? 0) == 1);
+                var cmdNouvelles = _cmdData.Count(r => (r.Cmd.Status ?? 0) == 0);
+                var cmdAnnulees = _cmdData.Count(r => (r.Cmd.Status ?? 0) == 3);
+                var cmdOuvertes = cmdNouvelles + cmdEnCours;
+                var cmdRecvPct = _cmdData.Count == 0 ? 0d : Math.Round(100d * cmdRecues / _cmdData.Count, 1);
+                var cmdCoverTone = cmdOuvertes == 0 ? "brand" : cmdOuvertes <= cmdRecues ? "accent" : "danger";
+                var cmdPageItems = PageOf(_cmdFiltered, _cmdPage, _cmdPageSize).ToList();
+
+                @if (_cmdData.Any())
+                {
+                    <section class="aw-overview aw-overview--with-cover" aria-label="Vue d'ensemble commandes internes">
+                        <div class="aw-overview__top">
+                            <div class="aw-overview__intro">
+                                <h2 class="aw-overview__title">Vue d'ensemble</h2>
+                                <p class="aw-overview__lead">
+                                    Suivi des commandes fournisseurs : ouverture, réception et clôture.
+                                </p>
+                            </div>
+                            <div class="@($"aw-overview__cover aw-overview__cover--{cmdCoverTone}")">
+                                <span class="aw-overview__cover-value">@cmdRecvPct.ToString("0.#")&nbsp;%</span>
+                                <span class="aw-overview__cover-label">commandes reçues</span>
+                            </div>
+                        </div>
+                        <div class="aw-overview__meter" role="meter"
+                             aria-valuemin="0" aria-valuemax="100" aria-valuenow="@((int)cmdRecvPct)"
+                             aria-label="Part des commandes internes reçues">
+                            <div class="aw-overview__meter-track">
+                                <div class="@($"aw-overview__meter-fill aw-overview__meter-fill--{cmdCoverTone}")"
+                                     style="width: @(cmdRecvPct.ToString(System.Globalization.CultureInfo.InvariantCulture))%"></div>
+                            </div>
+                        </div>
+                        <div class="aw-overview__metrics">
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-plus-circle"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Nouvelles</span>
+                                    <span class="aw-overview__metric-value">@cmdNouvelles</span>
+                                    <span class="aw-overview__metric-hint">À lancer en réception</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-hourglass-split"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">En cours</span>
+                                    <span class="aw-overview__metric-value">@cmdEnCours</span>
+                                    <span class="aw-overview__metric-hint">Réception partielle</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-check-circle"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Reçues</span>
+                                    <span class="aw-overview__metric-value">@cmdRecues</span>
+                                    <span class="aw-overview__metric-hint">Clôturées côté stock</span>
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+                }
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search"
+                               placeholder="Rechercher n°, fournisseur, description…"
+                               aria-label="Rechercher une commande interne"
+                               @bind="_cmdSearch"
+                               @bind:event="oninput"
+                               @bind:after="ApplyCmdFilter" />
+                    </div>
+                    <div class="aw-actionbar__filters">
+                        @if (_cmdData.Any())
+                        {
+                            <AwSearchSelect AriaLabel="Statut de la commande"
+                                            Placeholder="Statut"
+                                            Searchable="false"
+                                            Value="@(_cmdStatusFilter?.ToString() ?? "")"
+                                            ValueChanged="OnCmdStatusFilterChanged"
+                                            Options="@GetCmdStatusFilterOptions(cmdNouvelles, cmdEnCours, cmdRecues, cmdAnnulees)" />
+                        }
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="LoadCmd">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                        @if (_canCmdInternesWrite)
+                        {
+                            <button type="button" class="aw-btn aw-btn--primary" @onclick="OnAddCmd">
+                                <i class="bi bi-plus-lg"></i> Nouvelle commande
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                @if (_cmdLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!cmdPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-clipboard-check"></i>
+                            <p>Aucune commande interne pour ces filtres.</p>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>N° / Date</th>
+                                        <th>Fournisseur</th>
+                                        <th>Description</th>
+                                        <th>Articles</th>
+                                        <th>Réception</th>
+                                        <th>Statut</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in cmdPageItems)
+                                    {
+                                        var st = item.Cmd.Status ?? 0;
+                                        var (lbl, badgeCls, icon) = st switch
+                                        {
+                                            0 => ("Nouvelle", "aw-badge--muted", "bi-plus-circle"),
+                                            1 => ("En cours", "aw-badge--accent", "bi-hourglass-split"),
+                                            2 => ("Reçue", "aw-badge--brand", "bi-check-circle"),
+                                            3 => ("Annulée", "aw-badge--danger", "bi-x-circle"),
+                                            _ => ("—", "aw-badge--muted", "bi-question")
+                                        };
+                                        var pct = item.TotalOrder > 0
+                                            ? Math.Min(100, (int)(item.TotalReceived / item.TotalOrder * 100))
+                                            : 0;
+                                        var meterTone = pct >= 100 ? "brand" : pct >= 50 ? "accent" : "danger";
+                                        <tr @onclick="@(() => OnCmdRowClick(item))">
+                                            <td>
+                                                <span class="aw-table__title">N° @item.Cmd.Id</span>
+                                                <span class="aw-table__meta">@(item.Cmd.DateCommande?.ToString("dd/MM/yyyy") ?? "—")</span>
+                                            </td>
+                                            <td>
+                                                @if (item.Cmd.Supplier != null)
+                                                {
+                                                    <span class="aw-table__title"><i class="bi bi-truck" aria-hidden="true"></i> @item.Cmd.Supplier.SupplierName</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-table__meta">—</span>
+                                                }
+                                            </td>
+                                            <td>@(string.IsNullOrWhiteSpace(item.Cmd.Description) ? "—" : item.Cmd.Description)</td>
+                                            <td><span class="aw-badge aw-badge--muted">@item.NbArticles article@(item.NbArticles > 1 ? "s" : "")</span></td>
+                                            <td>
+                                                @if (item.TotalOrder > 0)
+                                                {
+                                                    <div class="aw-table-meter" title="@pct % reçu">
+                                                        <div class="aw-overview__meter-track">
+                                                            <div class="@($"aw-overview__meter-fill aw-overview__meter-fill--{meterTone}")"
+                                                                 style="width:@pct%"></div>
+                                                        </div>
+                                                        <span class="aw-table__num">@pct%</span>
+                                                    </div>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-table__meta">—</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <span class="aw-badge @badgeCls"><i class="bi @icon" aria-hidden="true"></i>@lbl</span>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="_cmdFiltered.Count"
+                                 Page="_cmdPage"
+                                 PageSize="_cmdPageSize"
+                                 ItemLabel="commande"
+                                 PageChanged="SetCmdPage"
+                                 PageSizeChanged="SetCmdPageSize" />
+                    </div>
+                }
+            }
+
+            @* ══════════════════ DEMANDES GÉNÉRIQUES ══════════════════ *@
+            @if (_tab == 1)
+            {
+                var dAttDepot = _demandeData.Count(d => d.Statut == 0);
+                var dAttMag = _demandeData.Count(d => d.Statut == 1);
+                var dComplete = _demandeData.Count(d => d.Statut == 2);
+                var dOuvertes = dAttDepot + dAttMag;
+                var dDonePct = _demandeData.Count == 0 ? 0d : Math.Round(100d * dComplete / _demandeData.Count, 1);
+                var dCoverTone = dOuvertes == 0 ? "brand" : dAttDepot > 0 ? "accent" : "brand";
+                var demandePageItems = PageOf(_demandeFiltered, _demandePage, _demandePageSize).ToList();
+
+                @if (_demandeData.Any())
+                {
+                    <section class="aw-overview aw-overview--with-cover" aria-label="Vue d'ensemble demandes">
+                        <div class="aw-overview__top">
+                            <div class="aw-overview__intro">
+                                <h2 class="aw-overview__title">Vue d'ensemble</h2>
+                                <p class="aw-overview__lead">
+                                    Circuit dépôt → magasins : validations en attente et demandes clôturées.
+                                </p>
+                            </div>
+                            <div class="@($"aw-overview__cover aw-overview__cover--{dCoverTone}")">
+                                <span class="aw-overview__cover-value">@dOuvertes</span>
+                                <span class="aw-overview__cover-label">demande(s) ouverte(s)</span>
+                            </div>
+                        </div>
+                        <div class="aw-overview__meter" role="meter"
+                             aria-valuemin="0" aria-valuemax="100" aria-valuenow="@((int)dDonePct)"
+                             aria-label="Part des demandes complétées">
+                            <div class="aw-overview__meter-track">
+                                <div class="@($"aw-overview__meter-fill aw-overview__meter-fill--{dCoverTone}")"
+                                     style="width: @(dDonePct.ToString(System.Globalization.CultureInfo.InvariantCulture))%"></div>
+                            </div>
+                        </div>
+                        <div class="aw-overview__metrics">
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-building"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Attente dépôt</span>
+                                    <span class="aw-overview__metric-value">@dAttDepot</span>
+                                    <span class="aw-overview__metric-hint">À approuver côté dépôt</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-shop"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Attente magasin</span>
+                                    <span class="aw-overview__metric-value">@dAttMag</span>
+                                    <span class="aw-overview__metric-hint">Réception à confirmer</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-check2-all"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Complétées</span>
+                                    <span class="aw-overview__metric-value">@dComplete</span>
+                                    <span class="aw-overview__metric-hint">Circuit terminé</span>
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+                }
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__filters">
+                        @if (_demandeData.Any())
+                        {
+                            <AwSearchSelect AriaLabel="Statut de la demande"
+                                            Placeholder="Statut"
+                                            Searchable="false"
+                                            Value="@(_demandeStatutFilter?.ToString() ?? "")"
+                                            ValueChanged="OnDemandeStatutFilterChanged"
+                                            Options="@GetDemandeStatutFilterOptions(dAttDepot, dAttMag, dComplete)" />
+                        }
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        @if (_depotLabel != null && _demandeUser.CanApproveDepot)
+                        {
+                            <span class="aw-table__meta">Dépôt : @_depotLabel</span>
+                        }
+                        <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="LoadDemandes">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+                </div>
+                @if (_demandeUser.CanApproveDepot && _depotLabel == null)
+                {
+                    <div class="aw-queue-alert" role="status">
+                        <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+                        <div class="aw-queue-alert__body">Aucun dépôt configuré — cochez « Dépôt central » sur une localisation.</div>
+                    </div>
+                }
+
+                @if (_demandeLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!demandePageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-arrow-left-right"></i>
+                            <p>Aucune demande pour ces filtres.</p>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>N° / Date</th>
+                                        <th>Agent / localisation</th>
+                                        <th>Dépôt source</th>
+                                        <th>Articles</th>
+                                        <th>Qté demandée</th>
+                                        <th>Statut</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in demandePageItems)
+                                    {
+                                        var (lbl, cls) = item.Statut switch
+                                        {
+                                            0 => ("Attente dépôt", "aw-badge--accent"),
+                                            1 => ("Attente magasin", "aw-badge--brand"),
+                                            2 => ("Complétée", "aw-badge--brand"),
+                                            3 => ("Refusée dépôt", "aw-badge--danger"),
+                                            4 => ("Refusée magasin", "aw-badge--danger"),
+                                            _ => ("—", "aw-badge--muted")
+                                        };
+                                        <tr @onclick="@(() => OnDemandeRowClick(item))">
+                                            <td>
+                                                <span class="aw-table__title">N° @item.IdDemande</span>
+                                                <span class="aw-table__meta">@item.DateCreation.ToString("dd/MM/yyyy HH:mm")</span>
+                                            </td>
+                                            <td>@item.LocalisationDemandeur</td>
+                                            <td>@item.LocalisationSource</td>
+                                            <td><span class="aw-badge aw-badge--muted">@item.NbArticles</span></td>
+                                            <td class="aw-table__num">@item.TotalQteDemandee.ToString("N0")</td>
+                                            <td><span class="aw-badge @cls">@lbl</span></td>
+                                            <td>
+                                                @if (item.CanAdminApprove && _canCmdInternesWrite)
+                                                {
+                                                    <span class="aw-table__meta" style="color:var(--aw-brand);">Approuver dépôt</span>
+                                                }
+                                                else if (item.CanAgentApprove && _canCmdInternesWrite)
+                                                {
+                                                    <span class="aw-table__meta" style="color:var(--aw-brand);">Confirmer réception</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-table__meta">—</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="_demandeFiltered.Count"
+                                 Page="_demandePage"
+                                 PageSize="_demandePageSize"
+                                 ItemLabel="demande"
+                                 PageChanged="SetDemandePage"
+                                 PageSizeChanged="SetDemandePageSize" />
+                    </div>
+                }
+            }
+
+            @* ══════════════════ COMMANDES CLIENTS (VENTE) ══════════════════ *@
+            @if (_tab == 2)
+            {
+                @if (_showVenteCatalog && _canCmdClientsWrite)
+                {
+                    <div class="aw-actionbar">
+                        <button type="button" class="aw-btn aw-btn--ghost" @onclick="ShowVenteHistory">
+                            <i class="bi bi-arrow-left"></i> Retour à l'historique
+                        </button>
+                        <span class="aw-table__meta">Saisie manuelle — les commandes en ligne arrivent depuis le catalogue client</span>
+                    </div>
+                    <CommandePosPanel @ref="_posPanel" OnSaved="@OnVentePosSaved" />
+                }
+                else
+                {
+                    var vNouvelles = _venteData.Count(c => (c.Status ?? 0) == 0);
+                    var vEnCours = _venteData.Count(c => (c.Status ?? 0) == 1);
+                    var vLivrees = _venteData.Count(c => (c.Status ?? 0) >= 2);
+                    var vCoverTone = vNouvelles > 0 ? "accent" : "brand";
+                    var ventePageItems = PageOf(_venteFiltered, _ventePage, _ventePageSize).ToList();
+                    @if (vNouvelles > 0)
+                    {
+                        <div class="aw-queue-alert" role="status">
+                            <i class="bi bi-bell-fill" aria-hidden="true"></i>
+                            <div class="aw-queue-alert__body">
+                                <strong>@vNouvelles nouvelle@(vNouvelles > 1 ? "s" : "") commande@(vNouvelles > 1 ? "s" : "")</strong>
+                                <span class="d-block" style="margin-top:0.15rem;color:var(--aw-muted);">
+                                    @if (_venteStatusFilter == 0)
+                                    {
+                                        <text>Affichage filtré sur les commandes à traiter.</text>
+                                    }
+                                    else
+                                    {
+                                        <text>Reçues depuis le catalogue client — à traiter en priorité.</text>
+                                    }
+                                </span>
+                            </div>
+                            <div class="aw-queue-alert__actions">
+                                @if (_venteStatusFilter == 0)
+                                {
+                                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="@(() => SetVenteStatusFilter(null))">Tout voir</button>
+                                }
+                                else
+                                {
+                                    <button type="button" class="aw-btn aw-btn--primary aw-btn--sm" @onclick="@(() => SetVenteStatusFilter(0))">Voir les nouvelles</button>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    @if (_venteData.Any())
+                    {
+                        <section class="aw-overview aw-overview--with-cover" aria-label="Vue d'ensemble commandes clients">
+                            <div class="aw-overview__top">
+                                <div class="aw-overview__intro">
+                                    <h2 class="aw-overview__title">Vue d'ensemble</h2>
+                                    <p class="aw-overview__lead">
+                                        File opérationnelle : nouvelles commandes, préparation et livraisons.
+                                    </p>
+                                </div>
+                                <div class="@($"aw-overview__cover aw-overview__cover--{vCoverTone}")">
+                                    <span class="aw-overview__cover-value">@vNouvelles</span>
+                                    <span class="aw-overview__cover-label">nouvelle(s) à traiter</span>
+                                </div>
+                            </div>
+                            <div class="aw-overview__metrics">
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-stars"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">Nouvelles</span>
+                                        <span class="aw-overview__metric-value">@vNouvelles</span>
+                                        <span class="aw-overview__metric-hint">Priorité file d'attente</span>
+                                    </div>
+                                </article>
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-hourglass-split"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">En cours</span>
+                                        <span class="aw-overview__metric-value">@vEnCours</span>
+                                        <span class="aw-overview__metric-hint">Préparation / livraison</span>
+                                    </div>
+                                </article>
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-truck"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">Livrées+</span>
+                                        <span class="aw-overview__metric-value">@vLivrees</span>
+                                        <span class="aw-overview__metric-hint">Livrées ou facturées</span>
+                                    </div>
+                                </article>
+                            </div>
+                        </section>
+                    }
+
+                    <div class="aw-actionbar">
+                        <div class="aw-actionbar__search">
+                            <i class="bi bi-search" aria-hidden="true"></i>
+                        <AwDebouncedInput Placeholder="Rechercher n°, client, description…"
+                                          AriaLabel="Rechercher une commande client"
+                                          Value="@_venteSearch"
+                                          ValueChanged="OnVenteSearchChanged" />
+                        </div>
+                        <div class="aw-actionbar__filters">
+                            @if (_venteData.Any())
+                            {
+                                <AwSearchSelect AriaLabel="Statut commande client"
+                                                Placeholder="Statut"
+                                                Searchable="false"
+                                                Value="@(_venteStatusFilter?.ToString() ?? "")"
+                                                ValueChanged="OnVenteStatusFilterChanged"
+                                                Options="@GetVenteStatusFilterOptions(vNouvelles, vEnCours, vLivrees)" />
+                            }
+                        </div>
+                        <div class="aw-actionbar__actions">
+                            <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="LoadVentes">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                            @if (_canCmdClientsWrite)
+                            {
+                                <button type="button" class="aw-btn aw-btn--primary" @onclick="ShowVenteCatalog">
+                                    <i class="bi bi-grid-3x3-gap"></i> Catalogue
+                                </button>
+                                <HubActionsMenu Label="">
+                                    <li><button type="button" class="dropdown-item" @onclick="@OnAddVente"><i class="bi bi-pencil me-2"></i>Saisie classique</button></li>
+                                </HubActionsMenu>
+                            }
+                        </div>
+                    </div>
+
+                    @if (_venteLoading)
+                    {
+                        <div class="aw-table-region">
+                            <AwSkeleton Variant="table" Rows="5" />
+                        </div>
+                    }
+                    else if (!ventePageItems.Any())
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-empty">
+                                <i class="bi bi-shop"></i>
+                                <p>Aucune commande client pour ces filtres.</p>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>N° / Date</th>
+                                            <th>Client</th>
+                                            <th>Objet</th>
+                                            <th>Total / Reste</th>
+                                            <th>Livraisons</th>
+                                            <th>Statut</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var item in ventePageItems)
+                                        {
+                                            var st = item.Status ?? 0;
+                                            var (vlbl, vbadgeCls, vicon) = st switch
+                                            {
+                                                0 => ("Nouvelle", "aw-badge--accent", "bi-stars"),
+                                                1 => ("En cours", "aw-badge--accent", "bi-hourglass-split"),
+                                                2 => ("Livrée", "aw-badge--brand", "bi-truck"),
+                                                3 => ("Facturée", "aw-badge--brand", "bi-check-circle"),
+                                                _ => ("—", "aw-badge--muted", "bi-question")
+                                            };
+                                            var nbLiv = item.Livraisons.Count;
+                                            var nbDetails = item.Details.Count;
+                                            var allDelivered = nbDetails > 0 && nbLiv > 0 && !HasRemainingToDeliver(item);
+                                            <tr class="@(st == 0 ? "aw-table__row--alert" : null)" @onclick="@(() => OnVenteRowClick(item))">
+                                                <td>
+                                                    <span class="aw-table__title">
+                                                        @if (st == 0)
+                                                        {
+                                                            <span class="aw-dot-alert" title="Nouvelle commande" aria-hidden="true"></span>
+                                                        }
+                                                        N° @item.CommandeId
+                                                        @if (IsOnlineClientOrder(item))
+                                                        {
+                                                            <span class="aw-badge aw-badge--brand"><i class="bi bi-phone" aria-hidden="true"></i>En ligne</span>
+                                                        }
+                                                    </span>
+                                                    <span class="aw-table__meta">@(item.CreationDate?.ToString("dd/MM/yyyy HH:mm") ?? "—")</span>
+                                                </td>
+                                                <td>
+                                                    @if (item.Customer != null)
+                                                    {
+                                                        <span class="aw-table__title">@item.Customer.CustomerName</span>
+                                                        @if (!string.IsNullOrWhiteSpace(item.Customer.Contact))
+                                                        {
+                                                            <span class="aw-table__meta"><i class="bi bi-telephone" aria-hidden="true"></i> @item.Customer.Contact</span>
+                                                        }
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="aw-table__meta">—</span>
+                                                    }
+                                                </td>
+                                                <td>@(string.IsNullOrWhiteSpace(item.CommandeDescription) ? "—" : item.CommandeDescription)</td>
+                                                <td>
+                                                    @{
+                                                        var totalFc = ResolveCommandeDisplayTotalFc(item);
+                                                        var restFc = Math.Max(0, totalFc - item.MontantPaye);
+                                                        var taux = item.Taux ?? MonetaryStandard.DefaultTauxFallback;
+                                                    }
+                                                    <span class="aw-table__title"><CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="totalFc" Taux="@taux" /></span>
+                                                    @if (restFc > 0)
+                                                    {
+                                                        <span class="aw-table__meta" style="color:var(--aw-accent);">Reste :
+                                                            <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="restFc" Taux="@taux" />
+                                                        </span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="aw-table__meta" style="color:var(--aw-brand);">Payé intégralement</span>
+                                                    }
+                                                </td>
+                                                <td>
+                                                    @if (nbLiv == 0)
+                                                    {
+                                                        <span class="aw-badge aw-badge--muted">0 livraison</span>
+                                                    }
+                                                    else if (allDelivered)
+                                                    {
+                                                        <span class="aw-badge aw-badge--brand"><i class="bi bi-check-circle" aria-hidden="true"></i>@nbLiv livrée@(nbLiv > 1 ? "s" : "")</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="aw-badge aw-badge--accent"><i class="bi bi-truck" aria-hidden="true"></i>@nbLiv en cours</span>
+                                                    }
+                                                </td>
+                                                <td>
+                                                    <span class="aw-badge @vbadgeCls"><i class="bi @vicon" aria-hidden="true"></i>@vlbl</span>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            <AwPager TotalCount="_venteFiltered.Count"
+                                     Page="_ventePage"
+                                     PageSize="_ventePageSize"
+                                     ItemLabel="commande"
+                                     PageChanged="SetVentePage"
+                                     PageSizeChanged="SetVentePageSize" />
+                        </div>
+                    }
+                }
+            }
+
+            @* ══════════════════ CLIENTS ══════════════════ *@
+            @if (_tab == 3)
+            {
+                var nbPermanent = _clientData.Count(c => c.IsPermanent == true);
+                var nbPassager = _clientData.Count(c => c.IsPermanent != true);
+                var clientPageItems = PageOf(_clientFiltered, _clientPage, _clientPageSize).ToList();
+
+                @if (_clientData.Any())
+                {
+                    <section class="aw-overview aw-overview--with-cover" aria-label="Vue d'ensemble clients">
+                        <div class="aw-overview__top">
+                            <div class="aw-overview__intro">
+                                <h2 class="aw-overview__title">Vue d'ensemble</h2>
+                                <p class="aw-overview__lead">
+                                    Répertoire clients, typologie et points de fidélité.
+                                </p>
+                            </div>
+                            <div class="aw-overview__cover aw-overview__cover--brand">
+                                <span class="aw-overview__cover-value">@_clientData.Count</span>
+                                <span class="aw-overview__cover-label">client(s) au total</span>
+                            </div>
+                        </div>
+                        <div class="aw-overview__metrics">
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-person-check"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Permanents</span>
+                                    <span class="aw-overview__metric-value">@nbPermanent</span>
+                                    <span class="aw-overview__metric-hint">Clients récurrents</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-person"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Passagers</span>
+                                    <span class="aw-overview__metric-value">@nbPassager</span>
+                                    <span class="aw-overview__metric-hint">Achats ponctuels</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-star"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Points acquis</span>
+                                    <span class="aw-overview__metric-value">@_clientLoyalty.Values.Sum(l => l.AcquiredPoints)</span>
+                                    <span class="aw-overview__metric-hint">Fidélité cumulée</span>
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+                }
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search"
+                               placeholder="Rechercher nom, téléphone, email…"
+                               aria-label="Rechercher un client"
+                               @bind="_clientSearch"
+                               @bind:event="oninput"
+                               @bind:after="ApplyClientFilter" />
+                    </div>
+                    <div class="aw-actionbar__filters">
+                        @if (_clientData.Any())
+                        {
+                            <AwSearchSelect AriaLabel="Type de client"
+                                            Placeholder="Type"
+                                            Searchable="false"
+                                            Value="@_clientTypeFilter"
+                                            ValueChanged="OnClientTypeFilterChanged"
+                                            Options="@GetClientTypeFilterOptions(nbPermanent, nbPassager)" />
+                        }
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="LoadClients">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                        @if (_canCmdClientsWrite)
+                        {
+                            <button type="button" class="aw-btn aw-btn--primary" @onclick="AddClient">
+                                <i class="bi bi-plus-lg"></i> Nouveau client
+                            </button>
+                        }
+                    </div>
+                </div>
+                <div class="aw-queue-alert" role="note" style="border-color:var(--aw-line);background:#f8fafc;">
+                    <i class="bi bi-star" style="color:var(--aw-brand);" aria-hidden="true"></i>
+                    <div class="aw-queue-alert__body">
+                        <strong>Fidélité :</strong> @CustomerLoyaltyRules.RuleSummary
+                        Les commandes nouvelles ou en préparation affichent des points en attente jusqu'à livraison.
+                    </div>
+                </div>
+
+                @if (_clientLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!clientPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-people"></i>
+                            <p>Aucun client pour ces filtres.</p>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>Client</th>
+                                        <th>Contact</th>
+                                        <th>Adresse</th>
+                                        <th>Points fidélité</th>
+                                        <th>Créé le</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in clientPageItems)
+                                    {
+                                        var loyalty = GetClientLoyalty(item.CustomerId);
+                                        <tr @onclick="@(() => OnClientRowClick(item))">
+                                            <td>
+                                                <span class="aw-table__title">@item.CustomerName</span>
+                                                @if (item.IsPermanent == true)
+                                                {
+                                                    <span class="aw-badge aw-badge--brand">Permanent</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-badge aw-badge--muted">Passager</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (!string.IsNullOrWhiteSpace(item.Contact))
+                                                {
+                                                    <span class="aw-table__title"><i class="bi bi-telephone" aria-hidden="true"></i> @item.Contact</span>
+                                                }
+                                                @if (!string.IsNullOrWhiteSpace(item.Email))
+                                                {
+                                                    <span class="aw-table__meta"><i class="bi bi-envelope" aria-hidden="true"></i> @item.Email</span>
+                                                }
+                                                @if (string.IsNullOrWhiteSpace(item.Contact) && string.IsNullOrWhiteSpace(item.Email))
+                                                {
+                                                    <span class="aw-table__meta">—</span>
+                                                }
+                                            </td>
+                                            <td>@(string.IsNullOrWhiteSpace(item.Adress) ? "—" : item.Adress)</td>
+                                            <td>
+                                                <span class="aw-badge aw-badge--brand"><i class="bi bi-star-fill" aria-hidden="true"></i>@loyalty.AcquiredPoints pt@(loyalty.AcquiredPoints > 1 ? "s" : "")</span>
+                                                @if (loyalty.PendingPoints > 0)
+                                                {
+                                                    <span class="aw-table__meta" style="color:var(--aw-accent);">+@loyalty.PendingPoints en attente</span>
+                                                }
+                                                @if (loyalty.QualifyingOrderCount > 0)
+                                                {
+                                                    <span class="aw-table__meta">@loyalty.QualifyingOrderCount commande@(loyalty.QualifyingOrderCount > 1 ? "s" : "") livrée@(loyalty.QualifyingOrderCount > 1 ? "s" : "")</span>
+                                                }
+                                                else if (loyalty.AcquiredPoints == 0 && loyalty.PendingPoints == 0)
+                                                {
+                                                    <span class="aw-table__meta">Aucune commande qualifiante</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <span class="aw-table__meta">@(item.CreationDate?.ToString("dd/MM/yyyy") ?? "—")</span>
+                                                @if (!string.IsNullOrWhiteSpace(item.UserLogin))
+                                                {
+                                                    <span class="aw-table__meta"><i class="bi bi-person-circle" aria-hidden="true"></i> @item.UserLogin</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="_clientFiltered.Count"
+                                 Page="_clientPage"
+                                 PageSize="_clientPageSize"
+                                 ItemLabel="client"
+                                 PageChanged="SetClientPage"
+                                 PageSizeChanged="SetClientPageSize" />
+                    </div>
+                }
+            }
+            </div>
+        </div>
+    </div>
+    }
+}
+
+</ModuleGuard>
+
+@code {
+    /* ── Hub ── */
+    int _tab;
+    bool _loaded;
+    bool _isAdmin;
+    string _login = "";
+    string? _roleDescription;
+    PermissionSnapshot _permissions = PermissionSnapshot.Empty;
+    DemandeUserContext _demandeUser = new();
+
+    /* ── Permissions ── */
+    bool _canCmdInternesRead;
+    bool _canCmdInternesWrite;
+    bool _canDemandesRead;
+    bool _canDemandesWrite;
+    bool _canCmdClientsRead;
+    bool _canCmdClientsWrite;
+
+    static readonly int[] PageSizeChoices = [10, 25, 50, 100];
+
+    /* ── Commandes internes ── */
+    bool _cmdLoading;
+    bool _cmdLoadedOnce;
+    List<CmdRowDto> _cmdData = new();
+    List<CmdRowDto> _cmdFiltered = new();
+    int? _cmdStatusFilter;
+    string _cmdSearch = "";
+    int _cmdPage = 1;
+    int _cmdPageSize = 25;
+
+    /* ── Demandes génériques ── */
+    bool _demandeLoading;
+    bool _demandeLoadedOnce;
+    List<DemandeRowDto> _demandeData = new();
+    List<DemandeRowDto> _demandeFiltered = new();
+    int? _demandeStatutFilter;
+    string? _depotLabel;
+    int _demandePage = 1;
+    int _demandePageSize = 25;
+
+    /* ── Commandes clients (Vente) ── */
+    bool _venteLoading;
+    bool _venteLoadedOnce;
+    bool _showVenteCatalog;
+    List<Commande> _venteData = new();
+    List<Commande> _venteFiltered = new();
+    int? _venteStatusFilter;
+    string _venteSearch = "";
+    Dictionary<int, decimal> _deliveredQty = new();
+    int _ventePage = 1;
+    int _ventePageSize = 25;
+
+    /* ── Clients ── */
+    bool _clientLoading;
+    bool _clientLoadedOnce;
+    List<Customer> _clientData = new();
+    List<Customer> _clientFiltered = new();
+    string _clientTypeFilter = "all";
+    string _clientSearch = "";
+    Dictionary<int, CustomerLoyaltySummaryDto> _clientLoyalty = new();
+    int _clientPage = 1;
+    int _clientPageSize = 25;
+
+    CommandePosPanel? _posPanel;
+
+    /* ════════════════════════════════════════════════════════════
+       INIT
+       ════════════════════════════════════════════════════════════ */
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            _login = user.FindFirst("login")?.Value
+                ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+            _roleDescription = user.FindFirst(ClaimTypes.Role)?.Value;
+            _isAdmin = SystemRolePolicy.IsAdministrateur(_roleDescription);
+            var perms = await PermissionResolver.GetPermissionsAsync(_login);
+            _permissions = perms;
+            _canCmdInternesRead = PermissionGate.ViewSubTab(perms, "commandes.internes",
+                () => PermissionGate.LegacyRead(perms, AppFunctions.CommandesInternes, _isAdmin));
+            _canCmdInternesWrite = PermissionGate.DoAction(perms, "commandes.internes.write",
+                () => PermissionGate.LegacyWrite(perms, AppFunctions.CommandesInternes, _isAdmin));
+            _canCmdClientsRead = PermissionGate.ViewSubTab(perms, "commandes.clients",
+                () => PermissionGate.LegacyRead(perms, AppFunctions.CommandesClients, _isAdmin));
+            _canCmdClientsWrite = PermissionGate.DoAction(perms, "commandes.clients.write",
+                () => PermissionGate.LegacyWrite(perms, AppFunctions.CommandesClients, _isAdmin));
+            _canDemandesRead = PermissionGate.ViewSubTab(perms, "commandes.demandes",
+                () => _canCmdInternesRead);
+            _canDemandesWrite = PermissionGate.DoAction(perms, "commandes.demandes.write",
+                () => _canCmdInternesWrite);
+
+            var locIds = await LocalisationService.GetUserLocalisationIdsAsync(_login, _isAdmin);
+            _demandeUser = new DemandeUserContext
+            {
+                Login = _login,
+                RoleDescription = _roleDescription,
+                Permissions = perms,
+                LocalisationIds = locIds
+            };
+        }
+        _loaded = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        try
+        {
+            var savedTab = await JS.InvokeAsync<int>("tabNavigation.getTab", "commandes", ResolveDefaultTab());
+            if (IsTabAllowed(savedTab))
+                _tab = savedTab;
+            else
+                _tab = ResolveDefaultTab();
+        }
+        catch
+        {
+            _tab = ResolveDefaultTab();
+        }
+
+        await LoadActiveTabAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    int ResolveDefaultTab()
+    {
+        if (_canCmdInternesRead) return 0;
+        if (_canDemandesRead) return 1;
+        if (_canCmdClientsRead) return 2;
+        return 0;
+    }
+
+    bool IsTabAllowed(int tab) => tab switch
+    {
+        0 => _canCmdInternesRead,
+        1 => _canDemandesRead,
+        2 or 3 => _canCmdClientsRead,
+        _ => false
+    };
+
+    async Task LoadActiveTabAsync()
+    {
+        switch (_tab)
+        {
+            case 0 when _canCmdInternesRead && !_cmdLoadedOnce:
+                await LoadCmd();
+                break;
+            case 1 when _canDemandesRead && !_demandeLoadedOnce:
+                await LoadDemandes();
+                break;
+            case 2 when _canCmdClientsRead && !_venteLoadedOnce:
+                await LoadVentes();
+                break;
+            case 3 when _canCmdClientsRead && !_clientLoadedOnce:
+                await LoadClients();
+                break;
+        }
+    }
+
+    async Task OnTabChange(int tabIndex)
+    {
+        _tab = tabIndex;
+        try
+        {
+            await JS.InvokeVoidAsync("tabNavigation.saveTab", "commandes", tabIndex);
+        }
+        catch { }
+
+        if (tabIndex == 0 && !_cmdLoadedOnce)
+            await LoadCmd();
+        else if (tabIndex == 1 && !_demandeLoadedOnce)
+            await LoadDemandes();
+        else if (tabIndex == 2)
+        {
+            if (!_venteLoadedOnce)
+                await LoadVentes();
+            else if (_posPanel != null)
+                await _posPanel.ReloadArticlesAsync();
+        }
+        else if (tabIndex == 3 && !_clientLoadedOnce)
+            await LoadClients();
+    }
+
+    string GetCommandeSectionDescription() => _tab switch
+    {
+        1 => "Réapprovisionnements entre dépôt et magasins — validation et réception.",
+        2 => "File opérationnelle des commandes clients : nouvelles en priorité, catalogue et historique.",
+        3 => "Répertoire clients permanents et passagers, contacts et fidélité.",
+        _ => "Commandes fournisseurs internes — suivi de réception et statuts."
+    };
+
+    async Task ShowVenteHistory()
+    {
+        _showVenteCatalog = false;
+        await LoadVentes();
+    }
+
+    async Task ShowVenteCatalog()
+    {
+        _showVenteCatalog = true;
+        if (_posPanel != null)
+            await _posPanel.ReloadArticlesAsync();
+    }
+
+    async Task OnVentePosSaved()
+    {
+        _showVenteCatalog = false;
+        await LoadVentes();
+    }
+
+    static bool IsOnlineClientOrder(Commande c) =>
+        c.CommandeDescription?.Contains("en ligne", StringComparison.OrdinalIgnoreCase) == true;
+
+    /* ════════════════════════════════════════════════════════════
+       PAGINATION
+       ════════════════════════════════════════════════════════════ */
+
+    IList<T> PageOf<T>(IList<T> items, int page, int pageSize) =>
+        items.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+    int PageCount(int total, int pageSize) =>
+        total <= 0 ? 1 : (int)Math.Ceiling(total / (double)Math.Max(1, pageSize));
+
+    void SetCmdPage(int page) =>
+        _cmdPage = Math.Clamp(page, 1, PageCount(_cmdFiltered.Count, _cmdPageSize));
+
+    void SetCmdPageSize(int size)
+    {
+        if (!PageSizeChoices.Contains(size)) return;
+        _cmdPageSize = size;
+        _cmdPage = 1;
+    }
+
+    void SetDemandePage(int page) =>
+        _demandePage = Math.Clamp(page, 1, PageCount(_demandeFiltered.Count, _demandePageSize));
+
+    void SetDemandePageSize(int size)
+    {
+        if (!PageSizeChoices.Contains(size)) return;
+        _demandePageSize = size;
+        _demandePage = 1;
+    }
+
+    void SetVentePage(int page) =>
+        _ventePage = Math.Clamp(page, 1, PageCount(_venteFiltered.Count, _ventePageSize));
+
+    void SetVentePageSize(int size)
+    {
+        if (!PageSizeChoices.Contains(size)) return;
+        _ventePageSize = size;
+        _ventePage = 1;
+    }
+
+    void SetClientPage(int page) =>
+        _clientPage = Math.Clamp(page, 1, PageCount(_clientFiltered.Count, _clientPageSize));
+
+    void SetClientPageSize(int size)
+    {
+        if (!PageSizeChoices.Contains(size)) return;
+        _clientPageSize = size;
+        _clientPage = 1;
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       COMMANDES INTERNES
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadCmd()
+    {
+        _cmdLoading = true;
+        _cmdData = await CmdService.GetCmdsWithStatusUpdateAsync();
+        ApplyCmdFilter();
+        _cmdLoading = false;
+        _cmdLoadedOnce = true;
+    }
+
+    void SetCmdStatusFilter(int? status)
+    {
+        _cmdStatusFilter = status;
+        ApplyCmdFilter();
+    }
+
+    Task OnCmdStatusFilterChanged(string? value)
+    {
+        SetCmdStatusFilter(int.TryParse(value, out var st) ? st : null);
+        return Task.CompletedTask;
+    }
+
+    List<AwSearchSelect.Option> GetCmdStatusFilterOptions(int nouvelles, int enCours, int recues, int annulees)
+    {
+        var list = new List<AwSearchSelect.Option>
+        {
+            new("", $"Statut : tous ({_cmdData.Count})"),
+            new("0", $"Nouvelles ({nouvelles})"),
+            new("1", $"En cours ({enCours})"),
+            new("2", $"Reçues ({recues})")
+        };
+        if (annulees > 0)
+            list.Add(new("3", $"Annulées ({annulees})"));
+        return list;
+    }
+
+    void ApplyCmdFilter()
+    {
+        _cmdFiltered = _cmdData.Where(r =>
+        {
+            if (_cmdStatusFilter.HasValue && (r.Cmd.Status ?? 0) != _cmdStatusFilter.Value)
+                return false;
+            if (string.IsNullOrWhiteSpace(_cmdSearch))
+                return true;
+            var s = _cmdSearch.Trim();
+            return r.Cmd.Id.ToString().Contains(s, StringComparison.OrdinalIgnoreCase)
+                || (r.Cmd.Description?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (r.Cmd.Supplier?.SupplierName?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false);
+        }).ToList();
+        _cmdPage = 1;
+    }
+
+    async Task OnCmdRowClick(CmdRowDto item)
+    {
+        var parameters = new DialogParameters<CmdDetailView>
+        {
+            { x => x.CmdId, item.Cmd.Id },
+            { x => x.HasRemaining, item.HasRemaining },
+            { x => x.HasStock, item.HasStock }
+        };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<CmdDetailView>(
+            $"Commande interne N° {item.Cmd.Id}", parameters, options);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled) await LoadCmd();
+    }
+
+    void OnAddCmd()
+    {
+        Navigation.NavigateTo("/commandes/interne/nouveau");
+    }
+
+    async Task LoadDemandes()
+    {
+        _demandeLoading = true;
+        _demandeData = await DemandeService.GetDemandesAsync(_demandeUser);
+        if (_demandeUser.CanApproveDepot)
+        {
+            var depot = (await LocalisationService.GetAllLocalisationsAsync())
+                .FirstOrDefault(l => l.IsDepot);
+            _depotLabel = depot?.DescriptionLocalisation;
+        }
+        ApplyDemandeFilter();
+        _demandeLoading = false;
+        _demandeLoadedOnce = true;
+    }
+
+    void SetDemandeStatutFilter(int? statut)
+    {
+        _demandeStatutFilter = statut;
+        ApplyDemandeFilter();
+    }
+
+    Task OnDemandeStatutFilterChanged(string? value)
+    {
+        SetDemandeStatutFilter(int.TryParse(value, out var st) ? st : null);
+        return Task.CompletedTask;
+    }
+
+    List<AwSearchSelect.Option> GetDemandeStatutFilterOptions(int attDepot, int attMag, int complete) =>
+    [
+        new("", $"Statut : tous ({_demandeData.Count})"),
+        new("0", $"Attente dépôt ({attDepot})"),
+        new("1", $"Attente magasin ({attMag})"),
+        new("2", $"Complétées ({complete})")
+    ];
+
+    void ApplyDemandeFilter()
+    {
+        _demandeFiltered = _demandeStatutFilter.HasValue
+            ? _demandeData.Where(d => d.Statut == _demandeStatutFilter.Value).ToList()
+            : _demandeData.ToList();
+        _demandePage = 1;
+    }
+
+    async Task OnDemandeRowClick(DemandeRowDto item)
+    {
+        var parameters = new DialogParameters<DemandeDetailDialog>
+        {
+            { x => x.DemandeId, item.IdDemande },
+            { x => x.Row, item },
+            { x => x.User, _demandeUser }
+        };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<DemandeDetailDialog>(
+            $"Demande N° {item.IdDemande}", parameters, options);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+            await LoadDemandes();
+    }
+
+    void OnEditCmd(Cmd item)
+    {
+        Navigation.NavigateTo($"/commandes/interne/modifier/{item.Id}");
+    }
+
+    async Task OnReceptionner(Cmd item)
+    {
+        var parameters = new DialogParameters<ApproFromCmdForm> { { x => x.CmdId, item.Id } };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<ApproFromCmdForm>(
+            $"Réception — Commande N° {item.Id}", parameters, options);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled) await LoadCmd();
+    }
+
+    async Task OnApprovisionnerDepuisStock(Cmd item)
+    {
+        var parameters = new DialogParameters<ApproFromStockForm> { { x => x.SourceCmdId, item.Id } };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<ApproFromStockForm>(
+            $"Approvisionner depuis Commande N° {item.Id}", parameters, options);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled) await LoadCmd();
+    }
+
+    async Task OnDeleteCmd(Cmd item)
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Confirmation",
+            $"Supprimer la commande N° {item.Id} ?",
+            yesText: "Supprimer",
+            cancelText: "Annuler");
+        if (confirm == true)
+        {
+            await CmdService.DeleteCmdAsync(item.Id);
+            _cmdData.RemoveAll(r => r.Cmd.Id == item.Id);
+            Snackbar.Add("Commande supprimée", Severity.Success);
+        }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       COMMANDES CLIENTS (VENTE)
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadVentes()
+    {
+        _venteLoading = true;
+        var result = await CommandeService.GetCommandesWithStatusUpdateAsync();
+        _venteData = result.Commandes;
+        _deliveredQty = result.DeliveredQtyByDetailId;
+        ApplyVenteFilter();
+        _venteLoading = false;
+        _venteLoadedOnce = true;
+    }
+
+    static decimal ResolveCommandeDisplayTotalFc(Commande cmd) =>
+        cmd.Details.Any(d => d.Article != null)
+            ? CommandePricing.ResolveCommandeTotalFc(cmd)
+            : CurrencyDefaults.IsCdfMoneyId(cmd.MoneyId ?? CurrencyDefaults.MoneyIdUsd)
+                ? cmd.MontantTotal
+                : cmd.MontantApresConversion ?? cmd.MontantTotal;
+
+    void SetVenteStatusFilter(int? status)
+    {
+        _venteStatusFilter = status;
+        ApplyVenteFilter();
+    }
+
+    Task OnVenteStatusFilterChanged(string? value)
+    {
+        SetVenteStatusFilter(int.TryParse(value, out var st) ? st : null);
+        return Task.CompletedTask;
+    }
+
+    List<AwSearchSelect.Option> GetVenteStatusFilterOptions(int nouvelles, int enCours, int livrees) =>
+    [
+        new("", $"Statut : tous ({_venteData.Count})"),
+        new("0", $"Nouvelles ({nouvelles})"),
+        new("1", $"En cours ({enCours})"),
+        new("2", $"Livrées+ ({livrees})")
+    ];
+
+    void ApplyVenteFilter()
+    {
+        _venteFiltered = _venteData.Where(c =>
+        {
+            if (_venteStatusFilter.HasValue)
+            {
+                var st = c.Status ?? 0;
+                if (_venteStatusFilter == 2)
+                {
+                    if (st < 2) return false;
+                }
+                else if (st != _venteStatusFilter.Value)
+                    return false;
+            }
+            if (string.IsNullOrWhiteSpace(_venteSearch))
+                return true;
+            var s = _venteSearch.Trim();
+            return c.CommandeId.ToString().Contains(s, StringComparison.OrdinalIgnoreCase)
+                || (c.CommandeDescription?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (c.Customer?.CustomerName?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (c.Customer?.Contact?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false);
+        }).OrderByDescending(c => (c.Status ?? 0) == 0)
+          .ThenByDescending(c => c.CreationDate ?? DateTime.MinValue)
+          .ToList();
+        _ventePage = 1;
+    }
+
+    void OnVenteSearchChanged(string value)
+    {
+        _venteSearch = value ?? "";
+        ApplyVenteFilter();
+    }
+
+    bool HasRemainingToDeliver(Commande cmd)
+        => CommandeService.HasRemainingToDeliver(cmd, _deliveredQty);
+
+    async Task OnVenteRowClick(Commande item)
+    {
+        var parameters = new DialogParameters<CommandeDetailView>
+        {
+            { x => x.CommandeId, item.CommandeId },
+            { x => x.HasRemainingToDeliver, HasRemainingToDeliver(item) }
+        };
+        var options = new MudBlazor.DialogOptions
+        {
+            MaxWidth = MaxWidth.ExtraLarge,
+            FullWidth = true,
+            NoHeader = true,
+            CloseButton = false
+        };
+        var dialog = await DialogService.ShowAsync<CommandeDetailView>(
+            "", parameters, options);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled) await LoadVentes();
+    }
+
+    void OnAddVente() => Navigation.NavigateTo("/commandes/nouveau");
+
+    /* ════════════════════════════════════════════════════════════
+       CLIENTS
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadClients()
+    {
+        _clientLoading = true;
+        _clientData = await CustomerService.GetAllAsync();
+        _clientLoyalty = await CommandeService.GetCustomerLoyaltySummariesAsync();
+        ApplyClientFilter();
+        _clientLoading = false;
+        _clientLoadedOnce = true;
+    }
+
+    CustomerLoyaltySummaryDto GetClientLoyalty(int customerId) =>
+        _clientLoyalty.GetValueOrDefault(customerId) ?? new CustomerLoyaltySummaryDto { CustomerId = customerId };
+
+    void SetClientTypeFilter(string type)
+    {
+        _clientTypeFilter = type;
+        ApplyClientFilter();
+    }
+
+    Task OnClientTypeFilterChanged(string? value)
+    {
+        SetClientTypeFilter(string.IsNullOrWhiteSpace(value) ? "all" : value);
+        return Task.CompletedTask;
+    }
+
+    List<AwSearchSelect.Option> GetClientTypeFilterOptions(int permanents, int passagers) =>
+    [
+        new("all", $"Type : tous ({_clientData.Count})"),
+        new("permanent", $"Permanents ({permanents})"),
+        new("passager", $"Passagers ({passagers})")
+    ];
+
+    void ApplyClientFilter()
+    {
+        _clientFiltered = _clientData.Where(c =>
+        {
+            if (_clientTypeFilter == "permanent" && c.IsPermanent != true) return false;
+            if (_clientTypeFilter == "passager" && c.IsPermanent == true) return false;
+            if (string.IsNullOrWhiteSpace(_clientSearch))
+                return true;
+            var s = _clientSearch.Trim();
+            return (c.CustomerName?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (c.Contact?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (c.Email?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (c.Adress?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false);
+        }).ToList();
+        _clientPage = 1;
+    }
+
+    void OnClientRowClick(Customer item) => EditClient(item);
+
+    void AddClient()
+    {
+        Navigation.NavigateTo("/commandes/client/nouveau");
+    }
+
+    void EditClient(Customer c)
+    {
+        Navigation.NavigateTo($"/commandes/client/modifier/{c.CustomerId}");
+    }
+
+    async Task DeleteClient(Customer c)
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Confirmation",
+            $"Supprimer le client « {c.CustomerName} » ?",
+            yesText: "Supprimer",
+            cancelText: "Annuler");
+        if (confirm == true)
+        {
+            await CustomerService.DeleteAsync(c.CustomerId);
+            _clientData.Remove(c);
+            Snackbar.Add("Client supprimé", Severity.Success);
+        }
+    }
+}

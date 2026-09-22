@@ -1,0 +1,969 @@
+@using AppPlusPlus.Domain.Common
+@using Microsoft.AspNetCore.Components.Forms
+@using MudBlazor
+@inject ICatalogueService CatalogueService
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+@if (!_loaded)
+{
+    <div class="aw-loading" style="min-height:160px;">
+        <span class="aw-spinner" role="status" aria-hidden="true"></span>
+        <span>Chargement…</span>
+    </div>
+}
+else
+{
+    <div class="aw-admin aw-admin--in-settings">
+        <aside class="aw-admin__nav" aria-label="Sections configuration">
+            <p class="aw-admin__nav-title">Référentiels</p>
+            <button type="button" class="aw-admin__link @(_section == "categories" ? "aw-admin__link--active" : null)" @onclick="@(() => SetSection("categories"))">
+                <i class="bi bi-tags" aria-hidden="true"></i>
+                <span>
+                    <strong>Catégories</strong>
+                    <small>Classement & visuel catalogue</small>
+                </span>
+                <em>@_categories.Count</em>
+            </button>
+            <button type="button" class="aw-admin__link @(_section == "types" ? "aw-admin__link--active" : null)" @onclick="@(() => SetSection("types"))">
+                <i class="bi bi-diagram-3" aria-hidden="true"></i>
+                <span>
+                    <strong>Types</strong>
+                    <small>Commandabilité</small>
+                </span>
+                <em>@_types.Count</em>
+            </button>
+            <button type="button" class="aw-admin__link @(_section == "marques" ? "aw-admin__link--active" : null)" @onclick="@(() => SetSection("marques"))">
+                <i class="bi bi-bookmark" aria-hidden="true"></i>
+                <span>
+                    <strong>Marques</strong>
+                    <small>Identité produit</small>
+                </span>
+                <em>@_marques.Count</em>
+            </button>
+            <button type="button" class="aw-admin__link @(_section == "mesures" ? "aw-admin__link--active" : null)" @onclick="@(() => SetSection("mesures"))">
+                <i class="bi bi-rulers" aria-hidden="true"></i>
+                <span>
+                    <strong>Unités</strong>
+                    <small>Mesures & conditionnements</small>
+                </span>
+                <em>@_mesures.Count</em>
+            </button>
+        </aside>
+
+        <div class="aw-admin__main">
+            @if (_section == "categories")
+            {
+                var filtered = FilterByText(_categories, c => c.DescriptionCategory, _search);
+                var pageItems = PageOf(filtered, _page, _pageSize).ToList();
+                var pageKeys = pageItems.Select(c => BulkKey("cat", c.IdCategory)).ToList();
+                var allPageSelected = AllPageSelected(pageKeys, _bulkSelected);
+                var somePageSelected = SomePageSelected(pageKeys, _bulkSelected);
+                <div class="aw-admin__header">
+                    <div>
+                        <h2 class="aw-admin__title">Catégories d'articles</h2>
+                        <p class="aw-admin__desc">Organisent le catalogue. Ajoutez une image pour représenter chaque catégorie sur l'accueil client.</p>
+                    </div>
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="InsertCategory"><i class="bi bi-plus-lg"></i> Ajouter</button>
+                </div>
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search" placeholder="Rechercher une catégorie…" @bind="_search" @bind:event="oninput" @bind:after="OnSearchChanged" />
+                    </div>
+                    @if (BulkSelectedCount > 0)
+                    {
+                        <div class="aw-actionbar__actions">
+                            <span class="aw-bulk-hint">@BulkSelectedCount sélectionné@(BulkSelectedCount > 1 ? "s" : "")</span>
+                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="ClearBulkSelection">
+                                Tout désélectionner
+                            </button>
+                            <button type="button" class="aw-btn aw-btn--danger aw-btn--sm" @onclick="DeleteBulkAsync">
+                                <i class="bi bi-trash"></i> Supprimer la sélection
+                            </button>
+                        </div>
+                    }
+                </div>
+                <div class="aw-table-region">
+                    <div class="aw-table-wrap">
+                        @if (!pageItems.Any())
+                        {
+                            <div class="aw-empty"><i class="bi bi-tags"></i><p>Aucune catégorie.</p></div>
+                        }
+                        else
+                        {
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:2.5rem;">
+                                            <MudCheckBox T="bool"
+                                                         Value="@allPageSelected"
+                                                         ValueChanged="@(v => SetPageBulkSelection(pageKeys, v))"
+                                                         indeterminate="@somePageSelected"
+                                                         Dense="true"
+                                                         title="Tout sélectionner (page)" />
+                                        </th>
+                                        <th style="width:4.5rem;">Image</th>
+                                        <th>Libellé</th>
+                                        <th>Accueil catalogue</th>
+                                        <th style="width:7rem;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var cat in pageItems)
+                                    {
+                                        var bulkKey = BulkKey("cat", cat.IdCategory);
+                                        <tr class="@(IsBulkSelected(bulkKey) ? "aw-table__row--selected" : null)">
+                                            <td>
+                                                @if (_editCategoryId != cat.IdCategory)
+                                                {
+                                                    <MudCheckBox T="bool"
+                                                                 Value="@IsBulkSelected(bulkKey)"
+                                                                 ValueChanged="@(v => ToggleBulkItem(bulkKey, v))"
+                                                                 Dense="true"
+                                                                 aria-label="@($"Sélectionner {cat.DescriptionCategory}")" />
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (_editCategoryId == cat.IdCategory)
+                                                {
+                                                    <label class="aw-cat-thumb-zone @(_categoryImageUploading ? "aw-cat-thumb-zone--busy" : null)" title="Changer l'image">
+                                                        <InputFile OnChange="OnCategoryImageSelected" accept="image/*" style="display:none;" />
+                                                        @if (_categoryImageUploading)
+                                                        {
+                                                            <span class="aw-spinner" aria-hidden="true"></span>
+                                                        }
+                                                        else if (!string.IsNullOrWhiteSpace(_editCategoryImage))
+                                                        {
+                                                            <img src="@_editCategoryImage" alt="" />
+                                                        }
+                                                        else
+                                                        {
+                                                            <i class="bi bi-image" aria-hidden="true"></i>
+                                                        }
+                                                    </label>
+                                                }
+                                                else if (!string.IsNullOrWhiteSpace(cat.ImageCategory))
+                                                {
+                                                    <img src="@cat.ImageCategory" alt="" class="aw-cat-thumb" />
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-cat-thumb aw-cat-thumb--empty" aria-hidden="true"><i class="bi bi-image"></i></span>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (_editCategoryId == cat.IdCategory)
+                                                {
+                                                    <div class="aw-cat-edit">
+                                                        <input class="aw-inline-input" @bind="_editCategoryText" />
+                                                        <input type="text" class="aw-input aw-input--sm aw-cat-edit__url" placeholder="ou URL https://…" @bind="_editCategoryImage" />
+                                                        @if (!string.IsNullOrWhiteSpace(_categoryImageError))
+                                                        {
+                                                            <span class="aw-settings__error">@_categoryImageError</span>
+                                                        }
+                                                    </div>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-table__title">@cat.DescriptionCategory</span>
+                                                    <span class="aw-table__meta">ID @cat.IdCategory</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <label class="aw-switch-label" title="Afficher sur l'accueil catalogue client">
+                                                    <input type="checkbox" class="aw-switch" role="switch"
+                                                           checked="@cat.VisibleCatalog"
+                                                           disabled="@(_editCategoryId == cat.IdCategory)"
+                                                           @onchange="@(e => ToggleCategoryCatalogAsync(cat, e))" />
+                                                    <span>@(cat.VisibleCatalog ? "Visible" : "Masquée")</span>
+                                                </label>
+                                            </td>
+                                            <td>
+                                                <div class="aw-actions">
+                                                    @if (_editCategoryId == cat.IdCategory)
+                                                    {
+                                                        <button type="button" class="aw-btn aw-btn--primary aw-btn--sm aw-btn--icon" title="Enregistrer" @onclick="@(() => SaveEditCategory(cat))"><i class="bi bi-check-lg"></i></button>
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Annuler" @onclick="CancelEditCategory"><i class="bi bi-x-lg"></i></button>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Modifier" @onclick="@(() => StartEditCategory(cat))"><i class="bi bi-pencil"></i></button>
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Supprimer" @onclick="@(() => DeleteCategory(cat))"><i class="bi bi-trash"></i></button>
+                                                    }
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                    <AwPager TotalCount="filtered.Count" Page="_page" PageSize="_pageSize" ItemLabel="catégorie"
+                             PageChanged="SetPage" PageSizeChanged="SetPageSize" />
+                </div>
+            }
+            else if (_section == "types")
+            {
+                var filtered = FilterByText(_types, t => t.DescriptionType, _search);
+                var pageItems = PageOf(filtered, _page, _pageSize).ToList();
+                var pageKeys = pageItems.Select(t => BulkKey("type", t.IdType)).ToList();
+                var allPageSelected = AllPageSelected(pageKeys, _bulkSelected);
+                var somePageSelected = SomePageSelected(pageKeys, _bulkSelected);
+                <div class="aw-admin__header">
+                    <div>
+                        <h2 class="aw-admin__title">Types d'articles</h2>
+                        <p class="aw-admin__desc">Distinguent notamment les articles à commander et ceux qui ne le sont pas.</p>
+                    </div>
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="InsertType"><i class="bi bi-plus-lg"></i> Ajouter</button>
+                </div>
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search" placeholder="Rechercher un type…" @bind="_search" @bind:event="oninput" @bind:after="OnSearchChanged" />
+                    </div>
+                    @if (BulkSelectedCount > 0)
+                    {
+                        <div class="aw-actionbar__actions">
+                            <span class="aw-bulk-hint">@BulkSelectedCount sélectionné@(BulkSelectedCount > 1 ? "s" : "")</span>
+                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="ClearBulkSelection">Tout désélectionner</button>
+                            <button type="button" class="aw-btn aw-btn--danger aw-btn--sm" @onclick="DeleteBulkAsync">
+                                <i class="bi bi-trash"></i> Supprimer la sélection
+                            </button>
+                        </div>
+                    }
+                </div>
+                <div class="aw-table-region">
+                    <div class="aw-table-wrap">
+                        @if (!pageItems.Any())
+                        {
+                            <div class="aw-empty"><i class="bi bi-diagram-3"></i><p>Aucun type.</p></div>
+                        }
+                        else
+                        {
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:2.5rem;">
+                                            <MudCheckBox T="bool"
+                                                         Value="@allPageSelected"
+                                                         ValueChanged="@(v => SetPageBulkSelection(pageKeys, v))"
+                                                         indeterminate="@somePageSelected"
+                                                         Dense="true"
+                                                         title="Tout sélectionner (page)" />
+                                        </th>
+                                        <th>Libellé</th>
+                                        <th style="width:7rem;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var typ in pageItems)
+                                    {
+                                        var bulkKey = BulkKey("type", typ.IdType);
+                                        <tr class="@(IsBulkSelected(bulkKey) ? "aw-table__row--selected" : null)">
+                                            <td>
+                                                @if (_editTypeId != typ.IdType)
+                                                {
+                                                    <MudCheckBox T="bool"
+                                                                 Value="@IsBulkSelected(bulkKey)"
+                                                                 ValueChanged="@(v => ToggleBulkItem(bulkKey, v))"
+                                                                 Dense="true"
+                                                                 aria-label="@($"Sélectionner {typ.DescriptionType}")" />
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (_editTypeId == typ.IdType)
+                                                {
+                                                    <input class="aw-inline-input" @bind="_editTypeText" />
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-table__title">@typ.DescriptionType</span>
+                                                    <span class="aw-table__meta">ID @typ.IdType</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <div class="aw-actions">
+                                                    @if (_editTypeId == typ.IdType)
+                                                    {
+                                                        <button type="button" class="aw-btn aw-btn--primary aw-btn--sm aw-btn--icon" title="Enregistrer" @onclick="@(() => SaveEditType(typ))"><i class="bi bi-check-lg"></i></button>
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Annuler" @onclick="CancelEditType"><i class="bi bi-x-lg"></i></button>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Modifier" @onclick="@(() => StartEditType(typ))"><i class="bi bi-pencil"></i></button>
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Supprimer" @onclick="@(() => DeleteType(typ))"><i class="bi bi-trash"></i></button>
+                                                    }
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                    <AwPager TotalCount="filtered.Count" Page="_page" PageSize="_pageSize" ItemLabel="type"
+                             PageChanged="SetPage" PageSizeChanged="SetPageSize" />
+                </div>
+            }
+            else if (_section == "marques")
+            {
+                var filtered = FilterByText(_marques, m => m.DescriptionMarque, _search);
+                var pageItems = PageOf(filtered, _page, _pageSize).ToList();
+                var pageKeys = pageItems.Select(m => BulkKey("marque", m.IdMarque)).ToList();
+                var allPageSelected = AllPageSelected(pageKeys, _bulkSelected);
+                var somePageSelected = SomePageSelected(pageKeys, _bulkSelected);
+                <div class="aw-admin__header">
+                    <div>
+                        <h2 class="aw-admin__title">Marques</h2>
+                        <p class="aw-admin__desc">Identité commerciale associée aux articles du référentiel.</p>
+                    </div>
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="InsertMarque"><i class="bi bi-plus-lg"></i> Ajouter</button>
+                </div>
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search" placeholder="Rechercher une marque…" @bind="_search" @bind:event="oninput" @bind:after="OnSearchChanged" />
+                    </div>
+                    @if (BulkSelectedCount > 0)
+                    {
+                        <div class="aw-actionbar__actions">
+                            <span class="aw-bulk-hint">@BulkSelectedCount sélectionné@(BulkSelectedCount > 1 ? "s" : "")</span>
+                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="ClearBulkSelection">Tout désélectionner</button>
+                            <button type="button" class="aw-btn aw-btn--danger aw-btn--sm" @onclick="DeleteBulkAsync">
+                                <i class="bi bi-trash"></i> Supprimer la sélection
+                            </button>
+                        </div>
+                    }
+                </div>
+                <div class="aw-table-region">
+                    <div class="aw-table-wrap">
+                        @if (!pageItems.Any())
+                        {
+                            <div class="aw-empty"><i class="bi bi-bookmark"></i><p>Aucune marque.</p></div>
+                        }
+                        else
+                        {
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:2.5rem;">
+                                            <MudCheckBox T="bool"
+                                                         Value="@allPageSelected"
+                                                         ValueChanged="@(v => SetPageBulkSelection(pageKeys, v))"
+                                                         indeterminate="@somePageSelected"
+                                                         Dense="true"
+                                                         title="Tout sélectionner (page)" />
+                                        </th>
+                                        <th>Libellé</th>
+                                        <th style="width:7rem;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var marque in pageItems)
+                                    {
+                                        var bulkKey = BulkKey("marque", marque.IdMarque);
+                                        <tr class="@(IsBulkSelected(bulkKey) ? "aw-table__row--selected" : null)">
+                                            <td>
+                                                @if (_editMarqueId != marque.IdMarque)
+                                                {
+                                                    <MudCheckBox T="bool"
+                                                                 Value="@IsBulkSelected(bulkKey)"
+                                                                 ValueChanged="@(v => ToggleBulkItem(bulkKey, v))"
+                                                                 Dense="true"
+                                                                 aria-label="@($"Sélectionner {marque.DescriptionMarque}")" />
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (_editMarqueId == marque.IdMarque)
+                                                {
+                                                    <input class="aw-inline-input" @bind="_editMarqueText" />
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-table__title">@marque.DescriptionMarque</span>
+                                                    <span class="aw-table__meta">ID @marque.IdMarque</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <div class="aw-actions">
+                                                    @if (_editMarqueId == marque.IdMarque)
+                                                    {
+                                                        <button type="button" class="aw-btn aw-btn--primary aw-btn--sm aw-btn--icon" title="Enregistrer" @onclick="@(() => SaveEditMarque(marque))"><i class="bi bi-check-lg"></i></button>
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Annuler" @onclick="CancelEditMarque"><i class="bi bi-x-lg"></i></button>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Modifier" @onclick="@(() => StartEditMarque(marque))"><i class="bi bi-pencil"></i></button>
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Supprimer" @onclick="@(() => DeleteMarque(marque))"><i class="bi bi-trash"></i></button>
+                                                    }
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                    <AwPager TotalCount="filtered.Count" Page="_page" PageSize="_pageSize" ItemLabel="marque"
+                             PageChanged="SetPage" PageSizeChanged="SetPageSize" />
+                </div>
+            }
+            else if (_section == "mesures")
+            {
+                var filtered = FilterByText(_mesures, m => m.DescriptionMesure, _search);
+                var pageItems = PageOf(filtered, _page, _pageSize).ToList();
+                var pageKeys = pageItems.Select(m => BulkKey("mesure", m.IdMesure)).ToList();
+                var allPageSelected = AllPageSelected(pageKeys, _bulkSelected);
+                var somePageSelected = SomePageSelected(pageKeys, _bulkSelected);
+                <div class="aw-admin__header">
+                    <div>
+                        <h2 class="aw-admin__title">Unités de mesure</h2>
+                        <p class="aw-admin__desc">Conditionnements et unités utilisés pour quantifier le stock.</p>
+                    </div>
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="InsertMesure"><i class="bi bi-plus-lg"></i> Ajouter</button>
+                </div>
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search" placeholder="Rechercher une unité…" @bind="_search" @bind:event="oninput" @bind:after="OnSearchChanged" />
+                    </div>
+                    @if (BulkSelectedCount > 0)
+                    {
+                        <div class="aw-actionbar__actions">
+                            <span class="aw-bulk-hint">@BulkSelectedCount sélectionné@(BulkSelectedCount > 1 ? "s" : "")</span>
+                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="ClearBulkSelection">Tout désélectionner</button>
+                            <button type="button" class="aw-btn aw-btn--danger aw-btn--sm" @onclick="DeleteBulkAsync">
+                                <i class="bi bi-trash"></i> Supprimer la sélection
+                            </button>
+                        </div>
+                    }
+                </div>
+                <div class="aw-table-region">
+                    <div class="aw-table-wrap">
+                        @if (!pageItems.Any())
+                        {
+                            <div class="aw-empty"><i class="bi bi-rulers"></i><p>Aucune unité.</p></div>
+                        }
+                        else
+                        {
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:2.5rem;">
+                                            <MudCheckBox T="bool"
+                                                         Value="@allPageSelected"
+                                                         ValueChanged="@(v => SetPageBulkSelection(pageKeys, v))"
+                                                         indeterminate="@somePageSelected"
+                                                         Dense="true"
+                                                         title="Tout sélectionner (page)" />
+                                        </th>
+                                        <th>Libellé</th>
+                                        <th style="width:7rem;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var mesure in pageItems)
+                                    {
+                                        var bulkKey = BulkKey("mesure", mesure.IdMesure);
+                                        <tr class="@(IsBulkSelected(bulkKey) ? "aw-table__row--selected" : null)">
+                                            <td>
+                                                @if (_editMesureId != mesure.IdMesure)
+                                                {
+                                                    <MudCheckBox T="bool"
+                                                                 Value="@IsBulkSelected(bulkKey)"
+                                                                 ValueChanged="@(v => ToggleBulkItem(bulkKey, v))"
+                                                                 Dense="true"
+                                                                 aria-label="@($"Sélectionner {mesure.DescriptionMesure}")" />
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (_editMesureId == mesure.IdMesure)
+                                                {
+                                                    <input class="aw-inline-input" @bind="_editMesureText" />
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-table__title">@mesure.DescriptionMesure</span>
+                                                    <span class="aw-table__meta">ID @mesure.IdMesure</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <div class="aw-actions">
+                                                    @if (_editMesureId == mesure.IdMesure)
+                                                    {
+                                                        <button type="button" class="aw-btn aw-btn--primary aw-btn--sm aw-btn--icon" title="Enregistrer" @onclick="@(() => SaveEditMesure(mesure))"><i class="bi bi-check-lg"></i></button>
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Annuler" @onclick="CancelEditMesure"><i class="bi bi-x-lg"></i></button>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Modifier" @onclick="@(() => StartEditMesure(mesure))"><i class="bi bi-pencil"></i></button>
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Supprimer" @onclick="@(() => DeleteMesure(mesure))"><i class="bi bi-trash"></i></button>
+                                                    }
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                    <AwPager TotalCount="filtered.Count" Page="_page" PageSize="_pageSize" ItemLabel="unité"
+                             PageChanged="SetPage" PageSizeChanged="SetPageSize" />
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    static readonly int[] PageSizeChoices = [10, 25, 50, 100];
+
+    bool _loaded;
+    string _section = "categories";
+    string _search = "";
+    int _page = 1;
+    int _pageSize = 25;
+
+    List<ArticleCategory> _categories = new();
+    List<ArticleType> _types = new();
+    List<ArticleMarque> _marques = new();
+    List<Mesure> _mesures = new();
+
+    int? _editCategoryId;
+    string _editCategoryText = "";
+    string? _editCategoryImage;
+    bool _categoryImageUploading;
+    string? _categoryImageError;
+
+    int? _editTypeId;
+    string _editTypeText = "";
+    int? _editMarqueId;
+    string _editMarqueText = "";
+    int? _editMesureId;
+    string _editMesureText = "";
+
+    readonly HashSet<string> _bulkSelected = new(StringComparer.Ordinal);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _categories = await CatalogueService.GetArticleCategoriesAsync();
+        _types = await CatalogueService.GetArticleTypesAsync();
+        _marques = await CatalogueService.GetArticleMarquesAsync();
+        _mesures = await CatalogueService.GetMesuresAsync();
+        _loaded = true;
+    }
+
+    void SetSection(string section)
+    {
+        _section = section;
+        _search = "";
+        _page = 1;
+        CancelAllEdits();
+        ClearBulkSelection();
+    }
+
+    void OnSearchChanged()
+    {
+        _page = 1;
+        ClearBulkSelection();
+    }
+
+    static string BulkKey(string kind, int id) => $"{kind}:{id}";
+
+    int BulkSelectedCount => _bulkSelected.Count;
+
+    void ClearBulkSelection() => _bulkSelected.Clear();
+
+    void ToggleBulkItem(string key, bool selected)
+    {
+        if (selected)
+            _bulkSelected.Add(key);
+        else
+            _bulkSelected.Remove(key);
+    }
+
+    bool IsBulkSelected(string key) => _bulkSelected.Contains(key);
+
+    static bool AllPageSelected(IReadOnlyList<string> pageKeys, HashSet<string> selected) =>
+        pageKeys.Count > 0 && pageKeys.All(selected.Contains);
+
+    static bool SomePageSelected(IReadOnlyList<string> pageKeys, HashSet<string> selected) =>
+        pageKeys.Any(selected.Contains) && !AllPageSelected(pageKeys, selected);
+
+    void SetPageBulkSelection(IReadOnlyList<string> pageKeys, bool selected)
+    {
+        foreach (var key in pageKeys)
+        {
+            if (selected)
+                _bulkSelected.Add(key);
+            else
+                _bulkSelected.Remove(key);
+        }
+    }
+
+    string GetBulkItemLabel() => _section switch
+    {
+        "types" => "type",
+        "marques" => "marque",
+        "mesures" => "unité",
+        _ => "catégorie"
+    };
+
+    IList<T> PageOf<T>(IList<T> items, int page, int pageSize) =>
+        items.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+    int PageCount(int total, int pageSize) =>
+        total <= 0 ? 1 : (int)Math.Ceiling(total / (double)Math.Max(1, pageSize));
+
+    void SetPage(int page) =>
+        _page = Math.Clamp(page, 1, PageCount(GetFilteredCount(), _pageSize));
+
+    void SetPageSize(int size)
+    {
+        if (!PageSizeChoices.Contains(size)) return;
+        _pageSize = size;
+        _page = 1;
+    }
+
+    int GetFilteredCount() => _section switch
+    {
+        "types" => FilterByText(_types, t => t.DescriptionType, _search).Count,
+        "marques" => FilterByText(_marques, m => m.DescriptionMarque, _search).Count,
+        "mesures" => FilterByText(_mesures, m => m.DescriptionMesure, _search).Count,
+        _ => FilterByText(_categories, c => c.DescriptionCategory, _search).Count
+    };
+
+    static List<T> FilterByText<T>(IEnumerable<T> source, Func<T, string?> selector, string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return source.ToList();
+        var q = query.Trim();
+        return source.Where(x => (selector(x) ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    void CancelAllEdits()
+    {
+        _editCategoryId = null;
+        _editCategoryText = "";
+        _editCategoryImage = null;
+        _categoryImageError = null;
+        _editTypeId = null;
+        _editTypeText = "";
+        _editMarqueId = null;
+        _editMarqueText = "";
+        _editMesureId = null;
+        _editMesureText = "";
+    }
+
+    async Task OnCategoryImageSelected(InputFileChangeEventArgs e)
+    {
+        _categoryImageError = null;
+        var file = e.File;
+        if (file.Size > 2 * 1024 * 1024)
+        {
+            _categoryImageError = "Fichier trop grand (max 2 Mo).";
+            return;
+        }
+        if (!file.ContentType.StartsWith("image/"))
+        {
+            _categoryImageError = "Seuls les fichiers image sont acceptés.";
+            return;
+        }
+
+        _categoryImageUploading = true;
+        try
+        {
+            using var stream = file.OpenReadStream(maxAllowedSize: 2 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var base64 = Convert.ToBase64String(ms.ToArray());
+            _editCategoryImage = $"data:{file.ContentType};base64,{base64}";
+        }
+        catch (Exception ex)
+        {
+            _categoryImageError = ex.Message;
+        }
+        finally
+        {
+            _categoryImageUploading = false;
+        }
+    }
+
+    void StartEditCategory(ArticleCategory item)
+    {
+        CancelAllEdits();
+        _editCategoryId = item.IdCategory;
+        _editCategoryText = item.DescriptionCategory ?? "";
+        _editCategoryImage = item.ImageCategory;
+    }
+
+    void CancelEditCategory() => CancelAllEdits();
+
+    async Task SaveEditCategory(ArticleCategory item)
+    {
+        item.DescriptionCategory = _editCategoryText.Trim();
+        item.ImageCategory = string.IsNullOrWhiteSpace(_editCategoryImage) ? null : _editCategoryImage.Trim();
+        await OnUpdateCategory(item);
+        CancelEditCategory();
+    }
+
+    async Task InsertCategory()
+    {
+        var item = new ArticleCategory { DescriptionCategory = "Nouvelle catégorie", VisibleCatalog = true };
+        await CatalogueService.AddCategoryAsync(item);
+        _categories.Add(item);
+        Snackbar.Add("Catégorie ajoutée — cliquez sur modifier pour la personnaliser", Severity.Success);
+    }
+
+    async Task ToggleCategoryCatalogAsync(ArticleCategory item, ChangeEventArgs e)
+    {
+        try
+        {
+            item.VisibleCatalog = e.Value is true;
+            await CatalogueService.UpdateCategoryAsync(item);
+            Snackbar.Add(
+                item.VisibleCatalog
+                    ? $"« {item.DescriptionCategory} » visible sur l'accueil."
+                    : $"« {item.DescriptionCategory} » masquée de l'accueil.",
+                Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            item.VisibleCatalog = !item.VisibleCatalog;
+            Snackbar.Add(ex.InnerException?.Message ?? ex.Message, Severity.Error);
+        }
+    }
+
+    async Task OnUpdateCategory(ArticleCategory item)
+    {
+        try
+        {
+            await CatalogueService.UpdateCategoryAsync(item);
+            Snackbar.Add("Catégorie enregistrée", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.InnerException?.Message ?? ex.Message, Severity.Error);
+        }
+    }
+
+    async Task DeleteCategory(ArticleCategory item)
+    {
+        if (await Confirmer($"Supprimer « {item.DescriptionCategory} » ?"))
+        {
+            await CatalogueService.DeleteCategoryAsync(item);
+            _categories.Remove(item);
+            Snackbar.Add("Catégorie supprimée", Severity.Success);
+        }
+    }
+
+    void StartEditType(ArticleType item)
+    {
+        CancelAllEdits();
+        _editTypeId = item.IdType;
+        _editTypeText = item.DescriptionType ?? "";
+    }
+
+    void CancelEditType() => CancelAllEdits();
+
+    async Task SaveEditType(ArticleType item)
+    {
+        item.DescriptionType = _editTypeText.Trim();
+        await OnUpdateType(item);
+        CancelEditType();
+    }
+
+    async Task InsertType()
+    {
+        var item = new ArticleType { DescriptionType = ArticleTypeCatalog.NotOrderableDescription };
+        await CatalogueService.AddTypeAsync(item);
+        _types.Add(item);
+        Snackbar.Add("Type ajouté — cliquez sur modifier pour renommer", Severity.Success);
+    }
+
+    async Task OnUpdateType(ArticleType item)
+    {
+        await CatalogueService.UpdateTypeAsync(item);
+        Snackbar.Add("Type modifié", Severity.Success);
+    }
+
+    async Task DeleteType(ArticleType item)
+    {
+        if (await Confirmer($"Supprimer « {item.DescriptionType} » ?"))
+        {
+            await CatalogueService.DeleteTypeAsync(item);
+            _types.Remove(item);
+            Snackbar.Add("Type supprimé", Severity.Success);
+        }
+    }
+
+    void StartEditMarque(ArticleMarque item)
+    {
+        CancelAllEdits();
+        _editMarqueId = item.IdMarque;
+        _editMarqueText = item.DescriptionMarque ?? "";
+    }
+
+    void CancelEditMarque() => CancelAllEdits();
+
+    async Task SaveEditMarque(ArticleMarque item)
+    {
+        item.DescriptionMarque = _editMarqueText.Trim();
+        await OnUpdateMarque(item);
+        CancelEditMarque();
+    }
+
+    async Task InsertMarque()
+    {
+        var item = new ArticleMarque { DescriptionMarque = "Nouvelle marque" };
+        await CatalogueService.AddMarqueAsync(item);
+        _marques.Add(item);
+        Snackbar.Add("Marque ajoutée — cliquez sur modifier pour renommer", Severity.Success);
+    }
+
+    async Task OnUpdateMarque(ArticleMarque item)
+    {
+        await CatalogueService.UpdateMarqueAsync(item);
+        Snackbar.Add("Marque modifiée", Severity.Success);
+    }
+
+    async Task DeleteMarque(ArticleMarque item)
+    {
+        if (await Confirmer($"Supprimer « {item.DescriptionMarque} » ?"))
+        {
+            await CatalogueService.DeleteMarqueAsync(item);
+            _marques.Remove(item);
+            Snackbar.Add("Marque supprimée", Severity.Success);
+        }
+    }
+
+    void StartEditMesure(Mesure item)
+    {
+        CancelAllEdits();
+        _editMesureId = item.IdMesure;
+        _editMesureText = item.DescriptionMesure ?? "";
+    }
+
+    void CancelEditMesure() => CancelAllEdits();
+
+    async Task SaveEditMesure(Mesure item)
+    {
+        item.DescriptionMesure = _editMesureText.Trim();
+        await OnUpdateMesure(item);
+        CancelEditMesure();
+    }
+
+    async Task InsertMesure()
+    {
+        var item = new Mesure { DescriptionMesure = "Nouvelle mesure" };
+        await CatalogueService.AddMesureAsync(item);
+        _mesures.Add(item);
+        Snackbar.Add("Mesure ajoutée — cliquez sur modifier pour renommer", Severity.Success);
+    }
+
+    async Task OnUpdateMesure(Mesure item)
+    {
+        await CatalogueService.UpdateMesureAsync(item);
+        Snackbar.Add("Mesure modifiée", Severity.Success);
+    }
+
+    async Task DeleteMesure(Mesure item)
+    {
+        if (await Confirmer($"Supprimer « {item.DescriptionMesure} » ?"))
+        {
+            await CatalogueService.DeleteMesureAsync(item);
+            _mesures.Remove(item);
+            Snackbar.Add("Mesure supprimée", Severity.Success);
+        }
+    }
+
+    async Task<bool> Confirmer(string message)
+    {
+        var result = await DialogService.ShowMessageBox("Confirmation", message,
+            yesText: "Supprimer", cancelText: "Annuler");
+        return result == true;
+    }
+
+    async Task DeleteBulkAsync()
+    {
+        if (_bulkSelected.Count == 0)
+            return;
+
+        var label = GetBulkItemLabel();
+        var count = _bulkSelected.Count;
+        if (!await Confirmer($"Supprimer {count} {label}{(count > 1 ? "s" : "")} ?"))
+            return;
+
+        var keys = _bulkSelected.ToList();
+        var deleted = 0;
+        var errors = 0;
+
+        foreach (var key in keys)
+        {
+            try
+            {
+                if (await TryDeleteByKeyAsync(key))
+                    deleted++;
+            }
+            catch (Exception ex)
+            {
+                errors++;
+                Snackbar.Add(ex.InnerException?.Message ?? ex.Message, Severity.Error);
+            }
+        }
+
+        ClearBulkSelection();
+
+        if (deleted > 0)
+            Snackbar.Add($"{deleted} {label}{(deleted > 1 ? "s" : "")} supprimé{(deleted > 1 ? "s" : "")}.", Severity.Success);
+        if (errors > 0 && deleted == 0)
+            Snackbar.Add("Aucun élément n'a pu être supprimé.", Severity.Warning);
+    }
+
+    async Task<bool> TryDeleteByKeyAsync(string key)
+    {
+        var sep = key.IndexOf(':');
+        if (sep <= 0 || !int.TryParse(key[(sep + 1)..], out var id))
+            return false;
+
+        var kind = key[..sep];
+        switch (kind)
+        {
+            case "cat":
+            {
+                var item = _categories.FirstOrDefault(c => c.IdCategory == id);
+                if (item is null) return false;
+                await CatalogueService.DeleteCategoryAsync(item);
+                _categories.Remove(item);
+                return true;
+            }
+            case "type":
+            {
+                var item = _types.FirstOrDefault(t => t.IdType == id);
+                if (item is null) return false;
+                await CatalogueService.DeleteTypeAsync(item);
+                _types.Remove(item);
+                return true;
+            }
+            case "marque":
+            {
+                var item = _marques.FirstOrDefault(m => m.IdMarque == id);
+                if (item is null) return false;
+                await CatalogueService.DeleteMarqueAsync(item);
+                _marques.Remove(item);
+                return true;
+            }
+            case "mesure":
+            {
+                var item = _mesures.FirstOrDefault(m => m.IdMesure == id);
+                if (item is null) return false;
+                await CatalogueService.DeleteMesureAsync(item);
+                _mesures.Remove(item);
+                return true;
+            }
+            default:
+                return false;
+        }
+    }
+}

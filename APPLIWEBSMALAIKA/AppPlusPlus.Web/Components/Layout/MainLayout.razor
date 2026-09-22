@@ -1,0 +1,1090 @@
+@inherits LayoutComponentBase
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+@inject IModuleLicenseService ModuleLicenseService
+@inject IUserCurrencyPreferenceService UserCurrency
+@inject IJSRuntime JS
+@inject UiNavigationGate NavGate
+@implements IDisposable
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using System.Globalization
+@using Microsoft.JSInterop
+
+<MudThemeProvider Theme="_appTheme" IsDarkMode="_isDarkMode" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+@if (_isLoginPage || !_isAuthenticated)
+{
+    @Body
+}
+else
+{
+    <div class="app-layout @(_useTopbarLayout ? "app-layout--topbar" : "")">
+
+        <!-- ══════════════ SIDEBAR ══════════════ -->
+        @if (!_useTopbarLayout)
+        {
+        <aside class="sidebar @(_sidebarCollapsed ? "sidebar--collapsed" : "") @(_mobileSidebarOpen ? "mobile-show" : "")">
+
+            <!-- Brand -->
+            <a href="/catalogue" data-enhance-nav="false" class="sb-brand" title="Catalogue client">
+                <div class="sb-brand-icon">
+                    <img src="appliweb-logo-v2.png" alt="AppliWeb+" class="sb-brand-logo" />
+                </div>
+                @if (!_sidebarCollapsed)
+                {
+                    <div class="sb-brand-text">
+                        <p class="sb-brand-name">@AppSettings.AppName</p>
+                        <p class="sb-brand-sub">Gestion commerciale</p>
+                    </div>
+                }
+            </a>
+
+            <!-- Nav -->
+            <nav class="sb-nav">
+
+                @* ── PRINCIPAL ── *@
+                @if (!_sidebarCollapsed)
+                {
+                    <p class="sb-section-label">PRINCIPAL</p>
+                }
+
+                @if (ShowDashboard)
+                {
+                    <a href="/dashboard" title="@(_sidebarCollapsed ? "Tableau de bord" : null)"
+                       class="sb-item @(IsNavActive("/dashboard") ? "sb-item--active" : "")">
+                        <i class="ti ti-layout-dashboard sb-icon"></i>
+                        @if (!_sidebarCollapsed) { <span>Tableau de bord</span> }
+                    </a>
+                }
+
+                @if (ModuleActive("vente") && CanAccessTabNav("vente", AppFunctions.Vente, AppFunctions.Facturation))
+                {
+                    <a href="@VenteNavHref" title="@(_sidebarCollapsed ? "Ventes" : null)"
+                       class="sb-item @(IsNavActive("/vente") ? "sb-item--active" : "")">
+                        <i class="ti ti-receipt sb-icon"></i>
+                        @if (!_sidebarCollapsed) { <span>Ventes</span> }
+                    </a>
+                }
+
+                @if (ShowArticlesNav)
+                {
+                    <a href="@ArticlesNavHref" title="@(_sidebarCollapsed ? "Articles" : null)"
+                       class="sb-item @(IsNavActive("/stock", "/gestion/article", "/gestion/approvisionnement", "/gestion/transformation") ? "sb-item--active" : "")">
+                        <i class="ti ti-box-seam sb-icon"></i>
+                        @if (!_sidebarCollapsed) { <span>Articles</span> }
+                    </a>
+                }
+
+                @if (ModuleActive("commandes") && CanAccessTabNav("commandes", AppFunctions.CommandesClients, AppFunctions.CommandesInternes))
+                {
+                    <a href="@CommandesNavHref" title="@(_sidebarCollapsed ? "Commandes" : null)"
+                       class="sb-item @(IsNavActive("/commandes", "/gestion/commande", "/gestion/client", "/gestion/vente") ? "sb-item--active" : "")">
+                        <i class="ti ti-shopping-cart sb-icon"></i>
+                        @if (!_sidebarCollapsed) { <span>Commandes</span> }
+                    </a>
+                }
+
+                @if (ModuleActive("services") && CanAccessTabNav("services", AppFunctions.Services))
+                {
+                    <a href="/services" title="@(_sidebarCollapsed ? "Prestations" : null)"
+                       class="sb-item @(IsNavActive("/services") ? "sb-item--active" : "")">
+                        <i class="ti ti-briefcase sb-icon"></i>
+                        @if (!_sidebarCollapsed) { <span>Prestations</span> }
+                    </a>
+                }
+
+                @if (ModuleActive("grh") && CanAccessTabNav("grh", AppFunctions.GRH))
+                {
+                    <a href="/grh" title="@(_sidebarCollapsed ? "GRH" : null)"
+                       class="sb-item @(IsNavActive("/grh") ? "sb-item--active" : "")">
+                        <i class="ti ti-users-group sb-icon"></i>
+                        @if (!_sidebarCollapsed) { <span>GRH</span> }
+                    </a>
+                }
+
+                @* ── ANALYSE ── *@
+                @if (!_sidebarCollapsed)
+                {
+                    <p class="sb-section-label">ANALYSE</p>
+                }
+
+                @if (ModuleActive("rapports") && CanAccessTabNav("rapports", AppFunctions.Rapports))
+                {
+                    <a href="/rapports" title="@(_sidebarCollapsed ? "Rapports" : null)"
+                       class="sb-item @(IsNavActive("/rapports", "/rapport") ? "sb-item--active" : "")">
+                        <i class="ti ti-chart-bar sb-icon"></i>
+                        @if (!_sidebarCollapsed) { <span>Rapports</span> }
+                    </a>
+                }
+
+                @* ── SYSTÈME ── *@
+                @if (!_sidebarCollapsed)
+                {
+                    <p class="sb-section-label">SYSTÈME</p>
+                }
+
+                @if (CanAccessTabNav("administration", AppFunctions.Administration))
+                {
+                    <a href="/administration" title="@(_sidebarCollapsed ? "Administration" : null)"
+                       class="sb-item @(IsNavActive("/administration", "/admin/") ? "sb-item--active" : "")">
+                        <i class="ti ti-settings-2 sb-icon"></i>
+                        @if (!_sidebarCollapsed) { <span>Administration</span> }
+                    </a>
+                }
+
+                @if (CanAccessTabNav("parametres", AppFunctions.Parametres))
+                {
+                    <a href="/settings" title="@(_sidebarCollapsed ? "Paramètres" : null)"
+                       class="sb-item @(IsNavActive("/settings") ? "sb-item--active" : "")">
+                        <i class="ti ti-adjustments sb-icon"></i>
+                        @if (!_sidebarCollapsed) { <span>Paramètres</span> }
+                    </a>
+                }
+
+                @if (!_sidebarCollapsed)
+                {
+                    <p class="sb-section-label">CLIENT</p>
+                }
+                <a href="/catalogue" data-enhance-nav="false" title="@(_sidebarCollapsed ? "Catalogue client" : null)" class="sb-item">
+                    <i class="ti ti-shopping-bag sb-icon"></i>
+                    @if (!_sidebarCollapsed) { <span>Catalogue client</span> }
+                </a>
+
+            </nav>
+
+            <!-- Footer : collapse + logout -->
+            <div class="sb-footer">
+                <button class="sb-footer-btn" @onclick="@(() => _sidebarCollapsed = !_sidebarCollapsed)"
+                        title="@(_sidebarCollapsed ? "Développer" : "Réduire")">
+                    <i class="ti @(_sidebarCollapsed ? "ti-chevron-right" : "ti-chevron-left") sb-icon"></i>
+                    @if (!_sidebarCollapsed) { <span>Réduire</span> }
+                </button>
+                <a href="/auth/logout" class="sb-footer-btn sb-footer-btn--danger"
+                   title="@(_sidebarCollapsed ? "Déconnexion" : null)">
+                    <i class="ti ti-logout sb-icon"></i>
+                    @if (!_sidebarCollapsed) { <span>Déconnexion</span> }
+                </a>
+            </div>
+        </aside>
+
+        <div class="sidebar-overlay @(_mobileSidebarOpen ? "show" : "")" @onclick="CloseMobileSidebar"></div>
+        }
+
+        <!-- ══════════════ MAIN AREA ══════════════ -->
+        <div class="main-area">
+
+            @if (_useTopbarLayout)
+            {
+                <!-- TOPNAV UNIFIED BAR (topbar mode) -->
+                <nav class="topnav topnav--unified">
+                  <div class="topnav-inner">
+                    <a href="/catalogue" data-enhance-nav="false" class="topnav-brand" title="Catalogue client">
+                        <span class="topnav-brand-icon"><img src="appliweb-logo-v2.png" alt="AppliWeb+" class="topnav-brand-logo" /></span>
+                        <span class="topnav-brand-name">@AppSettings.AppName</span>
+                    </a>
+
+                    <!-- Nav links -->
+                    <div class="topnav-links">
+                        @if (ShowDashboard)
+                        {
+                            <a href="/dashboard" class="topnav-item @(IsNavActive("/dashboard") ? "topnav-item--active" : "")">
+                                <i class="ti ti-layout-dashboard"></i>
+                                <span>Tableau de bord</span>
+                            </a>
+                        }
+
+                        @if (ModuleActive("vente") && CanAccessTabNav("vente", AppFunctions.Vente, AppFunctions.Facturation))
+                        {
+                            <a href="@VenteNavHref" class="topnav-item @(IsNavActive("/vente") ? "topnav-item--active" : "")">
+                                <i class="ti ti-receipt"></i>
+                                <span>Ventes</span>
+                            </a>
+                        }
+
+                        @if (ShowArticlesNav)
+                        {
+                            <a href="@ArticlesNavHref" class="topnav-item @(IsNavActive("/stock", "/gestion/article", "/gestion/approvisionnement", "/gestion/transformation") ? "topnav-item--active" : "")">
+                                <i class="ti ti-box-seam"></i>
+                                <span>Articles</span>
+                            </a>
+                        }
+
+                        @if (ModuleActive("commandes") && CanAccessTabNav("commandes", AppFunctions.CommandesClients, AppFunctions.CommandesInternes))
+                        {
+                            <a href="@CommandesNavHref" class="topnav-item @(IsNavActive("/commandes", "/gestion/commande", "/gestion/client", "/gestion/vente") ? "topnav-item--active" : "")">
+                                <i class="ti ti-shopping-cart"></i>
+                                <span>Commandes</span>
+                            </a>
+                        }
+
+                        @if (ModuleActive("services") && CanAccessTabNav("services", AppFunctions.Services))
+                        {
+                            <a href="/services" class="topnav-item @(IsNavActive("/services") ? "topnav-item--active" : "")">
+                                <i class="ti ti-briefcase"></i>
+                                <span>Prestations</span>
+                            </a>
+                        }
+
+                        @if (ModuleActive("grh") && CanAccessTabNav("grh", AppFunctions.GRH))
+                        {
+                            <a href="/grh" class="topnav-item @(IsNavActive("/grh") ? "topnav-item--active" : "")">
+                                <i class="ti ti-users-group"></i>
+                                <span>GRH</span>
+                            </a>
+                        }
+
+                        @if (ModuleActive("rapports") && CanAccessTabNav("rapports", AppFunctions.Rapports))
+                        {
+                            <a href="/rapports" class="topnav-item @(IsNavActive("/rapports", "/rapport") ? "topnav-item--active" : "")">
+                                <i class="ti ti-chart-bar"></i>
+                                <span>Rapports</span>
+                            </a>
+                        }
+
+                        @if (CanAccessTabNav("administration", AppFunctions.Administration))
+                        {
+                            <a href="/administration" class="topnav-item @(IsNavActive("/administration", "/admin/") ? "topnav-item--active" : "")">
+                                <i class="ti ti-settings-2"></i>
+                                <span>Administration</span>
+                            </a>
+                        }
+
+                        @if (CanAccessTabNav("parametres", AppFunctions.Parametres))
+                        {
+                            <a href="/settings" class="topnav-item @(IsNavActive("/settings") ? "topnav-item--active" : "")">
+                                <i class="ti ti-adjustments"></i>
+                                <span>Paramètres</span>
+                            </a>
+                        }
+                    </div>
+
+                    <!-- Right section: actions + user -->
+                    <div class="topnav-right">
+                        <a href="/catalogue" data-enhance-nav="false" class="topnav-tool" title="Catalogue client">
+                            <i class="ti ti-shopping-bag"></i>
+                        </a>
+                        <CurrencyToggle CssClass="currency-toggle--topnav" />
+
+                        @if (_profileOpen)
+                        {
+                            <div @ref="_accountBackdropRef" class="dropdown-backdrop aw-float-backdrop"></div>
+                        }
+                        <div class="aw-account">
+                            <button type="button"
+                                    @ref="_accountTriggerRef"
+                                    class="aw-account__trigger @(_profileOpen ? "aw-account__trigger--open" : "")"
+                                    aria-expanded="@_profileOpen"
+                                    aria-haspopup="menu"
+                                    @onclick="ToggleProfileMenuAsync"
+                                    @onclick:stopPropagation="true">
+                                <span class="aw-account__avatar" aria-hidden="true">
+                                    <i class="ti ti-user"></i>
+                                </span>
+                                <span class="aw-account__meta">
+                                    <span class="aw-account__name">@_currentUserName</span>
+                                    <span class="aw-account__role">@_currentUserRole</span>
+                                </span>
+                                <i class="ti ti-chevron-down aw-account__chevron" aria-hidden="true"></i>
+                            </button>
+                            @if (_profileOpen)
+                            {
+                                <div @ref="_accountMenuRef" class="aw-account__menu aw-float-panel" role="menu">
+                                    <div class="aw-account__head">
+                                        <span class="aw-account__avatar aw-account__avatar--lg" aria-hidden="true">
+                                            <i class="ti ti-user"></i>
+                                        </span>
+                                        <div class="aw-account__head-text">
+                                            <span class="aw-account__head-name">@_currentUserName</span>
+                                            <span class="aw-account__head-role">@_currentUserRole</span>
+                                        </div>
+                                    </div>
+                                    <div class="aw-account__list">
+                                        <a href="/catalogue" data-enhance-nav="false" class="aw-account__item" role="menuitem"
+                                           @onclick="@(() => _ = CloseProfileMenuAsync())">
+                                            <i class="ti ti-shopping-bag" aria-hidden="true"></i>
+                                            <span>Catalogue client</span>
+                                        </a>
+                                        <a href="/profile" class="aw-account__item" role="menuitem"
+                                           @onclick="@(() => _ = CloseProfileMenuAsync())">
+                                            <i class="ti ti-user" aria-hidden="true"></i>
+                                            <span>Mon profil</span>
+                                        </a>
+                                        @if (CanAccessTabNav("parametres", AppFunctions.Parametres))
+                                        {
+                                            <a href="/settings" class="aw-account__item" role="menuitem"
+                                               @onclick="@(() => _ = CloseProfileMenuAsync())">
+                                                <i class="ti ti-adjustments" aria-hidden="true"></i>
+                                                <span>Paramètres</span>
+                                            </a>
+                                        }
+                                    </div>
+                                    <div class="aw-account__footer">
+                                        <a href="/auth/logout" class="aw-account__item aw-account__item--danger" role="menuitem">
+                                            <i class="ti ti-logout" aria-hidden="true"></i>
+                                            <span>Déconnexion</span>
+                                        </a>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                  </div>
+                </nav>
+            }
+            else
+            {
+                <!-- TOPBAR (sidebar mode — white bar) -->
+                <header class="topbar">
+                    <button type="button"
+                            class="topbar-menu-btn d-lg-none"
+                            aria-label="Ouvrir le menu"
+                            @onclick="ToggleMobileSidebar">
+                        <i class="ti ti-menu-2"></i>
+                    </button>
+                    <!-- Page title + date -->
+                    <div class="topbar-title">
+                        <h1 class="topbar-page-name">@_pageTitle</h1>
+                        <div class="topbar-date">
+                            <i class="ti ti-calendar-event" style="font-size:13px;"></i>
+                            <span>@_todayLabel</span>
+                        </div>
+                    </div>
+
+                    <!-- Spacer -->
+                    <div style="flex:1;"></div>
+
+                    <!-- Action buttons -->
+                    <div class="topbar-actions">
+                        <a href="/catalogue" data-enhance-nav="false" class="topbar-tool" title="Catalogue client">
+                            <i class="ti ti-shopping-bag"></i>
+                        </a>
+                        <CurrencyToggle CssClass="currency-toggle--topbar" />
+                    </div>
+
+                    @if (_profileOpen)
+                    {
+                        <div @ref="_accountBackdropRef" class="dropdown-backdrop aw-float-backdrop"></div>
+                    }
+                    <div class="aw-account aw-account--light">
+                        <button type="button"
+                                @ref="_accountTriggerRef"
+                                class="aw-account__trigger @(_profileOpen ? "aw-account__trigger--open" : "")"
+                                aria-expanded="@_profileOpen"
+                                aria-haspopup="menu"
+                                @onclick="ToggleProfileMenuAsync"
+                                @onclick:stopPropagation="true">
+                            <span class="aw-account__avatar" aria-hidden="true">
+                                <i class="ti ti-user"></i>
+                            </span>
+                            <span class="aw-account__meta">
+                                <span class="aw-account__name">@_currentUserName</span>
+                                <span class="aw-account__role">@_currentUserRole</span>
+                            </span>
+                            <i class="ti ti-chevron-down aw-account__chevron" aria-hidden="true"></i>
+                        </button>
+                        @if (_profileOpen)
+                        {
+                            <div @ref="_accountMenuRef" class="aw-account__menu aw-float-panel" role="menu">
+                                <div class="aw-account__head">
+                                    <span class="aw-account__avatar aw-account__avatar--lg" aria-hidden="true">
+                                        <i class="ti ti-user"></i>
+                                    </span>
+                                    <div class="aw-account__head-text">
+                                        <span class="aw-account__head-name">@_currentUserName</span>
+                                        <span class="aw-account__head-role">@_currentUserRole</span>
+                                    </div>
+                                </div>
+                                <div class="aw-account__list">
+                                    <a href="/catalogue" data-enhance-nav="false" class="aw-account__item" role="menuitem"
+                                       @onclick="@(() => _ = CloseProfileMenuAsync())">
+                                        <i class="ti ti-shopping-bag" aria-hidden="true"></i>
+                                        <span>Catalogue client</span>
+                                    </a>
+                                    <a href="/profile" class="aw-account__item" role="menuitem"
+                                       @onclick="@(() => _ = CloseProfileMenuAsync())">
+                                        <i class="ti ti-user" aria-hidden="true"></i>
+                                        <span>Mon profil</span>
+                                    </a>
+                                    @if (CanAccessTabNav("parametres", AppFunctions.Parametres))
+                                    {
+                                        <a href="/settings" class="aw-account__item" role="menuitem"
+                                           @onclick="@(() => _ = CloseProfileMenuAsync())">
+                                            <i class="ti ti-adjustments" aria-hidden="true"></i>
+                                            <span>Paramètres</span>
+                                        </a>
+                                    }
+                                </div>
+                                <div class="aw-account__footer">
+                                    <a href="/auth/logout" class="aw-account__item aw-account__item--danger" role="menuitem">
+                                        <i class="ti ti-logout" aria-hidden="true"></i>
+                                        <span>Déconnexion</span>
+                                    </a>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </header>
+            }
+
+            <!-- CONTENT -->
+            <main class="page-content">
+                <div class="page-shell">
+                    @if (_hasCurrentRouteAccess)
+                    {
+                        <CurrencyRefreshBoundary>
+                            @Body
+                        </CurrencyRefreshBoundary>
+                    }
+                    else
+                    {
+                        <div class="aw-page" style="padding:1.5rem 0;">
+                            <div class="aw-shell" style="max-width:720px;margin:0 auto;">
+                                <div class="aw-empty">
+                                    <i class="bi bi-lock"></i>
+                                    <p><strong>Accès refusé</strong><br />Votre rôle ne possède pas la fonction nécessaire pour afficher cette page.</p>
+                                    <button type="button" class="aw-btn aw-btn--primary" style="margin-top:0.75rem;"
+                                            @onclick="@(() => Nav.NavigateTo(GetFirstAccessibleRoute()))">
+                                        <i class="bi bi-house"></i> Retour
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </main>
+
+            <!-- ══════════════ APP FOOTER ══════════════ -->
+            <footer class="app-footer">
+                <div class="app-footer-inner">
+                    <span class="app-footer-copy">
+                        &copy; @DateTime.Now.Year <strong>@AppSettings.AppName</strong>. Tous droits réservés.
+                    </span>
+                    <span class="app-footer-version">
+                        v@_appVersion
+                    </span>
+                </div>
+            </footer>
+        </div>
+    </div>
+}
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    // MudBlazor Theme with new color palette
+    private readonly MudTheme _appTheme = new()
+    {
+        PaletteLight = new PaletteLight()
+        {
+            Primary = "#009e84",
+            Secondary = "#a67235",
+            Tertiary = "#3b82f6",
+            Error = "#9a170c",
+            Warning = "#a67235",
+            Success = "#009e84",
+            Info = "#3b82f6",
+            Background = "#e8eef5",
+            Surface = "#ffffff",
+            AppbarBackground = "#0f172a",
+            AppbarText = "#ffffff",
+            DrawerBackground = "#0f172a",
+            DrawerText = "rgba(255,255,255,0.78)",
+            DrawerIcon = "rgba(255,255,255,0.65)"
+        },
+        PaletteDark = new PaletteDark()
+        {
+            Primary = "#009e84",
+            Secondary = "#a67235",
+            Tertiary = "#60a5fa",
+            Error = "#ef4444",
+            Warning = "#f59e0b",
+            Success = "#009e84",
+            Info = "#60a5fa",
+            Background = "#0f172a",
+            Surface = "#1e293b",
+            AppbarBackground = "#0f172a",
+            AppbarText = "#e2e8f0",
+            DrawerBackground = "#0f172a",
+            DrawerText = "rgba(255,255,255,0.78)",
+            DrawerIcon = "rgba(255,255,255,0.65)",
+            TextPrimary = "#e2e8f0",
+            TextSecondary = "#94a3b8",
+            ActionDefault = "#94a3b8",
+            Divider = "rgba(255,255,255,0.12)",
+            LinesDefault = "rgba(255,255,255,0.12)"
+        },
+        LayoutProperties = new LayoutProperties()
+        {
+            DefaultBorderRadius = "6px"
+        }
+    };
+
+    private bool _isDarkMode;
+
+    private const string LayoutSidebar = IAppSettingsService.LAYOUT_SIDEBAR;
+    private const string LayoutTopbar = IAppSettingsService.LAYOUT_TOPBAR;
+
+    private string _layoutPreference = LayoutSidebar;
+    private bool _useTopbarLayout => string.Equals(_layoutPreference, LayoutTopbar, StringComparison.OrdinalIgnoreCase);
+    private bool _sidebarCollapsed = true;
+    private bool _mobileSidebarOpen;
+    private bool _profileOpen;
+    private bool _accountPlacePending;
+    private int? _accountWatchId;
+    private DotNetObjectReference<MainLayout>? _overlayRef;
+    private ElementReference _accountTriggerRef;
+    private ElementReference _accountMenuRef;
+    private ElementReference _accountBackdropRef;
+    private string _pageTitle = "Tableau de bord";
+    private string _todayLabel = "";
+    private string _currentUserName = "Utilisateur";
+    private string _currentUserRole = "Aucun rôle";
+    private string _currentPath = "/";
+    private string _appVersion = typeof(MainLayout).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
+    private bool _isAuthenticated;
+    private bool _isAdministrator;
+    private bool _isVendeur;
+    private bool _hasCurrentRouteAccess = true;
+    private PermissionSnapshot _permissions = PermissionSnapshot.Empty;
+    private string? _permissionsLogin;
+
+    // Module licenses cache — loaded once at init
+    private Dictionary<string, bool> _moduleLicenses = new();
+    private bool ModuleActive(string moduleCode)
+        => _moduleLicenses.TryGetValue(moduleCode, out var active) && active;
+
+    private bool _isLoginPage => _currentPath.StartsWith("/login", StringComparison.OrdinalIgnoreCase);
+
+    // Map URL prefixes to breadcrumb labels
+    private static readonly (string prefix, string label, string icon)[] _routes = new[]
+    {
+        ("/dashboard", "Tableau de bord", "dashboard"),
+        // Ventes
+        ("/vente/facturation", "Ventes > Facturation", "shopping_cart_checkout"),
+        ("/vente/facture/print", "Ventes > Impression facture", "print"),
+        ("/vente/livraison", "Ventes > Livraison", "local_shipping"),
+        ("/vente/payement", "Ventes > Paiements", "payments"),
+        ("/vente", "Ventes", "point_of_sale"),
+        // Articles
+        ("/gestion/article/nouveau", "Articles > Nouvel article", "add_circle"),
+        ("/gestion/article/modifier", "Articles > Modifier article", "edit"),
+        ("/gestion/article", "Articles > Catalogue", "category"),
+        ("/gestion/approvisionnement", "Articles > Approvisionnement", "add_shopping_cart"),
+        ("/gestion/transformation", "Articles > Transformation", "transform"),
+        ("/stock", "Articles", "inventory_2"),
+        ("/settings", "Paramètres", "settings"),
+        // Commandes
+        ("/gestion/commande", "Commandes > Commandes internes", "assignment"),
+        ("/gestion/client", "Commandes > Clients", "people"),
+        ("/gestion/vente", "Commandes > Commandes clients", "storefront"),
+        ("/commandes", "Commandes & Clients", "shopping_cart"),
+        // Services
+        ("/services/catalogue", "Services > Catalogue", "work"),
+        ("/services", "Catalogue prestations", "work"),
+        // GRH
+        ("/grh", "GRH — Ressources Humaines", "badge"),
+        // Rapports
+        ("/rapport/appro-ben", "Rapports > Appro & B\u00e9n\u00e9fice", "analytics"),
+        ("/rapport/commande", "Rapports > Commandes", "list_alt"),
+        ("/rapport/stock", "Rapports > Stock", "inventory"),
+        ("/rapport/vente-mois", "Rapports > Ventes mensuelles", "calendar_month"),
+        ("/rapport/vente-appro", "Rapports > Ventes & Appro", "compare_arrows"),
+        ("/rapport/vente", "Rapports > Ventes", "trending_up"),
+        ("/rapports", "Rapports", "assessment"),
+        // Administration
+        ("/admin/facture", "Administration > Gestion factures", "receipt"),
+        ("/admin/livraison-payement", "Administration > Gestion livraisons", "local_shipping"),
+        ("/admin/periode-gestion", "Administration > P\u00e9riodes", "date_range"),
+        ("/admin/utilisateur", "Administration > Utilisateurs", "manage_accounts"),
+        ("/admin/taux", "Administration > Taux", "percent"),
+        ("/admin/versement", "Administration > Versements", "account_balance"),
+        ("/administration", "Administration", "admin_panel_settings"),
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        AuthStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
+        AppSettings.OnChange += OnAppSettingsChanged;
+
+        _currentPath = new Uri(Nav.Uri).AbsolutePath;
+        LoadLayoutPreference();
+        LoadThemePreference();
+        UpdatePageTitle(Nav.Uri);
+        UpdateTodayLabel();
+        await RefreshSecurityStateAsync();
+        await LoadModuleLicensesAsync();
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) =>
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                try { await JS.InvokeVoidAsync("appNavigation.startProgress"); } catch { }
+
+                _currentPath = new Uri(e.Location).AbsolutePath;
+                UpdatePageTitle(e.Location);
+                await CloseProfileMenuAsync();
+                _mobileSidebarOpen = false;
+                await RefreshSecurityStateAsync();
+                StateHasChanged();
+            }
+            catch
+            {
+            }
+            finally
+            {
+                NavGate.ForceReset();
+                try { await JS.InvokeVoidAsync("appNavigation.finishProgress"); } catch { }
+            }
+        });
+
+    private void ToggleMobileSidebar() => _mobileSidebarOpen = !_mobileSidebarOpen;
+
+    private void CloseMobileSidebar() => _mobileSidebarOpen = false;
+
+    private async Task ToggleProfileMenuAsync()
+    {
+        if (_profileOpen)
+        {
+            await CloseProfileMenuAsync();
+            return;
+        }
+        _profileOpen = true;
+        _accountPlacePending = true;
+    }
+
+    private async Task CloseProfileMenuAsync()
+    {
+        if (!_profileOpen) return;
+        await StopAccountWatchAsync();
+        _profileOpen = false;
+        _accountPlacePending = false;
+    }
+
+    private async Task StartAccountWatchAsync()
+    {
+        await StopAccountWatchAsync();
+        try
+        {
+            _overlayRef ??= DotNetObjectReference.Create(this);
+            _accountWatchId = await JS.InvokeAsync<int>("awOverlay.watch", _accountTriggerRef, _accountMenuRef, new
+            {
+                align = "end",
+                width = 248,
+                minWidth = 248,
+                maxWidth = 248,
+                maxHeight = 420,
+                estimatedHeight = 280,
+                gap = 6
+            }, _accountBackdropRef, _overlayRef);
+        }
+        catch { /* ignore */ }
+    }
+
+    private async Task StopAccountWatchAsync()
+    {
+        if (_accountWatchId is null) return;
+        var id = _accountWatchId.Value;
+        _accountWatchId = null;
+        try
+        {
+            await JS.InvokeVoidAsync("awOverlay.unwatch", id);
+        }
+        catch { /* ignore */ }
+    }
+
+    private void UpdatePageTitle(string url)
+    {
+        var path = new Uri(url).AbsolutePath.TrimEnd('/').ToLowerInvariant();
+        foreach (var (prefix, label, _) in _routes)
+        {
+            if (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                // Keep only the last segment after " > " for the topbar title
+                var parts = label.Split(" > ");
+                _pageTitle = parts[^1];
+                return;
+            }
+        }
+        _pageTitle = "Tableau de bord";
+    }
+
+    // IsNavActive helper — returns true if current path matches any of the given prefixes
+    private bool IsNavActive(params string[] prefixes)
+    {
+        var path = _currentPath.TrimEnd('/').ToLowerInvariant();
+        foreach (var prefix in prefixes)
+        {
+            var rawPrefix = prefix.ToLowerInvariant();
+            var p = rawPrefix.TrimEnd('/');
+            if (rawPrefix == "/")
+            {
+                if (path == "") return true;
+            }
+            else if (path == p || path.StartsWith(p + "/"))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private async void OnAuthenticationStateChanged(Task<AuthenticationState> task)
+    {
+        await RefreshSecurityStateAsync(task);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RefreshSecurityStateAsync(Task<AuthenticationState>? authTask = null)
+    {
+        var authState = authTask is null
+            ? await AuthStateProvider.GetAuthenticationStateAsync()
+            : await authTask;
+
+        var user = authState.User;
+        _isAuthenticated = user.Identity?.IsAuthenticated == true;
+
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            var login = user.FindFirst("login")?.Value
+                ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            _currentUserName = user.FindFirst("login")?.Value
+                ?? user.FindFirst(ClaimTypes.Name)?.Value
+                ?? "Utilisateur";
+            _currentUserRole = user.FindFirst(ClaimTypes.Role)?.Value ?? "Aucun rôle";
+            _isAdministrator = AppFunctions.Normalize(_currentUserRole) == "administrateur";
+            _isVendeur = AppFunctions.IsVendeurRole(_currentUserRole);
+            if (!string.Equals(_permissionsLogin, login, StringComparison.OrdinalIgnoreCase))
+            {
+                _permissions = await PermissionResolver.GetPermissionsAsync(login);
+                _permissionsLogin = login;
+            }
+            _hasCurrentRouteAccess = HasRouteReadAccess(_currentPath);
+            await UserCurrency.EnsureLoadedAsync();
+
+            if (_permissions.HasHierarchicalGrants)
+            {
+                if (PermissionCatalog.ShouldRedirectStockToInventaire(_permissions.Grants)
+                    && (_currentPath == "/stock" || _currentPath == "/stock/"))
+                {
+                    Nav.NavigateTo("/stock/inventaire", replace: true);
+                    return;
+                }
+
+                if (!_hasCurrentRouteAccess)
+                {
+                    var target = GetFirstAccessibleRoute();
+                    if (target != _currentPath)
+                    {
+                        Nav.NavigateTo(target);
+                        return;
+                    }
+                }
+            }
+            else if (_isVendeur && (_currentPath == "/dashboard" || _currentPath == "/dashboard/"))
+            {
+                Nav.NavigateTo("/vente");
+                return;
+            }
+            else if (_isVendeur && (_currentPath == "/" || _currentPath == ""))
+            {
+                Nav.NavigateTo("/vente");
+                return;
+            }
+
+            // Redirect to first accessible page if current route is not allowed
+            if (!_hasCurrentRouteAccess)
+            {
+                var target = GetFirstAccessibleRoute();
+                if (target != _currentPath)
+                {
+                    Nav.NavigateTo(target);
+                    return;
+                }
+            }
+
+            return;
+        }
+
+        _currentUserName = "Invité";
+        _currentUserRole = "Non connecté";
+        _isAdministrator = false;
+        _isVendeur = false;
+        _permissions = PermissionSnapshot.Empty;
+        _permissionsLogin = null;
+        _hasCurrentRouteAccess = true;
+    }
+
+    private async void OnAppSettingsChanged()
+    {
+        LoadLayoutPreference();
+        LoadThemePreference();
+        UpdateTodayLabel();
+        await CloseProfileMenuAsync();
+        await InvokeAsync(async () =>
+        {
+            await ApplyHtmlAttributesAsync();
+            StateHasChanged();
+        });
+    }
+
+    private void LoadLayoutPreference()
+    {
+        var pref = AppSettings.Get(IAppSettingsService.KEY_LAYOUT_PREFERENCE);
+        _layoutPreference = NormalizeLayoutPreference(pref);
+    }
+
+    private void LoadThemePreference()
+    {
+        var theme = AppSettings.Get(IAppSettingsService.KEY_THEME);
+        _isDarkMode = string.Equals(theme, "Sombre", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void UpdateTodayLabel()
+    {
+        var langue = AppSettings.Get(IAppSettingsService.KEY_LANGUE);
+        var culture = langue switch
+        {
+            "English" => new CultureInfo("en-US"),
+            "Español" => new CultureInfo("es-ES"),
+            "Deutsch" => new CultureInfo("de-DE"),
+            _ => new CultureInfo("fr-FR")
+        };
+        _todayLabel = DateTime.Now.ToString("dddd d MMMM yyyy", culture);
+    }
+
+    private CultureInfo GetCurrentCulture()
+    {
+        var langue = AppSettings.Get(IAppSettingsService.KEY_LANGUE);
+        return langue switch
+        {
+            "English" => new CultureInfo("en-US"),
+            "Español" => new CultureInfo("es-ES"),
+            "Deutsch" => new CultureInfo("de-DE"),
+            _ => new CultureInfo("fr-FR")
+        };
+    }
+
+    private async Task ApplyHtmlAttributesAsync()
+    {
+        try
+        {
+            var bsTheme = _isDarkMode ? "dark" : "light";
+            var langue = AppSettings.Get(IAppSettingsService.KEY_LANGUE);
+            var langCode = langue switch
+            {
+                "English" => "en",
+                "Español" => "es",
+                "Deutsch" => "de",
+                _ => "fr"
+            };
+            await JS.InvokeVoidAsync("eval",
+                $"document.documentElement.setAttribute('data-bs-theme','{bsTheme}');" +
+                $"document.documentElement.setAttribute('lang','{langCode}');");
+        }
+        catch { /* SSR prerender — no JS available yet */ }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            LoadThemePreference();
+            await ApplyHtmlAttributesAsync();
+            try
+            {
+                await JS.InvokeVoidAsync("awOverlay.configureBootstrapDropdowns");
+            }
+            catch { /* ignore */ }
+            // Do not call StateHasChanged here — it causes a visible double paint of the chrome.
+        }
+
+        if (_accountPlacePending && _profileOpen)
+        {
+            _accountPlacePending = false;
+            await StartAccountWatchAsync();
+        }
+    }
+
+    private static string NormalizeLayoutPreference(string? layoutPreference)
+        => string.Equals(layoutPreference, LayoutTopbar, StringComparison.OrdinalIgnoreCase)
+            ? LayoutTopbar
+            : LayoutSidebar;
+
+    private string ArticlesNavHref =>
+        HasHierarchicalGrants
+            ? PermissionCatalog.FirstAccessibleArticlesRoute(_permissions.Grants) ?? "/profile"
+            : "/stock";
+
+    private string VenteNavHref =>
+        HasHierarchicalGrants
+            ? PermissionCatalog.FirstAccessibleVenteRoute(_permissions.Grants) ?? "/profile"
+            : "/vente";
+
+    private string CommandesNavHref =>
+        HasHierarchicalGrants
+            ? PermissionCatalog.FirstAccessibleCommandesRoute(_permissions.Grants) ?? "/profile"
+            : "/commandes";
+
+    private bool HasHierarchicalGrants => _permissions.HasHierarchicalGrants;
+
+    private bool CanAccessTabNav(string tabCode, params string[] legacyReadModules)
+    {
+        if (HasHierarchicalGrants)
+            return _permissions.CanAccessTab(tabCode);
+
+        if (_isAdministrator)
+            return true;
+
+        return legacyReadModules.Any(m => _permissions.CanRead(m));
+    }
+
+    private bool CanRead(string functionName) =>
+        !HasHierarchicalGrants && (_isAdministrator || _permissions.CanRead(functionName));
+
+    private bool ShowDashboard =>
+        HasHierarchicalGrants
+            ? _permissions.CanAccessTab("dashboard")
+            : CanAccessTabNav("dashboard", AppFunctions.Dashboard) && !_isVendeur;
+
+    private bool ShowArticlesNav =>
+        ModuleActive("stock") && (
+            HasHierarchicalGrants
+                ? _permissions.CanAccessTab("articles")
+                : CanAccessTabNav("articles", AppFunctions.Stock, AppFunctions.Approvisionnement));
+
+    private async Task LoadModuleLicensesAsync()
+    {
+        try
+        {
+            var all = await ModuleLicenseService.GetAllModulesAsync();
+            _moduleLicenses = all.ToDictionary(m => m.ModuleCode, m => m.IsActive);
+        }
+        catch
+        {
+            // If the table is not yet created, all modules are considered active (fail-open)
+            _moduleLicenses = new Dictionary<string, bool>();
+        }
+    }
+
+    private string GetFirstAccessibleRoute() =>
+        HasHierarchicalGrants
+            ? PermissionCatalog.FirstAccessibleRoute(_permissions.Grants)
+            : GetLegacyFirstAccessibleRoute();
+
+    private string GetLegacyFirstAccessibleRoute()
+    {
+        if (ShowDashboard) return "/dashboard";
+        if (CanAccessTabNav("vente", AppFunctions.Vente, AppFunctions.Facturation)) return "/vente";
+        if (CanAccessTabNav("articles", AppFunctions.Stock, AppFunctions.Approvisionnement)) return "/stock";
+        if (CanAccessTabNav("commandes", AppFunctions.CommandesClients, AppFunctions.CommandesInternes)) return "/commandes";
+        if (CanAccessTabNav("grh", AppFunctions.GRH)) return "/grh";
+        if (CanAccessTabNav("rapports", AppFunctions.Rapports)) return "/rapports";
+        if (CanAccessTabNav("administration", AppFunctions.Administration)) return "/administration";
+        if (CanAccessTabNav("parametres", AppFunctions.Parametres)) return "/settings";
+        return "/profile";
+    }
+
+    private bool HasRouteReadAccess(string path)
+    {
+        var normalizedPath = (path ?? "/").Trim().ToLowerInvariant();
+
+        if (normalizedPath == "/dashboard" || normalizedPath == "/dashboard/")
+            return ShowDashboard;
+
+        if (normalizedPath == "/" || normalizedPath == "")
+            return true;
+
+        if (HasHierarchicalGrants)
+            return PermissionCatalog.CanAccessRoutePath(_permissions.Grants, normalizedPath);
+
+        if (_isVendeur && (normalizedPath.StartsWith("/gestion/") || normalizedPath.StartsWith("/stock/appro") || normalizedPath.StartsWith("/stock/transformation")))
+            return false;
+
+        if (_isVendeur && normalizedPath.StartsWith("/stock"))
+            return ShowArticlesNav;
+
+        if (normalizedPath.StartsWith("/commandes"))
+            return CanAccessTabNav("commandes", AppFunctions.CommandesClients, AppFunctions.CommandesInternes);
+
+        var requiredFunction = GetRequiredFunction(path ?? "/");
+        return string.IsNullOrWhiteSpace(requiredFunction) || CanRead(requiredFunction);
+    }
+
+    private static string? GetRequiredFunction(string path)
+    {
+        var normalizedPath = (path ?? "/").Trim().ToLowerInvariant();
+
+        if (normalizedPath.StartsWith("/login") || normalizedPath.StartsWith("/profile") || normalizedPath.StartsWith("/client/"))
+            return null;
+
+        if (normalizedPath == "/" || normalizedPath == "")
+            return null;
+
+        if (normalizedPath == "/dashboard" || normalizedPath == "/dashboard/")
+            return AppFunctions.Dashboard;
+
+        if (normalizedPath.StartsWith("/settings"))
+            return AppFunctions.Parametres;
+
+        if (normalizedPath.StartsWith("/administration") || normalizedPath.StartsWith("/admin/"))
+            return AppFunctions.Administration;
+
+        if (normalizedPath.StartsWith("/rapports") || normalizedPath.StartsWith("/rapport/"))
+            return AppFunctions.Rapports;
+
+        if (normalizedPath.StartsWith("/grh"))
+            return AppFunctions.GRH;
+
+        if (normalizedPath.StartsWith("/services"))
+            return AppFunctions.Services;
+
+        if (normalizedPath.StartsWith("/vente/facturation") || normalizedPath.StartsWith("/vente/facture/print"))
+            return AppFunctions.Facturation;
+
+        if (normalizedPath.StartsWith("/vente"))
+            return AppFunctions.Vente;
+
+        if (normalizedPath.StartsWith("/stock")
+            || normalizedPath.StartsWith("/gestion/article")
+            || normalizedPath.StartsWith("/gestion/transformation"))
+            return AppFunctions.Stock;
+
+        if (normalizedPath.StartsWith("/gestion/approvisionnement"))
+            return AppFunctions.Approvisionnement;
+
+        if (normalizedPath.StartsWith("/gestion/commande"))
+            return AppFunctions.CommandesInternes;
+
+        if (normalizedPath.StartsWith("/gestion/client")
+            || normalizedPath.StartsWith("/gestion/vente"))
+            return AppFunctions.CommandesClients;
+
+        return null;
+    }
+
+    [JSInvokable]
+    public Task OnOverlayDismiss() => CloseProfileMenuAsync();
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+        AuthStateProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
+        AppSettings.OnChange -= OnAppSettingsChanged;
+        _ = StopAccountWatchAsync();
+        _overlayRef?.Dispose();
+    }
+}

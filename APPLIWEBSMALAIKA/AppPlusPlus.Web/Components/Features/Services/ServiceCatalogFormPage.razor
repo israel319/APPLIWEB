@@ -1,0 +1,132 @@
+@page "/services/catalogue/nouveau"
+@page "/services/catalogue/modifier/{Code}"
+@rendermode InteractiveServer
+@using AppPlusPlus.Application.DTOs.Prestations
+@using AppPlusPlus.Application.Services.Prestations
+@using AppPlusPlus.Application.Services.Shared
+@using AppPlusPlus.Domain.Enums
+@using AppPlusPlus.Domain.Common
+@inject IServiceCatalogService CatalogService
+@inject ILookupService LookupService
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+
+<PageTitle>@AppSettings.AppName — @(_isEdit ? "Modifier prestation" : "Nouvelle prestation")</PageTitle>
+
+<div class="aw-page">
+    <div class="aw-form">
+        <header class="aw-form__head">
+            <div>
+                <p class="aw-form__eyebrow">Services</p>
+                <h1 class="aw-form__title">@(_isEdit ? "Modifier la prestation" : "Nouvelle prestation")</h1>
+            </div>
+            <div class="aw-form__actions">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                    <i class="bi bi-arrow-left"></i> Retour
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="SaveAsync" disabled="@_saving">
+                    <i class="bi bi-check-lg"></i> Enregistrer
+                </button>
+            </div>
+        </header>
+        <div class="aw-form__body">
+            <p class="aw-field__hint" style="margin-bottom:0.9rem;">
+                Comme un <strong>article</strong>, une prestation se définit une fois dans le catalogue
+                (code, libellé, prix) pour être réutilisée ensuite à la facturation.
+            </p>
+            <div class="aw-form__grid">
+                <div class="aw-field">
+                    <label class="aw-field__label">Code *</label>
+                    <input type="text" class="aw-input" @bind="_model.Code" maxlength="50" readonly="@_isEdit" placeholder="SRV-001" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Libellé *</label>
+                    <input type="text" class="aw-input" @bind="_model.Description" maxlength="120" placeholder="Ex. Consultation comptable" />
+                </div>
+                <div class="aw-field aw-form__span-2">
+                    <label class="aw-field__label">Description détaillée</label>
+                    <textarea class="aw-input" rows="2" @bind="_model.Detail" maxlength="500" placeholder="Optionnel"></textarea>
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Prix unitaire *</label>
+                    <input type="number" step="0.01" min="0" class="aw-input" @bind="_model.Price" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Devise</label>
+                    <select class="aw-select" @bind="_model.MoneyId">
+                        @foreach (var m in _monnaies)
+                        {
+                            <option value="@m.IdMonais">@m.DescriptionMonais</option>
+                        }
+                    </select>
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Unité de facturation</label>
+                    <select class="aw-select" @bind="_model.UnitType">
+                        <option value="@((int)ServiceUnitType.Hour)">À l'heure</option>
+                        <option value="@((int)ServiceUnitType.Flat)">Forfait</option>
+                        <option value="@((int)ServiceUnitType.Unit)">À l'unité</option>
+                    </select>
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Catégorie</label>
+                    <input type="text" class="aw-input" @bind="_model.Category" maxlength="80" placeholder="Ex. Conseil, Dépannage…" />
+                </div>
+                <div class="aw-field aw-form__span-2">
+                    <label class="aw-switch-label" style="display:flex;align-items:center;gap:0.55rem;cursor:pointer;">
+                        <input class="aw-switch" type="checkbox" id="svcActive" @bind="_model.IsActive" />
+                        <span class="aw-field__label" style="margin:0;">Prestation active (visible au catalogue)</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string? Code { get; set; }
+
+    bool _isEdit => !string.IsNullOrEmpty(Code);
+    bool _saving;
+    string _login = "";
+    ServiceCatalogDetailDto _model = new()
+    {
+        MoneyId = CurrencyDefaults.MoneyIdCdf,
+        UnitType = (int)ServiceUnitType.Hour,
+        IsActive = true
+    };
+    List<Domain.Entities.Vente.Money> _monnaies = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        _login = auth.User.FindFirst("login")?.Value
+            ?? auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "";
+
+        _monnaies = await LookupService.GetMoneysAsync();
+
+        if (_isEdit && Code != null)
+        {
+            var existing = await CatalogService.GetByCodeAsync(Code);
+            if (existing != null) _model = existing;
+        }
+    }
+
+    async Task SaveAsync()
+    {
+        _saving = true;
+        try
+        {
+            var r = await CatalogService.SaveAsync(_model, _login);
+            Snackbar.Add(r.Message, r.Success ? Severity.Success : Severity.Error);
+            if (r.Success)
+                Navigation.NavigateTo("/services");
+        }
+        finally { _saving = false; }
+    }
+
+    void Cancel() => Navigation.NavigateTo("/services");
+}

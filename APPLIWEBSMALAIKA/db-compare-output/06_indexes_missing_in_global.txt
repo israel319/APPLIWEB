@@ -1,0 +1,8 @@
+sch|tbl|idx_name|type_desc|is_unique|is_primary_key
+---|---|--------|---------|---------|--------------
+dbo|T_Art_Categorys|UQ__T_Art_Ca__877F3EF059B662B6|NONCLUSTERED|1|0
+dbo|T_Art_Types|UQ__T_Art_Ty__1C4A61F71305BE28|NONCLUSTERED|1|0
+dbo|T_Arts|UQ__T_Arts__4EBBBAC9909F7BE7|NONCLUSTERED|1|0
+dbo|T_Localisations|UQ__T_Locali__4DFD207914BF58D2|NONCLUSTERED|1|0
+
+(4 lignes affectées)

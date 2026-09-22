@@ -1,0 +1,396 @@
+@page "/"
+@attribute [AllowAnonymous]
+@layout PublicLayout
+@rendermode PublicRenderMode.Instance
+@using AppPlusPlus.Application.Services.Catalogue
+@using AppPlusPlus.Web.Services
+@inject ICatalogueService CatalogueService
+@inject HomeCatalogCoordinator HomeCatalog
+@inject IJSRuntime JS
+
+<PageTitle>@PublicBrand.ProductName - @PublicBrand.Tagline</PageTitle>
+
+<div class="mk-home">
+    <section class="mk-hero" aria-label="Mise en avant boutique">
+        <div id="mkHeroCarousel"
+             class="carousel slide carousel-fade mk-hero__carousel"
+             data-bs-ride="carousel"
+             data-bs-interval="5500"
+             data-bs-pause="hover"
+             data-bs-touch="true">
+            <div class="carousel-indicators mk-hero__dots">
+                <button type="button" data-bs-target="#mkHeroCarousel" data-bs-slide-to="0" class="active" aria-current="true" aria-label="Accueil"></button>
+                <button type="button" data-bs-target="#mkHeroCarousel" data-bs-slide-to="1" aria-label="Univers filles"></button>
+                <button type="button" data-bs-target="#mkHeroCarousel" data-bs-slide-to="2" aria-label="Univers gar&ccedil;ons"></button>
+            </div>
+            <div class="carousel-inner">
+                <div class="carousel-item active">
+                    <div class="mk-hero__slide mk-hero__slide--kids-bg" style="--mk-kids-bg-image: url('/images/home/hero-kids-bg-v2.png'); --mk-kids-bg-position: 82% 40%;">
+                        <div class="mk-wrap mk-hero__inner">
+                            <div class="mk-hero__copy">
+                                <h1>Des v&ecirc;tements doux pour les enfants qui courent partout</h1>
+                                <p class="mk-hero__lead">Filles, gar&ccedil;ons et b&eacute;b&eacute;s, de 0 &agrave; 14 ans. Choisissez en ligne, on s'occupe de la livraison.</p>
+                                <div class="mk-hero__cta">
+                                    <button type="button" class="mk-btn mk-btn--primary" @onclick="GoCatalogGridAsync">Voir le catalogue</button>
+                                    <a class="mk-btn mk-btn--ghost" href="#commande">Comment commander</a>
+                                </div>
+                                <div class="mk-hero__assure">
+                                    <span><i class="bi bi-shield-check" aria-hidden="true"></i> Paiement s&eacute;curis&eacute;</span>
+                                    <span><i class="bi bi-arrow-repeat" aria-hidden="true"></i> &Eacute;change facile</span>
+                                </div>
+                            </div>
+                            <div class="mk-hero__art" aria-hidden="true">
+                                <div class="mk-hero__sun"></div>
+                                <img class="mk-hero__mascot ali-brand-logo"
+                                     src="images/brand/malaika-kids-logo.png"
+                                     alt=""
+                                     width="320"
+                                     height="120"
+                                     decoding="async" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="carousel-item">
+                    <div class="mk-hero__slide mk-hero__slide--kids-bg" style="--mk-kids-bg-image: url('/images/home/carousel/faces/slide-3.png'); --mk-kids-bg-position: 72% 42%;">
+                        <div class="mk-wrap mk-hero__inner">
+                            <div class="mk-hero__copy">
+                                <p class="mk-hero__lane">Filles</p>
+                                <h1>Des tenues color&eacute;es pour les filles</h1>
+                                <p class="mk-hero__lead">Robes, hauts et looks de f&ecirc;te &mdash; des tailles du 2 au 14 ans, pr&ecirc;tes &agrave; rejoindre le panier.</p>
+                                <div class="mk-hero__cta">
+                                    <button type="button" class="mk-btn mk-btn--primary" @onclick="GoCatalogGirlsAsync">Voir les articles Filles</button>
+                                    <a class="mk-btn mk-btn--ghost" href="#univers">Tous les univers</a>
+                                </div>
+                                <div class="mk-hero__assure">
+                                    <span><i class="bi bi-shield-check" aria-hidden="true"></i> Paiement s&eacute;curis&eacute;</span>
+                                    <span><i class="bi bi-arrow-repeat" aria-hidden="true"></i> &Eacute;change facile</span>
+                                </div>
+                            </div>
+                            <div class="mk-hero__art" aria-hidden="true">
+                                <div class="mk-hero__sun"></div>
+                                <img class="mk-hero__mascot mk-hero__mascot--photo"
+                                     src="images/home/carousel/clothes/slide-1.png"
+                                     alt=""
+                                     width="320"
+                                     height="320"
+                                     loading="lazy"
+                                     decoding="async" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="carousel-item">
+                    <div class="mk-hero__slide mk-hero__slide--kids-bg" style="--mk-kids-bg-image: url('/images/home/carousel/faces/slide-1.png'); --mk-kids-bg-position: 68% 38%;">
+                        <div class="mk-wrap mk-hero__inner">
+                            <div class="mk-hero__copy">
+                                <p class="mk-hero__lane">Gar&ccedil;ons</p>
+                                <h1>Confort et style pour les gar&ccedil;ons</h1>
+                                <p class="mk-hero__lead">Sweats, jeans et tenues du quotidien pour suivre le rythme des aventures.</p>
+                                <div class="mk-hero__cta">
+                                    <button type="button" class="mk-btn mk-btn--primary" @onclick="GoCatalogBoysAsync">Voir les articles Gar&ccedil;ons</button>
+                                    <a class="mk-btn mk-btn--ghost" href="#commande">Comment commander</a>
+                                </div>
+                                <div class="mk-hero__assure">
+                                    <span><i class="bi bi-shield-check" aria-hidden="true"></i> Paiement s&eacute;curis&eacute;</span>
+                                    <span><i class="bi bi-arrow-repeat" aria-hidden="true"></i> &Eacute;change facile</span>
+                                </div>
+                            </div>
+                            <div class="mk-hero__art" aria-hidden="true">
+                                <div class="mk-hero__sun"></div>
+                                <img class="mk-hero__mascot mk-hero__mascot--photo"
+                                     src="images/home/carousel/clothes/slide-flatlay.png"
+                                     alt=""
+                                     width="320"
+                                     height="320"
+                                     loading="lazy"
+                                     decoding="async" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <button class="carousel-control-prev mk-hero__control" type="button" data-bs-target="#mkHeroCarousel" data-bs-slide="prev">
+                <span class="mk-hero__control-icon" aria-hidden="true"><i class="bi bi-chevron-left"></i></span>
+                <span class="visually-hidden">Diapositive pr&eacute;c&eacute;dente</span>
+            </button>
+            <button class="carousel-control-next mk-hero__control" type="button" data-bs-target="#mkHeroCarousel" data-bs-slide="next">
+                <span class="mk-hero__control-icon" aria-hidden="true"><i class="bi bi-chevron-right"></i></span>
+                <span class="visually-hidden">Diapositive suivante</span>
+            </button>
+        </div>
+    </section>
+
+    <div class="mk-trust">
+        <div class="mk-wrap">
+            <div class="mk-trust-panel">
+            <ul>
+                <li style="--mk-trust-bg:#cfe4ff">
+                    <span class="mk-trust__ico"><i class="bi bi-truck" aria-hidden="true"></i></span>
+                    <div><b>Livraison rapide</b><span>Chez vous ou en boutique</span></div>
+                </li>
+                <li style="--mk-trust-bg:#c9f2d9">
+                    <span class="mk-trust__ico"><i class="bi bi-shield-check" aria-hidden="true"></i></span>
+                    <div><b>Paiement s&eacute;curis&eacute;</b><span>Vos donn&eacute;es restent priv&eacute;es</span></div>
+                </li>
+                <li style="--mk-trust-bg:#ffe2b8">
+                    <span class="mk-trust__ico"><i class="bi bi-arrow-repeat" aria-hidden="true"></i></span>
+                    <div><b>&Eacute;change facile</b><span>Si la taille ne va pas</span></div>
+                </li>
+                <li style="--mk-trust-bg:#ffd3e6">
+                    <span class="mk-trust__ico"><i class="bi bi-chat-dots" aria-hidden="true"></i></span>
+                    <div><b>Une question ?</b><span>Notre &eacute;quipe vous r&eacute;pond</span></div>
+                </li>
+            </ul>
+            </div>
+        </div>
+    </div>
+
+    <section class="mk-section" id="univers">
+        <div class="mk-wrap">
+            <div class="mk-sec-head">
+                <div>
+                    <h2>Pour qui cherchez-vous ?</h2>
+                    <p>Choisissez un univers pour voir tout le catalogue.</p>
+                </div>
+                <button type="button" class="mk-more" @onclick="GoCatalogGridAsync">Voir tout le catalogue</button>
+            </div>
+            <div class="mk-universes">
+                <button type="button" class="mk-tile mk-tile--girls" @onclick="GoCatalogGirlsAsync">
+                    <img class="mk-tile__photo" src="images/home/univers/tile-girls.png" alt="" loading="lazy" decoding="async" />
+                    <div class="mk-tile__content"><h3>Filles</h3><p>Robes, hauts color&eacute;s et tenues de f&ecirc;te.</p></div>
+                    <span class="mk-btn mk-btn--ghost">Voir les articles Filles</span>
+                </button>
+                <button type="button" class="mk-tile mk-tile--boys" @onclick="GoCatalogBoysAsync">
+                    <img class="mk-tile__photo" src="images/home/univers/tile-boys.png" alt="" loading="lazy" decoding="async" />
+                    <div class="mk-tile__content"><h3>Gar&ccedil;ons</h3><p>Sweats, jeans et tenues du quotidien.</p></div>
+                    <span class="mk-btn mk-btn--ghost">Voir les articles Gar&ccedil;ons</span>
+                </button>
+                <button type="button" class="mk-tile mk-tile--baby" @onclick="GoCatalogGridAsync">
+                    <img class="mk-tile__photo" src="images/home/univers/tile-baby.png" alt="" loading="lazy" decoding="async" />
+                    <div class="mk-tile__content"><h3>B&eacute;b&eacute;</h3><p>Bodies, pyjamas et premi&egrave;res tenues.</p></div>
+                    <span class="mk-btn mk-btn--ghost">D&eacute;couvrir</span>
+                </button>
+                <button type="button" class="mk-tile mk-tile--gear" @onclick="GoCatalogGridAsync">
+                    <img class="mk-tile__photo" src="images/home/univers/tile-gear.png" alt="" loading="lazy" decoding="async" />
+                    <div class="mk-tile__content"><h3>Chaussures &amp; accessoires</h3><p>Baskets, sacs et essentiels.</p></div>
+                    <span class="mk-btn mk-btn--ghost">Parcourir</span>
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <section class="mk-section mk-how" id="commande">
+        <div class="mk-wrap">
+            <div class="mk-sec-head"><div><h2>Commander en 4 &eacute;tapes</h2></div></div>
+            <ol class="mk-steps">
+                <li><h3>Parcourez</h3><p>Choisissez filles, gar&ccedil;ons ou toutes les cat&eacute;gories.</p></li>
+                <li><h3>Ajoutez au panier</h3><p>S&eacute;lectionnez tailles et quantit&eacute;s.</p></li>
+                <li><h3>Connectez-vous</h3><p>Client : votre num&eacute;ro de t&eacute;l&eacute;phone.</p></li>
+                <li><h3>On livre</h3><p>Confirmation et livraison &agrave; @PublicBrand.ContactAddress.</p></li>
+            </ol>
+        </div>
+    </section>
+
+    <div class="mk-catalog-intro" id="categories">
+        <div class="mk-wrap">
+            <span class="mk-page-hero__eyebrow">La boutique @PublicBrand.ProductName</span>
+            <h2>Le catalogue</h2>
+            <p>Toutes les cat&eacute;gories et articles commandables - @PublicBrand.Tagline</p>
+        </div>
+    </div>
+
+    <section class="mk-section mk-catalog-section ali-home__catalog" aria-label="Le catalogue" id="catalogue" style="padding-top:0">
+        <div class="mk-wrap">
+            <LandingCatalogSection StayOnHome="true" PreviewMode="true" MaxCategoryCards="8" />
+        </div>
+    </section>
+
+    <footer class="mk-footer" id="contact">
+        <div class="mk-wrap">
+        <div class="mk-footer__panel">
+        <div class="mk-foot-grid">
+            <div class="mk-foot-brand">
+                <img class="mk-foot-logo" src="images/brand/malaika-kids-logo.png" alt="@PublicBrand.ProductName" width="260" height="80" decoding="async" />
+                <p>Mode et habillement enfant. Des v&ecirc;tements, des chaussures et des accessoires pour les 0 &agrave; 14 ans.</p>
+            </div>
+            <div class="mk-foot-shop">
+                <h4>Boutique</h4>
+                <ul>
+                    <li><button type="button" class="mk-footer-link" @onclick="GoCatalogGirlsAsync">Filles</button></li>
+                    <li><button type="button" class="mk-footer-link" @onclick="GoCatalogBoysAsync">Gar&ccedil;ons</button></li>
+                    <li><button type="button" class="mk-footer-link" @onclick="GoCatalogGridAsync">Catalogue</button></li>
+                </ul>
+            </div>
+            <div class="mk-foot-contact">
+                <h4>Contact</h4>
+                <ul class="mk-foot-contact-list">
+                    <li>
+                        <a class="mk-foot-contact-item" href="tel:@PublicBrand.ContactPhoneTel">
+                            <i class="bi bi-telephone mk-foot-contact-ico" aria-hidden="true"></i>
+                            <span>@PublicBrand.ContactPhone</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a class="mk-foot-contact-item" href="mailto:@PublicBrand.ContactEmail">
+                            <i class="bi bi-envelope mk-foot-contact-ico" aria-hidden="true"></i>
+                            <span>@PublicBrand.ContactEmail</span>
+                        </a>
+                    </li>
+                    <li>
+                        <span class="mk-foot-contact-item">
+                            <i class="bi bi-geo-alt mk-foot-contact-ico" aria-hidden="true"></i>
+                            <span>@PublicBrand.ContactAddress</span>
+                        </span>
+                    </li>
+                </ul>
+            </div>
+        </div>
+        <div class="mk-foot-bottom">
+            <span>&copy; @DateTime.Today.Year @PublicBrand.ProductName</span>
+            <span>@PublicBrand.Tagline</span>
+        </div>
+        </div>
+        </div>
+    </footer>
+</div>
+
+@code {
+    List<SidebarCategory> _allOrderableCategories = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var bootstrap = await CatalogueService.GetCatalogBootstrapAsync();
+            _allOrderableCategories = bootstrap.Categories
+                .Where(c => c.VisibleCatalog && bootstrap.OrderableCategoryIds.Contains(c.IdCategory))
+                .OrderBy(c => c.DescriptionCategory)
+                .Select(c => new SidebarCategory(
+                    c.IdCategory,
+                    FormatLabel(c.DescriptionCategory, c.IdCategory),
+                    PickIcon(c.DescriptionCategory),
+                    PickCssClass(c.DescriptionCategory)))
+                .ToList();
+        }
+        catch
+        {
+            _allOrderableCategories = new();
+        }
+    }
+
+    Task GoCatalogGridAsync() => GoFullCatalogAsync(null);
+
+    Task GoFullCatalogAsync(string? search)
+    {
+        var url = string.IsNullOrWhiteSpace(search)
+            ? "/catalogue"
+            : $"/catalogue?q={Uri.EscapeDataString(search.Trim())}";
+        Navigation.NavigateTo(url);
+        return Task.CompletedTask;
+    }
+
+    Task GoCatalogGirlsAsync() => GoCatalogUniverseAsync(isGirls: true);
+
+    Task GoCatalogBoysAsync() => GoCatalogUniverseAsync(isGirls: false);
+
+    async Task GoCatalogUniverseAsync(bool isGirls)
+    {
+        if (TryPickUniverseCategory(isGirls, out var id))
+        {
+            await GoCatalogAsync(reset: false, categoryId: id, search: null);
+            return;
+        }
+
+        await GoCatalogAsync(reset: false, categoryId: null, search: isGirls ? "fille" : "gar\u00e7on");
+    }
+
+    async Task GoCatalogAsync(bool reset, int? categoryId, string? search)
+    {
+        if (reset)
+            HomeCatalog.RequestBrowseAll();
+        else if (categoryId is > 0)
+            HomeCatalog.RequestCategoryFilter(categoryId.Value, search);
+        else if (!string.IsNullOrWhiteSpace(search))
+            HomeCatalog.RequestSearch(search);
+        else
+            HomeCatalog.RequestBrowseAll();
+
+        var url = BuildCatalogUrl(categoryId, search, reset);
+        Navigation.NavigateTo(url, replace: true);
+        await ScrollToCatalogAsync();
+    }
+
+    static string BuildCatalogUrl(int? categoryId, string? search, bool reset)
+    {
+        if (reset || (categoryId is null or <= 0 && string.IsNullOrWhiteSpace(search)))
+            return "/#catalogue";
+
+        if (categoryId is > 0)
+        {
+            var url = $"/?c={categoryId.Value}";
+            if (!string.IsNullOrWhiteSpace(search))
+                url += $"&q={Uri.EscapeDataString(search.Trim())}";
+            return $"{url}#catalogue";
+        }
+
+        return $"/?q={Uri.EscapeDataString(search!.Trim())}#catalogue";
+    }
+
+    async Task ScrollToCatalogAsync()
+    {
+        try
+        {
+            await Task.Yield();
+            var nav = await JS.InvokeAsync<IJSObjectReference>("import", "./js/public-nav.js");
+            await nav.InvokeVoidAsync("scrollToId", "catalogue");
+        }
+        catch
+        {
+            // Défilement non bloquant.
+        }
+    }
+
+    bool TryPickUniverseCategory(bool isGirls, out int categoryId)
+    {
+        var match = _allOrderableCategories.FirstOrDefault(c =>
+            isGirls
+                ? c.CssClass == "ali-cat-panel__item--girls"
+                : c.CssClass == "ali-cat-panel__item--boys");
+
+        if (match is not null)
+        {
+            categoryId = match.Id;
+            return true;
+        }
+
+        categoryId = 0;
+        return false;
+    }
+
+    [Inject] NavigationManager Navigation { get; set; } = default!;
+
+    static string FormatLabel(string? name, int id) =>
+        string.IsNullOrWhiteSpace(name) ? $"Categorie {id}" : name.Trim();
+
+    static string PickIcon(string? name)
+    {
+        var n = name?.ToLowerInvariant() ?? "";
+        if (n.Contains("fil") || n.Contains("girl") || n.Contains("robe")) return "bi-balloon-heart";
+        if (n.Contains("gar") || n.Contains("boy") || n.Contains("homme")) return "bi-lightning";
+        if (n.Contains("beb") || n.Contains("bebe")) return "bi-emoji-smile";
+        return "bi-tag";
+    }
+
+    static string PickCssClass(string? name)
+    {
+        var n = name?.ToLowerInvariant() ?? "";
+        if (n.Contains("fille") || n.Contains("girl") || n.Contains("robe") || n.Contains("jupe") || n.Contains("filles"))
+            return "ali-cat-panel__item--girls";
+        if (n.Contains("garcon") || n.Contains("boy") || n.Contains("garcons"))
+            return "ali-cat-panel__item--boys";
+        return "";
+    }
+
+    sealed record SidebarCategory(int Id, string Label, string Icon, string CssClass);
+}

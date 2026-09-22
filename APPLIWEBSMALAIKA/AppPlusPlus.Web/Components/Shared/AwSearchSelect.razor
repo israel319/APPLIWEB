@@ -1,0 +1,247 @@
+@namespace AppPlusPlus.Web.Components.Shared
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+@using Microsoft.JSInterop
+
+<div class="aw-dd @(_open ? "aw-dd--open" : null)">
+    <button type="button"
+            @ref="_triggerRef"
+            class="aw-dd__trigger"
+            aria-haspopup="listbox"
+            aria-expanded="@_open"
+            aria-label="@AriaLabel"
+            @onclick="ToggleAsync"
+            @onclick:stopPropagation="true">
+        <span class="aw-dd__value @(string.IsNullOrEmpty(SelectedLabel) ? "aw-dd__value--placeholder" : null)">
+            @(SelectedLabel ?? Placeholder)
+        </span>
+        <i class="bi @(_open ? "bi-chevron-up" : "bi-chevron-down")" aria-hidden="true"></i>
+    </button>
+
+    @if (_open)
+    {
+        <div @ref="_backdropRef" class="aw-dd__backdrop aw-float-backdrop"></div>
+        <div @ref="_panelRef"
+             class="@PanelClass"
+             @onclick:stopPropagation="true">
+            @if (Searchable)
+            {
+                <div class="aw-dd__search">
+                    <i class="bi bi-search" aria-hidden="true"></i>
+                    <input type="search"
+                           @ref="_searchInput"
+                           placeholder="Rechercher…"
+                           value="@_query"
+                           @oninput="OnQueryInput"
+                           @onclick:stopPropagation="true"
+                           @onkeydown="OnSearchKeyDown"
+                           autocomplete="off" />
+                </div>
+            }
+            <ul class="aw-dd__list" role="listbox">
+                @foreach (var opt in FilteredOptions)
+                {
+                    var isSelected = string.Equals(opt.Value ?? "", Value ?? "", StringComparison.Ordinal);
+                    <li role="option" aria-selected="@isSelected">
+                        <button type="button"
+                                class="aw-dd__option @(isSelected ? "aw-dd__option--selected" : null)"
+                                @onclick="@(() => SelectAsync(opt))">
+                            <span>@opt.Label</span>
+                            @if (isSelected)
+                            {
+                                <i class="bi bi-check-lg" aria-hidden="true"></i>
+                            }
+                        </button>
+                    </li>
+                }
+                @if (!FilteredOptions.Any())
+                {
+                    <li class="aw-dd__empty">Aucun résultat</li>
+                }
+            </ul>
+        </div>
+    }
+</div>
+
+@code {
+    public sealed record Option(string Value, string Label);
+
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public IReadOnlyList<Option> Options { get; set; } = Array.Empty<Option>();
+    [Parameter] public string Placeholder { get; set; } = "Sélectionner…";
+    [Parameter] public string AriaLabel { get; set; } = "Liste";
+    [Parameter] public bool Searchable { get; set; } = true;
+
+    bool _open;
+    bool _focusSearch;
+    bool _placePending;
+    bool _panelVisible;
+    bool _useFallbackPanel;
+    string _query = "";
+    int? _watchId;
+    DotNetObjectReference<AwSearchSelect>? _overlayRef;
+    ElementReference _triggerRef;
+    ElementReference _panelRef;
+    ElementReference _backdropRef;
+    ElementReference _searchInput;
+
+    string PanelClass =>
+        _useFallbackPanel
+            ? "aw-dd__panel aw-dd__panel--fallback aw-dd__panel--visible"
+            : _panelVisible
+                ? "aw-dd__panel aw-float-panel aw-float-panel--ready"
+                : "aw-dd__panel aw-float-panel";
+
+    string? SelectedLabel =>
+        Options.FirstOrDefault(o => string.Equals(o.Value ?? "", Value ?? "", StringComparison.Ordinal))?.Label;
+
+    IEnumerable<Option> FilteredOptions
+    {
+        get
+        {
+            if (!Searchable || string.IsNullOrWhiteSpace(_query))
+                return Options;
+
+            var q = _query.Trim();
+            return Options.Where(o => o.Label.Contains(q, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    async Task ToggleAsync()
+    {
+        if (_open)
+        {
+            await CloseAsync();
+            return;
+        }
+
+        _open = true;
+        _query = "";
+        _focusSearch = Searchable;
+        _placePending = true;
+        _panelVisible = false;
+        _useFallbackPanel = false;
+    }
+
+    void Close() => _ = CloseAsync();
+
+    async Task CloseAsync()
+    {
+        if (!_open) return;
+        await StopWatchAsync();
+        _open = false;
+        _query = "";
+        _placePending = false;
+        _panelVisible = false;
+        _useFallbackPanel = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_placePending && _open)
+        {
+            _placePending = false;
+            await StartWatchAsync();
+            if (_open)
+                StateHasChanged();
+        }
+
+        if (!_focusSearch) return;
+        _focusSearch = false;
+        try
+        {
+            await _searchInput.FocusAsync();
+        }
+        catch
+        {
+            // Ignore si le panneau se ferme pendant le focus.
+        }
+    }
+
+    async Task StartWatchAsync()
+    {
+        await StopWatchAsync();
+        _panelVisible = false;
+        _useFallbackPanel = false;
+
+        try
+        {
+            _overlayRef ??= DotNetObjectReference.Create(this);
+            _watchId = await JS.InvokeAsync<int>("awOverlay.watch", _triggerRef, _panelRef, new
+            {
+                align = "stretch",
+                minWidth = 240,
+                maxWidth = 352,
+                maxHeight = 320,
+                estimatedHeight = 280,
+                gap = 4
+            }, _backdropRef, _overlayRef);
+            _panelVisible = true;
+        }
+        catch
+        {
+            // Fallback sans interop : panneau ancré sous le trigger.
+            _useFallbackPanel = true;
+            _panelVisible = true;
+        }
+    }
+
+    async Task StopWatchAsync()
+    {
+        if (_watchId is null) return;
+        var id = _watchId.Value;
+        _watchId = null;
+        try
+        {
+            await JS.InvokeVoidAsync("awOverlay.unwatch", id);
+        }
+        catch { /* ignore */ }
+    }
+
+    async Task SelectAsync(Option opt)
+    {
+        await CloseAsync();
+        if (!string.Equals(Value ?? "", opt.Value ?? "", StringComparison.Ordinal))
+            await ValueChanged.InvokeAsync(opt.Value);
+    }
+
+    void OnQueryInput(ChangeEventArgs e)
+    {
+        _query = e.Value?.ToString() ?? "";
+        _ = RepositionAsync();
+    }
+
+    async Task RepositionAsync()
+    {
+        if (!_open || _useFallbackPanel || _watchId is null) return;
+        try
+        {
+            await JS.InvokeVoidAsync("awOverlay.place", _triggerRef, _panelRef, new
+            {
+                align = "stretch",
+                minWidth = 240,
+                maxWidth = 352,
+                maxHeight = 320,
+                estimatedHeight = 280,
+                gap = 4
+            });
+        }
+        catch { /* ignore */ }
+    }
+
+    void OnSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            Close();
+    }
+
+    [JSInvokable]
+    public Task OnOverlayDismiss() => CloseAsync();
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopWatchAsync();
+        _overlayRef?.Dispose();
+    }
+}

@@ -1,0 +1,39 @@
+@implements IDisposable
+@inject IUserCurrencyPreferenceService UserCurrency
+@inject ICurrencyService Currency
+
+<div class="appro-money-cell text-end lh-sm">
+    <div class="fw-medium">@Text</div>
+</div>
+
+@code {
+    /// <summary>Montant stocké en FC.</summary>
+    [Parameter] public decimal Amount { get; set; }
+    [Parameter] public decimal Taux { get; set; }
+    [Parameter] public string Format { get; set; } = "N2";
+
+    /// <summary>Obsolète — les montants sont toujours stockés en FC.</summary>
+    [Parameter] public bool IsUsd { get; set; }
+
+    bool _disposed;
+
+    string Text => Currency.FormatStoredFc(Amount, Taux > 0 ? Taux : null, Format);
+
+    protected override void OnInitialized() => UserCurrency.OnChanged += Refresh;
+
+    void Refresh()
+    {
+        if (_disposed) return;
+        _ = InvokeAsync(() =>
+        {
+            if (!_disposed)
+                StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        UserCurrency.OnChanged -= Refresh;
+    }
+}

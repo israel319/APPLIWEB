@@ -1,0 +1,168 @@
+@page "/grh/training"
+@using AppPlusPlus.Application.Services.GRH
+@using AppPlusPlus.Application.DTOs.GRH.Training
+@using MudBlazor
+@inject ITrainingService TrainingService
+@inject ISnackbar Snackbar
+
+<PageTitle>@AppSettings.AppName — Formations</PageTitle>
+
+<div class="aw-page aw-page--workspace">
+    <div class="aw-workspace">
+        <header class="aw-object-head">
+            <div class="aw-object-head__identity">
+                <p class="aw-object-head__eyebrow">Module GRH</p>
+                <h1 class="aw-object-head__title">Gestion des formations</h1>
+                <p class="aw-object-head__desc">Programmes et sessions</p>
+            </div>
+        </header>
+
+        <nav class="aw-modnav" aria-label="Sections formations" role="tablist">
+            <button type="button" role="tab" aria-selected="@(_tab == 0)"
+                    class="aw-modnav__item @(_tab == 0 ? "aw-modnav__item--active" : "")"
+                    @onclick="@(() => _tab = 0)">
+                <i class="bi bi-journal-bookmark" aria-hidden="true"></i>
+                <span>Programmes</span>
+            </button>
+            <button type="button" role="tab" aria-selected="@(_tab == 1)"
+                    class="aw-modnav__item @(_tab == 1 ? "aw-modnav__item--active" : "")"
+                    @onclick="@(() => _tab = 1)">
+                <i class="bi bi-calendar-event" aria-hidden="true"></i>
+                <span>Sessions</span>
+            </button>
+        </nav>
+
+        <div class="aw-workspace__body">
+            @if (_tab == 0)
+            {
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--primary">
+                            <i class="bi bi-plus-lg"></i> Nouveau programme
+                        </button>
+                    </div>
+                </div>
+
+                @if (isLoading)
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-loading">
+                            <span class="aw-spinner" role="status" aria-hidden="true"></span>
+                            <span>Chargement des programmes…</span>
+                        </div>
+                    </div>
+                }
+                else if (trainingPrograms.Count > 0)
+                {
+                    <div class="aw-table-region">
+                        <MudDataGrid Items="@trainingPrograms" Hover="true" Bordered="false" Dense="true"
+                                     Striped="true" Elevation="0">
+                            <Columns>
+                                <PropertyColumn Property="x => x.ProgramCode" Title="Code" />
+                                <PropertyColumn Property="x => x.ProgramName" Title="Nom du Programme" />
+                                <PropertyColumn Property="x => x.Category" Title="Catégorie" />
+                                <PropertyColumn Property="x => x.DurationHours" Title="Durée (h)" />
+                                <PropertyColumn Property="x => x.Cost" Title="Coût" Format="F2" />
+                                <PropertyColumn Property="x => x.SessionCount" Title="Sessions" />
+                                <PropertyColumn Property="x => x.TotalEnrolledEmployees" Title="Employés" />
+                            </Columns>
+                        </MudDataGrid>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-journal-bookmark"></i>
+                            <p>Aucun programme de formation.</p>
+                        </div>
+                    </div>
+                }
+            }
+            else
+            {
+                @if (isLoading)
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-loading">
+                            <span class="aw-spinner" role="status" aria-hidden="true"></span>
+                            <span>Chargement des sessions…</span>
+                        </div>
+                    </div>
+                }
+                else if (trainingSessions.Count > 0)
+                {
+                    <div class="aw-table-region">
+                        <MudDataGrid Items="@trainingSessions" Hover="true" Bordered="false" Dense="true"
+                                     Striped="true" Elevation="0">
+                            <Columns>
+                                <PropertyColumn Property="x => x.SessionCode" Title="Code" />
+                                <PropertyColumn Property="x => x.ProgramName" Title="Programme" />
+                                <PropertyColumn Property="x => x.StartDate" Title="Début" Format="dd/MM/yyyy" />
+                                <PropertyColumn Property="x => x.EndDate" Title="Fin" Format="dd/MM/yyyy" />
+                                <PropertyColumn Property="x => x.TrainerName" Title="Formateur" />
+                                <PropertyColumn Property="x => x.Status" Title="Statut">
+                                    <CellTemplate>
+                                        <MudChip Size="Size.Small" Label="true"
+                                                 Color="@GetSessionStatusColor(context.Item.Status)">
+                                            @context.Item.Status
+                                        </MudChip>
+                                    </CellTemplate>
+                                </PropertyColumn>
+                            </Columns>
+                        </MudDataGrid>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-calendar-event"></i>
+                            <p>Aucune session de formation.</p>
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<TrainingProgramReadDto> trainingPrograms = new();
+    private List<TrainingSessionReadDto> trainingSessions = new();
+    private int _tab = 0;
+    private bool isLoading = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadTrainingData();
+    }
+
+    private async Task LoadTrainingData()
+    {
+        try
+        {
+            isLoading = true;
+            // TODO: Appeler les services
+            await Task.Delay(500);
+            isLoading = false;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Erreur: {ex.Message}", Severity.Error);
+            isLoading = false;
+        }
+    }
+
+    private Color GetSessionStatusColor(string status)
+    {
+        return status?.ToLower() switch
+        {
+            "planned" => Color.Info,
+            "inprogress" => Color.Warning,
+            "completed" => Color.Success,
+            "cancelled" => Color.Error,
+            _ => Color.Default
+        };
+    }
+}

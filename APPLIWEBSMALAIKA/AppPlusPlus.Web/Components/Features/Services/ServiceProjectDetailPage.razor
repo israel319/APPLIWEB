@@ -1,0 +1,385 @@
+@page "/services/projet/{ProjectId:int}"
+@rendermode InteractiveServer
+@using AppPlusPlus.Application.DTOs.Prestations
+@using AppPlusPlus.Application.Services.Prestations
+@using AppPlusPlus.Domain.Entities.Prestations
+@using AppPlusPlus.Domain.Enums
+@inject IServiceManagementService ServiceManagement
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+
+<ModuleGuard ModuleCode="services" ModuleName="Services & Prestations">
+
+<PageTitle>@AppSettings.AppName — @(_project?.Title ?? "Mission")</PageTitle>
+
+@if (!_loaded)
+{
+    <div class="aw-page">
+        <div class="aw-loading" style="min-height:200px;">
+            <span class="aw-spinner" role="status" aria-hidden="true"></span>
+            <span>Chargement…</span>
+        </div>
+    </div>
+}
+else if (!_canRead || _project == null)
+{
+    <div class="aw-page">
+        <div class="aw-shell" style="max-width:640px;margin:1.5rem auto;">
+            <div class="aw-empty">
+                <i class="bi bi-folder2"></i>
+                <p><strong>Mission introuvable</strong></p>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="@(() => Navigation.NavigateTo("/services"))">
+                    <i class="bi bi-arrow-left"></i> Retour à la liste
+                </button>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="aw-page aw-page--workspace">
+        <div class="aw-workspace">
+            <header class="aw-object-head">
+                <div class="aw-object-head__identity">
+                    <p class="aw-object-head__eyebrow">Module services · Mission</p>
+                    <h1 class="aw-object-head__title">@_project.Title</h1>
+                    <p class="aw-object-head__desc">
+                        Client : @(_project.CustomerName ?? "—") · @BillingSummary(_project)
+                    </p>
+                </div>
+                <div class="aw-object-head__actions">
+                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm"
+                            @onclick="@(() => Navigation.NavigateTo("/services"))">
+                        <i class="bi bi-arrow-left"></i> Liste
+                    </button>
+                    @if (_canWrite)
+                    {
+                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm"
+                                @onclick="@(() => Navigation.NavigateTo($"/services/projet/modifier/{ProjectId}"))">
+                            <i class="bi bi-pencil"></i> Modifier
+                        </button>
+                    }
+                </div>
+            </header>
+
+            <div class="aw-workspace__body">
+                <ServicesSubNav />
+
+                <div class="aw-ref-card">
+                    <div class="aw-ref-card__head">
+                        <h3 class="aw-ref-card__title"><i class="bi bi-signpost-2" aria-hidden="true"></i> Comment facturer</h3>
+                    </div>
+                    <div class="aw-ref-card__body" style="padding:0.65rem 0.75rem;">
+                        <div class="svc-guide-steps">
+                            <div class="svc-guide-step">
+                                <span class="svc-guide-num">1</span>
+                                <span>Saisir les <strong>heures travaillées</strong></span>
+                            </div>
+                            <div class="svc-guide-arrow">→</div>
+                            <div class="svc-guide-step">
+                                <span class="svc-guide-num">2</span>
+                                <span><strong>Valider</strong> les heures</span>
+                            </div>
+                            <div class="svc-guide-arrow">→</div>
+                            <div class="svc-guide-step">
+                                <span class="svc-guide-num">3</span>
+                                <span><strong>Créer la facture</strong></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <section class="aw-settings__section" aria-labelledby="svc-step1" style="max-width:none;">
+                    <div class="aw-settings__section-head">
+                        <h2 id="svc-step1" class="aw-settings__section-title">1 · Saisir le temps travaillé</h2>
+                        <p class="aw-settings__section-lead">Enregistrez le nombre d'heures et le travail effectué.</p>
+                    </div>
+                    <div class="aw-settings__card" style="padding:0.85rem 0.95rem;">
+                        @if (_canWrite)
+                        {
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-3">
+                                    <AwDateField Label="Date"
+                                                 Value="_tsDate.ToDateTime(TimeOnly.MinValue)"
+                                                 ValueChanged="OnTsDateChanged" />
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label small mb-0">Heures</label>
+                                    <input type="number" step="0.25" min="0.01" class="form-control" @bind="_tsHours" />
+                                </div>
+                                <div class="col-md-5">
+                                    <label class="form-label small mb-0">Travail effectué</label>
+                                    <input class="form-control" @bind="_tsDesc" placeholder="Ex. Réunion client, rédaction rapport…" />
+                                </div>
+                                <div class="col-md-2">
+                                    <button type="button" class="aw-btn aw-btn--primary" style="width:100%;" @onclick="SaveTimesheetAsync">
+                                        Enregistrer
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="aw-settings__hint mb-0">Lecture seule — vous ne pouvez pas saisir d'heures.</p>
+                        }
+                    </div>
+                </section>
+
+                <section class="aw-settings__section" aria-labelledby="svc-step2" style="max-width:none;">
+                    <div class="aw-settings__section-head">
+                        <h2 id="svc-step2" class="aw-settings__section-title">2 · Valider les heures</h2>
+                        <p class="aw-settings__section-lead">Les lignes « En attente » doivent être validées avant facturation.</p>
+                    </div>
+                    <div class="aw-ref-card">
+                        @if (_timesheets.Any())
+                        {
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Qui</th>
+                                            <th class="aw-table__num">Heures</th>
+                                            <th>Travail effectué</th>
+                                            <th>État</th>
+                                            @if (_canWrite) { <th></th> }
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var t in _timesheets)
+                                        {
+                                            <tr>
+                                                <td><span class="aw-table__meta">@t.WorkDate.ToString("dd/MM/yyyy")</span></td>
+                                                <td>@t.UserLogin</td>
+                                                <td class="aw-table__num">@t.Hours.ToString("0.##") h</td>
+                                                <td><span class="aw-table__meta">@(t.Description ?? "—")</span></td>
+                                                <td><span class="aw-badge @TsBadge(t.Status)">@TsStatusLabel(t.Status)</span></td>
+                                                @if (_canWrite)
+                                                {
+                                                    <td style="text-align:right;white-space:nowrap;">
+                                                        @if (t.Status == (int)ServiceTimesheetStatus.Draft)
+                                                        {
+                                                            <button type="button" class="aw-btn aw-btn--primary aw-btn--sm"
+                                                                    @onclick="@(() => ApproveTsAsync(t.Id))">
+                                                                Valider
+                                                            </button>
+                                                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm"
+                                                                    @onclick="@(() => CancelTsAsync(t.Id))">
+                                                                Annuler
+                                                            </button>
+                                                        }
+                                                        else if (t.FactId.HasValue)
+                                                        {
+                                                            <a class="aw-btn aw-btn--ghost aw-btn--sm" href="/services/facturation/@t.FactId">Voir facture</a>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="aw-table__meta">—</span>
+                                                        }
+                                                    </td>
+                                                }
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="aw-empty" style="min-height:120px;padding:1.25rem;">
+                                <i class="bi bi-clock"></i>
+                                <p>Aucune heure enregistrée pour l'instant.</p>
+                            </div>
+                        }
+                    </div>
+                </section>
+
+                <section class="aw-settings__section" aria-labelledby="svc-step3" style="max-width:none;">
+                    <div class="aw-settings__section-head">
+                        <h2 id="svc-step3" class="aw-settings__section-title">3 · Facturer le client</h2>
+                        <p class="aw-settings__section-lead">
+                            Une facture brouillon sera créée dans Factures prestations — validation et impression hors caisse Ventes.
+                        </p>
+                    </div>
+                    <div class="aw-settings__card">
+                        <div class="aw-settings__row" style="flex-wrap:wrap;align-items:stretch;">
+                            <div class="aw-dash-grid aw-dash-grid--3" style="margin:0;flex:1 1 18rem;">
+                                <div>
+                                    <span class="aw-settings__hint">Heures validées</span>
+                                    <div class="aw-dash-summary__value">@_project.BillableHours.ToString("0.##") h</div>
+                                </div>
+                                @if (_project.HourlyRate is > 0 && _project.BillingMode is (int)ServiceBillingMode.Hourly or (int)ServiceBillingMode.Mixed)
+                                {
+                                    <div>
+                                        <span class="aw-settings__hint">Tarif horaire</span>
+                                        <div class="aw-dash-summary__value" style="font-size:1rem;">@_project.HourlyRate.Value.ToString("N0") FC/h</div>
+                                        @if (_project.BillableHours > 0)
+                                        {
+                                            <span class="aw-settings__hint">Est. @((_project.BillableHours * _project.HourlyRate.Value).ToString("N0")) FC</span>
+                                        }
+                                    </div>
+                                }
+                                @if (!_project.FlatInvoiced && _project.FlatAmount is > 0 && _project.BillingMode is (int)ServiceBillingMode.Flat or (int)ServiceBillingMode.Mixed)
+                                {
+                                    <div>
+                                        <span class="aw-settings__hint">Forfait à facturer</span>
+                                        <div class="aw-dash-summary__value" style="font-size:1rem;">@_project.FlatAmount.Value.ToString("N0") FC</div>
+                                    </div>
+                                }
+                            </div>
+                            @if (_canWrite)
+                            {
+                                <div style="display:flex;flex-direction:column;gap:0.35rem;min-width:12rem;">
+                                    <button type="button" class="aw-btn aw-btn--primary" disabled="@(!CanInvoice())" @onclick="GenerateInvoiceAsync">
+                                        <i class="bi bi-receipt"></i> Créer la facture
+                                    </button>
+                                    @if (!CanInvoice())
+                                    {
+                                        <span class="aw-settings__hint">@InvoiceBlockReason()</span>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+}
+
+</ModuleGuard>
+
+@code {
+    [Parameter] public int ProjectId { get; set; }
+
+    bool _loaded;
+    bool _canRead;
+    bool _canWrite;
+    string _login = "";
+
+    ServiceProjectDetailDto? _project;
+    List<ServiceTimesheetRowDto> _timesheets = new();
+
+    DateOnly _tsDate = DateOnly.FromDateTime(DateTime.Today);
+    decimal _tsHours = 1;
+    string? _tsDesc;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        _login = auth.User.FindFirst("login")?.Value
+            ?? auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "";
+        var isAdmin = AppFunctions.Normalize(auth.User.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+        var perms = await PermissionResolver.GetPermissionsAsync(_login);
+        _canRead = isAdmin || perms.CanRead(AppFunctions.Services);
+        _canWrite = isAdmin || perms.CanWrite(AppFunctions.Services);
+        await LoadAsync();
+        _loaded = true;
+    }
+
+    async Task LoadAsync()
+    {
+        if (!_canRead) return;
+        _project = await ServiceManagement.GetProjectAsync(ProjectId);
+        if (_project == null) return;
+        _timesheets = await ServiceManagement.GetTimesheetsAsync(ProjectId);
+    }
+
+    static string BillingSummary(ServiceProjectDetailDto p) => p.BillingMode switch
+    {
+        (int)ServiceBillingMode.Flat => p.FlatAmount is > 0
+            ? $"Forfait {p.FlatAmount.Value:N0} FC"
+            : "Forfait",
+        (int)ServiceBillingMode.Mixed => $"Mixte · {p.HourlyRate:N0} FC/h + forfait",
+        _ => p.HourlyRate is > 0 ? $"{p.HourlyRate.Value:N0} FC/heure" : "Facturation à l'heure"
+    };
+
+    bool CanInvoice()
+    {
+        if (_project == null || _project.Status == (int)ServiceProjectStatus.Cancelled) return false;
+        var hasHours = _project.BillableHours > 0;
+        var hasFlat = !_project.FlatInvoiced && _project.FlatAmount is > 0
+            && _project.BillingMode is (int)ServiceBillingMode.Flat or (int)ServiceBillingMode.Mixed;
+        return hasHours || hasFlat;
+    }
+
+    string InvoiceBlockReason()
+    {
+        if (_project == null) return "";
+        if (_project.Status == (int)ServiceProjectStatus.Cancelled) return "Mission annulée.";
+        if (_project.BillingMode == (int)ServiceBillingMode.Flat && _project.FlatInvoiced)
+            return "Le forfait a déjà été facturé.";
+        return "Saisissez et validez des heures, ou définissez un forfait dans les paramètres de la mission.";
+    }
+
+    static string TsStatusLabel(int s) => s switch
+    {
+        (int)ServiceTimesheetStatus.Approved => "Prête à facturer",
+        (int)ServiceTimesheetStatus.Billed => "Facturée",
+        (int)ServiceTimesheetStatus.Cancelled => "Annulée",
+        _ => "En attente"
+    };
+
+    static string TsBadge(int s) => s switch
+    {
+        (int)ServiceTimesheetStatus.Approved => "aw-badge--brand",
+        (int)ServiceTimesheetStatus.Billed => "aw-badge--primary",
+        (int)ServiceTimesheetStatus.Cancelled => "aw-badge--danger",
+        _ => "aw-badge--accent"
+    };
+
+    async Task OnTsDateChanged(DateTime? v)
+    {
+        if (v.HasValue)
+            _tsDate = DateOnly.FromDateTime(v.Value);
+    }
+
+    async Task SaveTimesheetAsync()
+    {
+        var ts = new ServiceTimesheet
+        {
+            ProjectId = ProjectId,
+            WorkDate = _tsDate,
+            Hours = _tsHours,
+            Description = _tsDesc,
+            UserLogin = _login
+        };
+        var r = await ServiceManagement.SaveTimesheetAsync(ts, _login);
+        Snackbar.Add(r.Message, r.Success ? Severity.Success : Severity.Error);
+        if (r.Success)
+        {
+            _tsDesc = "";
+            await LoadAsync();
+        }
+    }
+
+    async Task ApproveTsAsync(int id)
+    {
+        var r = await ServiceManagement.ApproveTimesheetAsync(id, _login);
+        Snackbar.Add(r.Message, r.Success ? Severity.Success : Severity.Error);
+        if (r.Success) await LoadAsync();
+    }
+
+    async Task CancelTsAsync(int id)
+    {
+        var r = await ServiceManagement.CancelTimesheetAsync(id, _login);
+        Snackbar.Add(r.Message, r.Success ? Severity.Success : Severity.Error);
+        if (r.Success) await LoadAsync();
+    }
+
+    async Task GenerateInvoiceAsync()
+    {
+        var r = await ServiceManagement.GenerateInvoiceFromProjectAsync(ProjectId, _login);
+        if (!r.Success)
+        {
+            Snackbar.Add(r.Message, Severity.Error);
+            return;
+        }
+        Snackbar.Add("Facture créée. Vérifiez-la avant validation.", Severity.Success);
+        Navigation.NavigateTo($"/services/facturation/{r.Data}");
+    }
+}

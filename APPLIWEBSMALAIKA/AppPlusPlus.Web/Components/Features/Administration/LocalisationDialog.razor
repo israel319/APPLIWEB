@@ -1,0 +1,90 @@
+@using MudBlazor
+@inject ICatalogueService CatalogueService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <div class="aw-dialog">
+            <header class="aw-dialog__head">
+                <div class="aw-dialog__title-wrap">
+                    <i class="bi bi-geo-alt" aria-hidden="true"></i>
+                    <h2 class="aw-dialog__title">@(_isEdit ? "Modifier la localisation" : "Nouvelle localisation")</h2>
+                </div>
+            </header>
+            <div class="aw-dialog__body">
+                <div class="aw-field">
+                    <label class="aw-field__label">Description *</label>
+                    <input type="text" class="aw-input" @bind="_model.DescriptionLocalisation" maxlength="50"
+                           placeholder="Nom de la localisation" />
+                </div>
+                <div class="aw-field" style="margin-top:0.9rem;">
+                    <label class="aw-switch-label" style="display:flex;align-items:center;gap:0.55rem;cursor:pointer;">
+                        <input class="aw-switch" type="checkbox" @bind="_model.IsDepot" />
+                        <span class="aw-field__label" style="margin:0;">Dépôt central</span>
+                    </label>
+                    <p class="aw-field__hint">
+                        Une seule localisation peut être le dépôt. Les demandes génériques prélèvent le stock ici pour approvisionner les agents.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;">
+            <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                <i class="bi bi-x-lg"></i> Annuler
+            </button>
+            <button type="button" class="aw-btn aw-btn--primary" @onclick="Submit">
+                <i class="bi bi-check-lg"></i> @(_isEdit ? "Modifier" : "Ajouter")
+            </button>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public Localisation? Model { get; set; }
+
+    private Localisation _model = new();
+    private bool _isEdit;
+
+    protected override void OnInitialized()
+    {
+        if (Model != null)
+        {
+            _isEdit = true;
+            _model = new Localisation
+            {
+                IdLocalisation = Model.IdLocalisation,
+                DescriptionLocalisation = Model.DescriptionLocalisation,
+                IsDepot = Model.IsDepot
+            };
+        }
+    }
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_model.DescriptionLocalisation)) return;
+
+        if (_isEdit)
+        {
+            await CatalogueService.UpdateLocalisationAsync(_model);
+            Snackbar.Add("Localisation modifiée.", Severity.Success);
+        }
+        else
+        {
+            await CatalogueService.AddLocalisationAsync(_model);
+            Snackbar.Add("Localisation ajoutée.", Severity.Success);
+        }
+
+        MudDialog.Close();
+    }
+
+    private void Cancel()
+    {
+        MudDialog.Cancel();
+    }
+}

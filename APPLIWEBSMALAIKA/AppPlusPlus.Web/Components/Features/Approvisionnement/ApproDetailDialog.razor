@@ -1,0 +1,254 @@
+@using MudBlazor
+@using AppPlusPlus.Application.DTOs.Approvisionnement
+@using AppPlusPlus.Application.Services.Approvisionnement
+@using AppPlusPlus.Application.Services.Shared
+@using AppPlusPlus.Domain.Common
+@inject IApproQueryService ApproQuery
+@inject IApproPostingService ApproPosting
+@inject ICurrencyService Currency
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+@inject UiNavigationGate NavGate
+
+<MudDialog Class="appro-detail-dialog">
+    <DialogContent>
+        @if (_loading)
+        {
+            <div class="aw-dialog"><div class="aw-dialog__body"><AwSkeleton Variant="table" Rows="6" /></div></div>
+        }
+        else if (_detail is null)
+        {
+            <div class="aw-empty aw-empty--compact"><p>Réception introuvable</p></div>
+        }
+        else
+        {
+            var d = _detail;
+            var showExp = d.Lines.Any(l => l.DateExpiration.HasValue);
+            <div class="aw-dialog">
+                <header class="aw-dialog__head">
+                    <div class="aw-dialog__title-wrap">
+                        <i class="bi bi-box-arrow-in-down" aria-hidden="true"></i>
+                        <h2 class="aw-dialog__title">Réception N° @d.Id</h2>
+                    </div>
+                    @if (d.IsTransfer)
+                    {
+                        <span class="aw-badge aw-badge--muted">Transfert interne</span>
+                    }
+                    else if (d.IsCancelled)
+                    {
+                        <span class="aw-badge aw-badge--danger">Annulé</span>
+                    }
+                    else
+                    {
+                        <span class="aw-badge aw-badge--success">Validé</span>
+                    }
+                </header>
+                <div class="aw-dialog__body">
+                    <div class="aw-dialog__meta aw-inventaire-view-meta">
+                        <div>
+                            <span class="aw-dialog__meta-label">Date</span>
+                            <span class="aw-dialog__meta-value">@d.Date.ToString("dd/MM/yyyy") · @d.DateSys.ToString("HH:mm")</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Référence</span>
+                            <span class="aw-dialog__meta-value">@(string.IsNullOrWhiteSpace(d.Reference) ? "—" : d.Reference)</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Taux</span>
+                            <span class="aw-dialog__meta-value">@d.Taux.ToString("N0") FC/USD</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Lieu</span>
+                            <span class="aw-dialog__meta-value">@(string.IsNullOrWhiteSpace(d.LocalisationLabel) ? "—" : d.LocalisationLabel)</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Origine</span>
+                            <span class="aw-dialog__meta-value">
+                                @if (d.IsFromCommand)
+                                {
+                                    <text>Commande N° @(d.CommandId?.ToString() ?? "—")</text>
+                                }
+                                else
+                                {
+                                    <text>Réception directe</text>
+                                }
+                            </span>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(d.SupplierName))
+                        {
+                            <div>
+                                <span class="aw-dialog__meta-label">Fournisseur</span>
+                                <span class="aw-dialog__meta-value">@d.SupplierName</span>
+                            </div>
+                        }
+                        <div>
+                            <span class="aw-dialog__meta-label">Opérateur</span>
+                            <span class="aw-dialog__meta-value">@UserDisplayNames.Format(d.User)</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Lignes</span>
+                            <span class="aw-dialog__meta-value">@d.LineCount · @d.TotalQte.ToString("N0") unités</span>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(d.Commentaire) && d.Commentaire != "Approvisionnement")
+                    {
+                        <p class="aw-table__meta" style="margin:0 0 0.85rem;padding:0.55rem 0.65rem;background:#f8fafc;border-radius:8px;border:1px solid var(--aw-line);">
+                            <i class="bi bi-chat-left-text me-1"></i>@d.Commentaire
+                        </p>
+                    }
+
+                    <div class="aw-table-region">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table aw-table--compact">
+                                <thead>
+                                    <tr>
+                                        <th>Article</th>
+                                        <th>Lieu</th>
+                                        <th class="aw-table__num">Qté</th>
+                                        @if (showExp){<th>Exp.</th>}
+                                        <th class="aw-table__num">PA (FC)</th>
+                                        <th class="aw-table__num">PV (FC)</th>
+                                        <th class="aw-table__num">Achat</th>
+                                        <th class="aw-table__num">Bén.</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var line in d.Lines)
+                                    {
+                                        <tr>
+                                            <td>
+                                                <span class="aw-table__title">@line.ArticleName</span>
+                                                <span class="aw-table__meta">@line.IdArticle</span>
+                                            </td>
+                                            <td><span class="aw-table__meta">@line.LocalisationLabel</span></td>
+                                            <td class="aw-table__num">@line.Qte.ToString("N2")</td>
+                                            @if (showExp)
+                                            {
+                                                <td>@(line.DateExpiration?.ToString("dd/MM/yyyy") ?? "—")</td>
+                                            }
+                                            <td class="aw-table__num">@CurrencyFormat.Cdf(line.PA ?? 0, "N0")</td>
+                                            <td class="aw-table__num">@CurrencyFormat.Cdf(line.PV ?? 0, "N0")</td>
+                                            <td class="aw-table__num">@CurrencyFormat.Cdf(line.MontantAchatFc, "N0")</td>
+                                            <td class="aw-table__num @(line.BenLineFc >= 0 ? "aw-table__num--plus" : "aw-table__num--minus")">
+                                                @CurrencyFormat.Cdf(line.BenLineFc, "N0")
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                                <tfoot>
+                                    <tr>
+                                        <td colspan="@(showExp ? 6 : 5)"><strong>Totaux</strong></td>
+                                        <td class="aw-table__num"><strong>@CurrencyFormat.Cdf(d.TotalAchatFc, "N0")</strong></td>
+                                        <td class="aw-table__num"><strong>@CurrencyFormat.Cdf(d.BenTotalFc, "N0")</strong></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="appro-detail-dialog__totals">
+                        <div>
+                            <span class="appro-detail-dialog__totals-label">Valeur achat</span>
+                            <strong>@Currency.FormatStoredFc(d.TotalAchatFc, d.Taux)</strong>
+                        </div>
+                        <div>
+                            <span class="appro-detail-dialog__totals-label">Valeur vente</span>
+                            <strong>@Currency.FormatStoredFc(d.TotalVenteFc, d.Taux)</strong>
+                        </div>
+                        <div>
+                            <span class="appro-detail-dialog__totals-label">Bénéfice</span>
+                            <strong class="@(d.BenTotalFc >= 0 ? "text-success" : "text-danger")">@Currency.FormatStoredFc(d.BenTotalFc, d.Taux)</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (!_loading && _detail is not null)
+        {
+            <div class="aw-dialog__footer appro-detail-dialog__footer">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="Close" disabled="@_actionBusy">
+                    <i class="bi bi-x-lg"></i> Fermer
+                </button>
+                @if (CanWrite && !_detail.IsCancelled && !_detail.IsTransfer)
+                {
+                    <button type="button" class="aw-btn aw-btn--ghost" @onclick="EditAsync" disabled="@_actionBusy">
+                        <i class="bi bi-pencil"></i> Modifier
+                    </button>
+                }
+                @if (CanWrite && !_detail.IsCancelled)
+                {
+                    <button type="button" class="aw-btn aw-btn--danger aw-btn--ghost" @onclick="CancelAsync" disabled="@_actionBusy">
+                        <i class="bi bi-x-circle"></i> @( _detail.IsTransfer ? "Annuler le transfert" : "Annuler la réception")
+                    </button>
+                }
+            </div>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public int ApproId { get; set; }
+    [Parameter] public bool CanWrite { get; set; }
+    [Parameter] public string UserLogin { get; set; } = "";
+
+    ApproDetailDto? _detail;
+    bool _loading = true;
+    bool _actionBusy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _detail = await ApproQuery.GetDetailAsync(ApproId);
+        _loading = false;
+    }
+
+    void Close()
+    {
+        if (_actionBusy) return;
+        MudDialog.Close();
+    }
+
+    async Task EditAsync()
+    {
+        if (_actionBusy || !NavGate.TryEnter()) return;
+        _actionBusy = true;
+        try
+        {
+            var target = $"/stock/appro/modifier/{ApproId}";
+            MudDialog.Close();
+            await Task.Yield();
+            Navigation.NavigateTo(target);
+        }
+        finally
+        {
+            NavGate.Exit();
+        }
+    }
+
+    async Task CancelAsync()
+    {
+        if (_detail is null || _actionBusy) return;
+        if (!NavGate.TryEnter()) return;
+        _actionBusy = true;
+
+        var login = !string.IsNullOrWhiteSpace(UserLogin) ? UserLogin : _detail.User;
+        try
+        {
+            await ApproPosting.CancelApproAsync(ApproId, login);
+            Snackbar.Add(_detail.IsTransfer
+                ? $"Transfert N° {ApproId} annulé."
+                : $"Réception N° {ApproId} annulée.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok("cancelled"));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+            _actionBusy = false;
+            NavGate.Exit();
+        }
+    }
+}

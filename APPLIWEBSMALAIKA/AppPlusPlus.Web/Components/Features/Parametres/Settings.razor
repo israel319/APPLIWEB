@@ -1,0 +1,570 @@
+@page "/settings"
+@rendermode InteractiveServer
+@inject ISnackbar Snackbar
+@inject IShopProfileService ShopProfileService
+@inject NavigationManager Navigation
+@using MudBlazor
+
+<PageTitle>@AppSettings.AppName — Paramètres</PageTitle>
+
+@if (!_loaded)
+{
+    <div class="aw-page">
+        <div class="aw-loading" style="min-height:200px;">
+            <span class="aw-spinner" role="status" aria-hidden="true"></span>
+            <span>Chargement…</span>
+        </div>
+    </div>
+}
+else
+{
+    <div class="aw-page aw-page--workspace">
+        <div class="aw-workspace aw-settings">
+            <header class="aw-settings__head">
+                <div class="aw-settings__identity">
+                    <h1 class="aw-settings__title">Paramètres</h1>
+                    <p class="aw-settings__desc">@GetSectionDescription()</p>
+                </div>
+            </header>
+
+            <nav class="aw-settings__tabs" aria-label="Sections paramètres" role="tablist">
+                @foreach (var tab in _tabs)
+                {
+                    <button type="button" role="tab"
+                            aria-selected="@(_section == tab.Key)"
+                            class="aw-settings__tab @(_section == tab.Key ? "aw-settings__tab--active" : "")"
+                            @onclick="@(() => SelectSection(tab.Key))">
+                        <i class="bi @tab.Icon" aria-hidden="true"></i>
+                        <span>@tab.Label</span>
+                    </button>
+                }
+            </nav>
+
+            <div class="aw-settings__body">
+                @if (_section == "general")
+                {
+                    <section class="aw-settings__section" aria-labelledby="set-loc">
+                        <div class="aw-settings__section-head">
+                            <h2 id="set-loc" class="aw-settings__section-title">Localisation</h2>
+                            <p class="aw-settings__section-lead">Langue et fuseau utilisés dans l'application.</p>
+                        </div>
+                        <div class="aw-settings__card">
+                            <div class="aw-settings__row">
+                                <div class="aw-settings__meta">
+                                    <p class="aw-settings__label">Langue</p>
+                                    <p class="aw-settings__hint">Langue d'affichage de l'interface</p>
+                                </div>
+                                <AwSearchSelect AriaLabel="Langue" Placeholder="Langue" Searchable="false"
+                                                Value="@_settings.Langue" ValueChanged="OnLangueChanged"
+                                                Options="@_langueOptions" />
+                            </div>
+                            <div class="aw-settings__row">
+                                <div class="aw-settings__meta">
+                                    <p class="aw-settings__label">Fuseau horaire</p>
+                                    <p class="aw-settings__hint">Référence pour les horodatages</p>
+                                </div>
+                                <AwSearchSelect AriaLabel="Fuseau horaire" Placeholder="Fuseau" Searchable="true"
+                                                Value="@_settings.Fuseau" ValueChanged="OnFuseauChanged"
+                                                Options="@_fuseauOptions" />
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="aw-settings__section" aria-labelledby="set-fmt">
+                        <div class="aw-settings__section-head">
+                            <h2 id="set-fmt" class="aw-settings__section-title">Formats</h2>
+                            <p class="aw-settings__section-lead">Présentation des dates dans les listes et documents.</p>
+                        </div>
+                        <div class="aw-settings__card">
+                            <div class="aw-settings__row">
+                                <div class="aw-settings__meta">
+                                    <p class="aw-settings__label">Format de date</p>
+                                    <p class="aw-settings__hint">Ex. 18/07/2026 ou 2026-07-18</p>
+                                </div>
+                                <AwSearchSelect AriaLabel="Format de date" Placeholder="Format" Searchable="false"
+                                                Value="@_settings.FormatDate" ValueChanged="OnFormatDateChanged"
+                                                Options="@_dateFormatOptions" />
+                            </div>
+                        </div>
+                    </section>
+                }
+                else if (_section == "shop")
+                {
+                    <section class="aw-settings__section" aria-labelledby="set-id">
+                        <div class="aw-settings__section-head">
+                            <h2 id="set-id" class="aw-settings__section-title">Identité du magasin</h2>
+                            <p class="aw-settings__section-lead">Nom et logo visibles dans l'app et sur les factures.</p>
+                        </div>
+                        <div class="aw-settings__card">
+                            <div class="aw-settings__row">
+                                <div class="aw-settings__meta">
+                                    <p class="aw-settings__label">Nom du shop</p>
+                                    <p class="aw-settings__hint">Affiché dans l'interface et sur la facture</p>
+                                </div>
+                                <input type="text" class="aw-input" maxlength="50" placeholder="Nom du shop"
+                                       @bind="_settings.AppName" />
+                            </div>
+                            <div class="aw-settings__row aw-settings__row--stack">
+                                <div class="aw-settings__meta">
+                                    <p class="aw-settings__label">Logo</p>
+                                    <p class="aw-settings__hint">PNG, JPG ou WEBP — 2 Mo max. Ou URL https.</p>
+                                </div>
+                                <div class="aw-settings__control-stack">
+                                    <label class="aw-logo-zone @(_logoUploading ? "aw-logo-zone--busy" : null)">
+                                        <InputFile OnChange="@OnLogoFileSelected" accept="image/*" style="display:none;" />
+                                        @if (_logoUploading)
+                                        {
+                                            <span class="aw-spinner" role="status" aria-hidden="true"></span>
+                                            <span>Chargement…</span>
+                                        }
+                                        else if (!string.IsNullOrWhiteSpace(_settings.PhotoShop))
+                                        {
+                                            <img src="@_settings.PhotoShop" alt="Logo" />
+                                            <span class="aw-settings__hint">Cliquer pour changer</span>
+                                        }
+                                        else
+                                        {
+                                            <i class="bi bi-image" aria-hidden="true"></i>
+                                            <span class="aw-settings__hint">Déposer ou choisir une image</span>
+                                        }
+                                    </label>
+                                    @if (!string.IsNullOrWhiteSpace(_logoError))
+                                    {
+                                        <span class="aw-settings__error">@_logoError</span>
+                                    }
+                                    <input type="text" class="aw-input aw-input--wide" placeholder="ou coller une URL https://…"
+                                           @bind="_settings.PhotoShop" />
+                                    @if (!string.IsNullOrWhiteSpace(_settings.PhotoShop))
+                                    {
+                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm"
+                                                @onclick="@(() => { _settings.PhotoShop = null; _logoError = null; })">
+                                            <i class="bi bi-trash"></i> Supprimer le logo
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="aw-settings__section" aria-labelledby="set-addr">
+                        <div class="aw-settings__section-head">
+                            <h2 id="set-addr" class="aw-settings__section-title">Adresse sur facture</h2>
+                            <p class="aw-settings__section-lead">Coordonnées imprimées en pied de page des factures.</p>
+                        </div>
+                        <div class="aw-settings__card">
+                            <div class="aw-settings__row">
+                                <div class="aw-settings__meta">
+                                    <p class="aw-settings__label">Adresse ligne 1</p>
+                                    <p class="aw-settings__hint">Rue, avenue, ville…</p>
+                                </div>
+                                <input type="text" class="aw-input aw-input--wide" maxlength="250"
+                                       placeholder="Avenue…, Ville…" @bind="_settings.Adresse1" />
+                            </div>
+                            <div class="aw-settings__row">
+                                <div class="aw-settings__meta">
+                                    <p class="aw-settings__label">Adresse ligne 2</p>
+                                    <p class="aw-settings__hint">Complément (commune, référence…)</p>
+                                </div>
+                                <input type="text" class="aw-input aw-input--wide" maxlength="250"
+                                       placeholder="Commune, référence…" @bind="_settings.Adresse2" />
+                            </div>
+                        </div>
+                    </section>
+                }
+                else if (_section == "configuration")
+                {
+                    <ConfigurationSettings />
+                }
+                else if (_section == "invoice-template")
+                {
+                    <InvoiceTemplateSettings />
+                }
+                else if (_section == "notifications")
+                {
+                    <section class="aw-settings__section" aria-labelledby="set-chan">
+                        <div class="aw-settings__section-head">
+                            <h2 id="set-chan" class="aw-settings__section-title">Canaux</h2>
+                            <p class="aw-settings__section-lead">Où recevoir les alertes importantes.</p>
+                        </div>
+                        <div class="aw-settings__card">
+                            @foreach (var notif in _notifSettings.Take(2))
+                            {
+                                <div class="aw-settings__row">
+                                    <div class="aw-settings__meta">
+                                        <p class="aw-settings__label">@notif.Title</p>
+                                        <p class="aw-settings__hint">@notif.Description</p>
+                                    </div>
+                                    <input class="aw-switch" type="checkbox" role="switch"
+                                           checked="@notif.Enabled"
+                                           @onchange="@((ChangeEventArgs e) => notif.Enabled = (bool)(e.Value ?? false))" />
+                                </div>
+                            }
+                        </div>
+                    </section>
+
+                    <section class="aw-settings__section" aria-labelledby="set-extra">
+                        <div class="aw-settings__section-head">
+                            <h2 id="set-extra" class="aw-settings__section-title">Préférences</h2>
+                            <p class="aw-settings__section-lead">Sons et digests (stockage local pour l'instant).</p>
+                        </div>
+                        <div class="aw-settings__card">
+                            @foreach (var notif in _notifSettings.Skip(2))
+                            {
+                                <div class="aw-settings__row">
+                                    <div class="aw-settings__meta">
+                                        <p class="aw-settings__label">@notif.Title</p>
+                                        <p class="aw-settings__hint">@notif.Description</p>
+                                    </div>
+                                    <input class="aw-switch" type="checkbox" role="switch"
+                                           checked="@notif.Enabled"
+                                           @onchange="@((ChangeEventArgs e) => notif.Enabled = (bool)(e.Value ?? false))" />
+                                </div>
+                            }
+                        </div>
+                    </section>
+                }
+                else if (_section == "apparence")
+                {
+                    <section class="aw-settings__section" aria-labelledby="set-theme">
+                        <div class="aw-settings__section-head">
+                            <h2 id="set-theme" class="aw-settings__section-title">Thème & densité</h2>
+                            <p class="aw-settings__section-lead">Apparence générale de l'espace de travail.</p>
+                        </div>
+                        <div class="aw-settings__card">
+                            <div class="aw-settings__row">
+                                <div class="aw-settings__meta">
+                                    <p class="aw-settings__label">Thème</p>
+                                    <p class="aw-settings__hint">Clair, sombre, ou suivi du système</p>
+                                </div>
+                                <AwSearchSelect AriaLabel="Thème" Placeholder="Thème" Searchable="false"
+                                                Value="@_settings.Theme" ValueChanged="OnThemeChanged"
+                                                Options="@_themeOptions" />
+                            </div>
+                            <div class="aw-settings__row">
+                                <div class="aw-settings__meta">
+                                    <p class="aw-settings__label">Densité d'affichage</p>
+                                    <p class="aw-settings__hint">Espacement des listes et formulaires</p>
+                                </div>
+                                <AwSearchSelect AriaLabel="Densité" Placeholder="Densité" Searchable="false"
+                                                Value="@_settings.Densite" ValueChanged="OnDensiteChanged"
+                                                Options="@_densiteOptions" />
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="aw-settings__section" aria-labelledby="set-nav">
+                        <div class="aw-settings__section-head">
+                            <h2 id="set-nav" class="aw-settings__section-title">Navigation</h2>
+                            <p class="aw-settings__section-lead">Emplacement et comportement du menu principal.</p>
+                        </div>
+                        <div class="aw-settings__card">
+                            <div class="aw-settings__row">
+                                <div class="aw-settings__meta">
+                                    <p class="aw-settings__label">Disposition du menu</p>
+                                    <p class="aw-settings__hint">Barre latérale ou barre supérieure</p>
+                                </div>
+                                <AwSearchSelect AriaLabel="Disposition du menu" Placeholder="Disposition" Searchable="false"
+                                                Value="@_settings.LayoutPreference" ValueChanged="OnLayoutChanged"
+                                                Options="@_layoutOptions" />
+                            </div>
+                            @if (_settings.LayoutPreference != IAppSettingsService.LAYOUT_TOPBAR)
+                            {
+                                <div class="aw-settings__row">
+                                    <div class="aw-settings__meta">
+                                        <p class="aw-settings__label">Sidebar compacte</p>
+                                        <p class="aw-settings__hint">Réduire la largeur de la barre latérale</p>
+                                    </div>
+                                    <input class="aw-switch" type="checkbox" role="switch" @bind="_settings.SidebarCompacte" />
+                                </div>
+                            }
+                        </div>
+                    </section>
+                }
+                else if (_section == "donnees")
+                {
+                    <section class="aw-settings__section" aria-labelledby="set-priv">
+                        <div class="aw-settings__section-head">
+                            <h2 id="set-priv" class="aw-settings__section-title">Confidentialité</h2>
+                            <p class="aw-settings__section-lead">Contrôle des données locales et analytiques.</p>
+                        </div>
+                        <div class="aw-settings__card">
+                            <div class="aw-settings__row">
+                                <div class="aw-settings__meta">
+                                    <p class="aw-settings__label">Sauvegarde automatique</p>
+                                    <p class="aw-settings__hint">Conserver les brouillons de formulaires</p>
+                                </div>
+                                <input class="aw-switch" type="checkbox" role="switch" @bind="_settings.AutoSave" />
+                            </div>
+                            <div class="aw-settings__row">
+                                <div class="aw-settings__meta">
+                                    <p class="aw-settings__label">Collecte analytique</p>
+                                    <p class="aw-settings__hint">Partager des données d'usage anonymes</p>
+                                </div>
+                                <input class="aw-switch" type="checkbox" role="switch" @bind="_settings.Analytics" />
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="aw-settings__section" aria-labelledby="set-ret">
+                        <div class="aw-settings__section-head">
+                            <h2 id="set-ret" class="aw-settings__section-title">Conservation</h2>
+                            <p class="aw-settings__section-lead">Durée de rétention des journaux d'activité.</p>
+                        </div>
+                        <div class="aw-settings__card">
+                            <div class="aw-settings__row">
+                                <div class="aw-settings__meta">
+                                    <p class="aw-settings__label">Rétention des logs</p>
+                                    <p class="aw-settings__hint">Après cette durée, les journaux peuvent être purgés</p>
+                                </div>
+                                <AwSearchSelect AriaLabel="Rétention des logs" Placeholder="Rétention" Searchable="false"
+                                                Value="@_settings.RetentionLogs" ValueChanged="OnRetentionChanged"
+                                                Options="@_retentionOptions" />
+                            </div>
+                        </div>
+                    </section>
+                }
+            </div>
+
+            @if (_section is not ("invoice-template" or "configuration"))
+            {
+                <footer class="aw-settings__bar">
+                    <p class="aw-settings__bar-hint">Les modifications ne sont appliquées qu'après enregistrement.</p>
+                    <div class="aw-settings__bar-actions">
+                        <button type="button" class="aw-btn aw-btn--ghost" @onclick="OnReset">
+                            <i class="bi bi-arrow-counterclockwise"></i> Réinitialiser
+                        </button>
+                        <button type="button" class="aw-btn aw-btn--primary" @onclick="OnSave">
+                            <i class="bi bi-check-lg"></i> Enregistrer
+                        </button>
+                    </div>
+                </footer>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    record SettingsTab(string Key, string Label, string Icon);
+
+    class SettingsModel
+    {
+        public string AppName { get; set; } = "App++";
+        public string? PhotoShop { get; set; }
+        public string? Adresse1 { get; set; }
+        public string? Adresse2 { get; set; }
+        public string Langue { get; set; } = "Français";
+        public string Fuseau { get; set; } = "Europe/Paris (UTC+1)";
+        public string FormatDate { get; set; } = "DD/MM/YYYY";
+        public string Theme { get; set; } = "Clair";
+        public string LayoutPreference { get; set; } = IAppSettingsService.LAYOUT_SIDEBAR;
+        public bool SidebarCompacte { get; set; }
+        public string Densite { get; set; } = "Normal";
+        public bool AutoSave { get; set; } = true;
+        public bool Analytics { get; set; }
+        public string RetentionLogs { get; set; } = "30 jours";
+    }
+
+    class NotifSetting
+    {
+        public string Icon { get; set; } = "bi-bell";
+        public string Title { get; set; } = "";
+        public string Description { get; set; } = "";
+        public bool Enabled { get; set; }
+    }
+
+    bool _loaded;
+    string _section = "general";
+    SettingsModel _settings = new();
+    bool _logoUploading;
+    string? _logoError;
+
+    [SupplyParameterFromQuery(Name = "section")]
+    public string? SectionQuery { get; set; }
+
+    readonly SettingsTab[] _tabs =
+    [
+        new("general", "Général", "bi-sliders"),
+        new("shop", "Shop / Facture", "bi-shop"),
+        new("configuration", "Configuration", "bi-tags"),
+        new("invoice-template", "Modèle facture", "bi-receipt"),
+        new("notifications", "Notifications", "bi-bell"),
+        new("apparence", "Apparence", "bi-palette"),
+        new("donnees", "Confidentialité", "bi-shield-lock"),
+    ];
+
+    readonly List<AwSearchSelect.Option> _langueOptions =
+    [
+        new("Français", "Français"),
+        new("English", "English"),
+        new("Español", "Español"),
+        new("Deutsch", "Deutsch")
+    ];
+
+    readonly List<AwSearchSelect.Option> _fuseauOptions =
+    [
+        new("Europe/Paris (UTC+1)", "Europe/Paris (UTC+1)"),
+        new("Europe/London (UTC+0)", "Europe/London (UTC+0)"),
+        new("America/New_York (UTC-5)", "America/New_York (UTC-5)"),
+        new("Asia/Tokyo (UTC+9)", "Asia/Tokyo (UTC+9)")
+    ];
+
+    readonly List<AwSearchSelect.Option> _dateFormatOptions =
+    [
+        new("DD/MM/YYYY", "DD/MM/YYYY"),
+        new("MM/DD/YYYY", "MM/DD/YYYY"),
+        new("YYYY-MM-DD", "YYYY-MM-DD")
+    ];
+
+    readonly List<AwSearchSelect.Option> _themeOptions =
+    [
+        new("Clair", "Clair"),
+        new("Sombre", "Sombre"),
+        new("Système", "Système")
+    ];
+
+    readonly List<AwSearchSelect.Option> _layoutOptions =
+    [
+        new(IAppSettingsService.LAYOUT_SIDEBAR, IAppSettingsService.LAYOUT_SIDEBAR),
+        new(IAppSettingsService.LAYOUT_TOPBAR, IAppSettingsService.LAYOUT_TOPBAR)
+    ];
+
+    readonly List<AwSearchSelect.Option> _densiteOptions =
+    [
+        new("Compact", "Compact"),
+        new("Normal", "Normal"),
+        new("Confortable", "Confortable")
+    ];
+
+    readonly List<AwSearchSelect.Option> _retentionOptions =
+    [
+        new("7 jours", "7 jours"),
+        new("30 jours", "30 jours"),
+        new("90 jours", "90 jours"),
+        new("1 an", "1 an"),
+        new("Illimité", "Illimité")
+    ];
+
+    List<NotifSetting> _notifSettings =
+    [
+        new() { Icon = "bi-envelope", Title = "Notifications par email", Description = "Recevoir les alertes importantes par email", Enabled = true },
+        new() { Icon = "bi-phone", Title = "Notifications push", Description = "Recevoir des notifications dans le navigateur", Enabled = true },
+        new() { Icon = "bi-volume-up", Title = "Son de notification", Description = "Jouer un son lors d'une nouvelle notification", Enabled = false },
+        new() { Icon = "bi-file-text", Title = "Résumé quotidien", Description = "Email récapitulatif chaque matin à 8h", Enabled = true },
+    ];
+
+    string GetSectionDescription() => _section switch
+    {
+        "shop" => "Identité du magasin et informations affichées sur les factures.",
+        "configuration" => "Catégories, types, marques et unités — référentiels du catalogue articles.",
+        "invoice-template" => "Modèles ticket ou A4, en-tête et filigrane par entreprise.",
+        "notifications" => "Canaux d'alertes et digests.",
+        "apparence" => "Thème, densité et disposition du menu.",
+        "donnees" => "Confidentialité et conservation des journaux.",
+        _ => "Langue, fuseau horaire et formats d'affichage."
+    };
+
+    Task OnLangueChanged(string? v) { _settings.Langue = v ?? "Français"; return Task.CompletedTask; }
+    Task OnFuseauChanged(string? v) { _settings.Fuseau = v ?? _settings.Fuseau; return Task.CompletedTask; }
+    Task OnFormatDateChanged(string? v) { _settings.FormatDate = v ?? _settings.FormatDate; return Task.CompletedTask; }
+    Task OnThemeChanged(string? v) { _settings.Theme = v ?? "Clair"; return Task.CompletedTask; }
+    Task OnLayoutChanged(string? v)
+    {
+        _settings.LayoutPreference = NormalizeLayoutPreference(v);
+        return Task.CompletedTask;
+    }
+    Task OnDensiteChanged(string? v) { _settings.Densite = v ?? "Normal"; return Task.CompletedTask; }
+    Task OnRetentionChanged(string? v) { _settings.RetentionLogs = v ?? "30 jours"; return Task.CompletedTask; }
+
+    async Task OnLogoFileSelected(InputFileChangeEventArgs e)
+    {
+        _logoError = null;
+        var file = e.File;
+        if (file.Size > 2 * 1024 * 1024)
+        {
+            _logoError = "Le fichier est trop grand (max 2 Mo).";
+            return;
+        }
+        if (!file.ContentType.StartsWith("image/"))
+        {
+            _logoError = "Seuls les fichiers image sont acceptés.";
+            return;
+        }
+        _logoUploading = true;
+        try
+        {
+            using var stream = file.OpenReadStream(maxAllowedSize: 2 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var base64 = Convert.ToBase64String(ms.ToArray());
+            _settings.PhotoShop = $"data:{file.ContentType};base64,{base64}";
+        }
+        catch (Exception ex)
+        {
+            _logoError = $"Erreur lors du chargement : {ex.Message}";
+        }
+        finally
+        {
+            _logoUploading = false;
+        }
+    }
+
+    void SelectSection(string key)
+    {
+        _section = key;
+        Navigation.NavigateTo(key == "general" ? "/settings" : $"/settings?section={key}", replace: true);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(SectionQuery) && _tabs.Any(t => t.Key == SectionQuery))
+            _section = SectionQuery;
+
+        _settings.AppName = AppSettings.AppName;
+        _settings.LayoutPreference = NormalizeLayoutPreference(
+            AppSettings.Get(IAppSettingsService.KEY_LAYOUT_PREFERENCE));
+        _settings.Theme = AppSettings.Get(IAppSettingsService.KEY_THEME) ?? "Clair";
+        _settings.Langue = AppSettings.Get(IAppSettingsService.KEY_LANGUE) ?? "Français";
+
+        var profile = await ShopProfileService.GetAsync();
+        _settings.PhotoShop = profile.PhotoShop;
+        _settings.Adresse1 = profile.Adresse1;
+        _settings.Adresse2 = profile.Adresse2;
+        _loaded = true;
+    }
+
+    static string NormalizeLayoutPreference(string? layoutPreference)
+        => string.Equals(layoutPreference, IAppSettingsService.LAYOUT_TOPBAR, StringComparison.OrdinalIgnoreCase)
+            ? IAppSettingsService.LAYOUT_TOPBAR
+            : IAppSettingsService.LAYOUT_SIDEBAR;
+
+    async Task OnSave()
+    {
+        if (!string.IsNullOrWhiteSpace(_settings.AppName))
+            await AppSettings.SetAsync(IAppSettingsService.KEY_APP_NAME, _settings.AppName.Trim());
+
+        await AppSettings.SetAsync(
+            IAppSettingsService.KEY_LAYOUT_PREFERENCE,
+            NormalizeLayoutPreference(_settings.LayoutPreference));
+        await AppSettings.SetAsync(IAppSettingsService.KEY_THEME, _settings.Theme);
+        await AppSettings.SetAsync(IAppSettingsService.KEY_LANGUE, _settings.Langue);
+        await ShopProfileService.SaveAsync(_settings.PhotoShop, _settings.Adresse1, _settings.Adresse2);
+        Snackbar.Add("Les paramètres ont été enregistrés avec succès.", Severity.Success);
+    }
+
+    void OnReset()
+    {
+        _settings.Langue = "Français";
+        _settings.Fuseau = "Europe/Paris (UTC+1)";
+        _settings.FormatDate = "DD/MM/YYYY";
+        _settings.Theme = "Clair";
+        _settings.LayoutPreference = IAppSettingsService.LAYOUT_SIDEBAR;
+        _settings.SidebarCompacte = false;
+        _settings.Densite = "Normal";
+        _settings.AutoSave = true;
+        _settings.Analytics = false;
+        _settings.RetentionLogs = "30 jours";
+        foreach (var n in _notifSettings)
+            n.Enabled = n.Title != "Son de notification";
+        Snackbar.Add("Les paramètres par défaut ont été restaurés.", Severity.Info);
+    }
+}

@@ -1,0 +1,305 @@
+@page "/stock/inventaire/reception/nouveau"
+@page "/stock/inventaire/reception/modifier/{ReceptionId:int}"
+@rendermode InteractiveServer
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using AppPlusPlus.Application.DTOs.Inventaire
+@using AppPlusPlus.Application.Services.Inventaire
+@using AppPlusPlus.Application.Services.Catalogue
+@using AppPlusPlus.Domain.Common
+@using AppPlusPlus.Domain.Entities.Catalogue
+@inject IInventaireService InventaireService
+@inject ICatalogueService CatalogueService
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+
+<PageTitle>@AppSettings.AppName — @(_isEdit ? "Réception inventaire" : "Nouvelle réception")</PageTitle>
+
+<div class="aw-page aw-page--workspace">
+    <div class="aw-form aw-form--xl">
+        <header class="aw-form__head">
+            <div>
+                <p class="aw-form__eyebrow">Inventaire magasin</p>
+                <h1 class="aw-form__title">@(_isEdit ? "Modifier la réception" : "Nouvelle réception")</h1>
+                @if (_readOnly)
+                {
+                    <span class="aw-badge aw-badge--brand">Clôturée — lecture seule</span>
+                }
+            </div>
+            <div class="aw-form__actions">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="OnCancel">
+                    <i class="bi bi-arrow-left"></i> Retour
+                </button>
+                @if (!_readOnly && _canWrite)
+                {
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="OnSave" disabled="@(!_lines.Any())">
+                        <i class="bi bi-check-lg"></i> Enregistrer
+                    </button>
+                }
+            </div>
+        </header>
+
+        @if (_loading)
+        {
+            <AwSkeleton Variant="form" Rows="6" />
+        }
+        else
+        {
+            <div class="aw-form__body">
+                <div class="aw-form__grid aw-form__grid--3">
+                    <div class="aw-field">
+                        <label class="aw-field__label">N° réception</label>
+                        <input class="aw-input" @bind="_numero" disabled="@_readOnly" placeholder="REC-001" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Référence</label>
+                        <input class="aw-input" @bind="_reference" disabled="@_readOnly" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Observation</label>
+                        <input class="aw-input" @bind="_observation" disabled="@_readOnly" />
+                    </div>
+                </div>
+
+                <div class="aw-dialog__section">Articles</div>
+
+                @if (!_readOnly && _canWrite)
+                {
+                    <div class="aw-field aw-field--picker">
+                        <label class="aw-field__label">Ajouter un article</label>
+                        <ArticleAutocomplete Articles="@_articles"
+                                             Value="@_pickerArticleId"
+                                             ValueChanged="OnPickerArticleSelected"
+                                             Placeholder="Rechercher…" />
+                    </div>
+                }
+
+                <div class="aw-table-region">
+                    <div class="aw-table-wrap">
+                        <table class="aw-table">
+                            <thead>
+                                <tr>
+                                    <th>Article</th>
+                                    <th class="aw-table__num">Qté</th>
+                                    <th>Exp.</th>
+                                    <th class="aw-table__num">P.U. (FC)</th>
+                                    <th class="aw-table__num">Montant</th>
+                                    @if (!_readOnly && _canWrite){<th></th>}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var line in _lines)
+                                {
+                                    var montant = line.Quantite * line.PrixUnitaire;
+                                    <tr>
+                                        <td>
+                                            <span class="aw-table__title">@(line.ArticleName ?? line.IdArticle)</span>
+                                            <span class="aw-table__meta">@line.IdArticle</span>
+                                        </td>
+                                        <td class="aw-table__num">
+                                            @if (_readOnly)
+                                            {
+                                                @line.Quantite.ToString("N2")
+                                            }
+                                            else
+                                            {
+                                                <input type="number" class="aw-input aw-input--table" @bind="line.Quantite" min="0.01" step="0.01" />
+                                            }
+                                        </td>
+                                        <td>
+                                            @if (_readOnly)
+                                            {
+                                                @(line.DateExpiration?.ToString("dd/MM/yyyy") ?? "—")
+                                            }
+                                            else
+                                            {
+                                                <input type="date" class="aw-input aw-input--table aw-input--date"
+                                                       @bind="line.DateExpiration" />
+                                            }
+                                        </td>
+                                        <td class="aw-table__num">
+                                            @if (_readOnly)
+                                            {
+                                                @CurrencyFormat.Cdf(line.PrixUnitaire, "N0")
+                                            }
+                                            else
+                                            {
+                                                <input type="number" class="aw-input aw-input--table aw-input--table-wide" @bind="line.PrixUnitaire" min="0" step="1" />
+                                            }
+                                        </td>
+                                        <td class="aw-table__num"><strong>@CurrencyFormat.Cdf(montant, "N0")</strong></td>
+                                        @if (!_readOnly && _canWrite)
+                                        {
+                                            <td>
+                                                <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="() => RemoveLine(line)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </td>
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                            @if (_lines.Any())
+                            {
+                                <tfoot>
+                                    <tr>
+                                        <td colspan="4" class="aw-table__num"><strong>Total réception</strong></td>
+                                        <td class="aw-table__num"><strong>@CurrencyFormat.Cdf(_lines.Sum(l => l.Quantite * l.PrixUnitaire), "N0")</strong></td>
+                                        @if (!_readOnly && _canWrite){<td></td>}
+                                    </tr>
+                                </tfoot>
+                            }
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public int ReceptionId { get; set; }
+    [SupplyParameterFromQuery] public int? InventaireId { get; set; }
+
+    bool _loading = true;
+    bool _isEdit;
+    bool _readOnly;
+    bool _canWrite;
+    int _inventaireId;
+    string _login = "";
+    string? _numero;
+    string? _reference;
+    string? _observation;
+    string? _pickerArticleId;
+    List<Article> _articles = new();
+    List<LineVm> _lines = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+        _login = user.FindFirst("login")?.Value
+            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? user.Identity?.Name
+            ?? "";
+        var isAdmin = AppFunctions.Normalize(user.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+        var perms = await PermissionResolver.GetPermissionsAsync(_login);
+        _canWrite = PermissionGate.DoAction(perms, "articles.inventaire.write",
+            () => PermissionGate.LegacyWrite(perms, AppFunctions.Stock, isAdmin));
+
+        _articles = await CatalogueService.GetArticlesAsync();
+        _isEdit = ReceptionId > 0;
+
+        if (_isEdit)
+        {
+            var rec = await InventaireService.GetReceptionAsync(ReceptionId);
+            if (rec == null)
+            {
+                Snackbar.Add("Réception introuvable", Severity.Error);
+                Navigation.NavigateTo("/stock/inventaire");
+                return;
+            }
+
+            _inventaireId = rec.IdInventaire;
+            _numero = rec.NumeroReception;
+            _reference = rec.Reference;
+            _observation = rec.Observation;
+            _readOnly = rec.Statut == InventaireReceptionStatut.Cloture;
+            _lines = rec.Lines.Select(l => new LineVm
+            {
+                IdArticle = l.IdArticle,
+                ArticleName = l.ArticleName,
+                Quantite = l.Quantite,
+                PrixUnitaire = l.PrixUnitaire,
+                DateExpiration = l.DateExpiration
+            }).ToList();
+        }
+        else
+        {
+            if (!InventaireId.HasValue)
+            {
+                Snackbar.Add("Session inventaire requise", Severity.Error);
+                Navigation.NavigateTo("/stock/inventaire");
+                return;
+            }
+            _inventaireId = InventaireId.Value;
+        }
+
+        _loading = false;
+    }
+
+    async Task OnPickerArticleSelected(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return;
+        var art = _articles.FirstOrDefault(a => a.IdArticle == value)
+                  ?? _articles.FirstOrDefault(a => a.Description?.Equals(value.Trim(), StringComparison.OrdinalIgnoreCase) == true);
+        var id = art?.IdArticle ?? value.Trim();
+
+        var existing = _lines.FirstOrDefault(l => l.IdArticle == id);
+        if (existing != null)
+        {
+            existing.Quantite += 1;
+        }
+        else
+        {
+            var puFc = art != null
+                ? CurrencyFormat.ArticleToFc((decimal)art.Price, CurrencyDefaults.IsUsdMoneyId(art.IdMonais), UserCurrency.CachedTaux)
+                : 0;
+            _lines.Add(new LineVm
+            {
+                IdArticle = id,
+                ArticleName = art?.Description,
+                Quantite = 1,
+                PrixUnitaire = puFc
+            });
+        }
+
+        _pickerArticleId = null;
+        await Task.CompletedTask;
+    }
+
+    void RemoveLine(LineVm line) => _lines.Remove(line);
+
+    async Task OnSave()
+    {
+        try
+        {
+            var id = await InventaireService.SaveReceptionAsync(new InventaireReceptionSaveRequest
+            {
+                IdReception = _isEdit ? ReceptionId : null,
+                IdInventaire = _inventaireId,
+                NumeroReception = _numero,
+                Reference = _reference,
+                Observation = _observation,
+                UserLogin = _login,
+                Lines = _lines.Select(l => new InventaireReceptionLineInput
+                {
+                    IdArticle = l.IdArticle,
+                    Quantite = l.Quantite,
+                    PrixUnitaire = l.PrixUnitaire,
+                    DateExpiration = l.DateExpiration
+                }).ToList()
+            });
+            Snackbar.Add("Réception enregistrée", Severity.Success);
+            Navigation.NavigateTo("/stock/inventaire");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    void OnCancel() => Navigation.NavigateTo("/stock/inventaire");
+
+    class LineVm
+    {
+        public string IdArticle { get; set; } = "";
+        public string? ArticleName { get; set; }
+        public decimal Quantite { get; set; }
+        public decimal PrixUnitaire { get; set; }
+        public DateOnly? DateExpiration { get; set; }
+    }
+}

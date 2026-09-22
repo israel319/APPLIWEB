@@ -1,0 +1,3134 @@
+@page "/administration"
+@page "/admin"
+@rendermode InteractiveServer
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using AppPlusPlus.Application.Services.Vente
+@using AppPlusPlus.Application.Services.Commandes
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject MudBlazor.IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+@inject IRoleService RoleService
+@inject IPermissionResolver PermissionResolver
+@inject ILocalisationService LocalisationService
+@inject IUserAdminService UserAdminService
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IModuleLicenseService ModuleLicenseService
+@inject IVendorSecurityService VendorSecurity
+@inject IClotureService ClotureService
+@inject IFacturationService FacturationService
+@inject ILivraisonPostingService LivraisonPosting
+
+<PageTitle>@AppSettings.AppName — Administration</PageTitle>
+
+@if (!_loaded)
+{
+    <div class="aw-page">
+        <AwSkeleton Variant="page" Rows="7" />
+    </div>
+}
+else if (!_canAccessAdmin)
+{
+    <div class="aw-page">
+        <div class="aw-shell" style="max-width:720px;margin:1.5rem auto;">
+            <div class="aw-empty">
+                <i class="bi bi-lock"></i>
+                <p><strong>Accès refusé</strong><br />Ce module est réservé aux administrateurs.</p>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="aw-page aw-page--workspace">
+        <div class="aw-workspace">
+            <header class="aw-object-head">
+                <div class="aw-object-head__identity">
+                    <p class="aw-object-head__eyebrow">Module administration</p>
+                    <h1 class="aw-object-head__title">Administration</h1>
+                    <p class="aw-object-head__desc">Utilisateurs, activités et données de base</p>
+                </div>
+            </header>
+
+            <nav class="aw-railnav" aria-label="Sections administration" role="tablist">
+                <button type="button" role="tab" aria-selected="@(_tab == 0)" title="Utilisateurs"
+                        class="aw-railnav__item @(_tab == 0 ? "aw-railnav__item--active" : "")"
+                        @onclick="@(async () => await OnTabChange(0))">
+                    <i class="bi bi-people" aria-hidden="true"></i>
+                    Utilisateurs
+                </button>
+                <button type="button" role="tab" aria-selected="@(_tab == 1)" title="Fournisseurs"
+                        class="aw-railnav__item @(_tab == 1 ? "aw-railnav__item--active" : "")"
+                        @onclick="@(async () => await OnTabChange(1))">
+                    <i class="bi bi-truck" aria-hidden="true"></i>
+                    Fournisseurs
+                </button>
+                <button type="button" role="tab" aria-selected="@(_tab == 2)" title="Taux de change"
+                        class="aw-railnav__item @(_tab == 2 ? "aw-railnav__item--active" : "")"
+                        @onclick="@(async () => await OnTabChange(2))">
+                    <i class="bi bi-percent" aria-hidden="true"></i>
+                    Taux
+                </button>
+                <button type="button" role="tab" aria-selected="@(_tab == 3)" title="Périodes"
+                        class="aw-railnav__item @(_tab == 3 ? "aw-railnav__item--active" : "")"
+                        @onclick="@(async () => await OnTabChange(3))">
+                    <i class="bi bi-calendar-event" aria-hidden="true"></i>
+                    Périodes
+                </button>
+                <button type="button" role="tab" aria-selected="@(_tab == 4)" title="Versements"
+                        class="aw-railnav__item @(_tab == 4 ? "aw-railnav__item--active" : "")"
+                        @onclick="@(async () => await OnTabChange(4))">
+                    <i class="bi bi-bank" aria-hidden="true"></i>
+                    Versements
+                    @if (_pendingClotures.Count > 0)
+                    {
+                        <span class="aw-railnav__count aw-railnav__count--alert">@_pendingClotures.Count</span>
+                    }
+                </button>
+                <button type="button" role="tab" aria-selected="@(_tab == 5)" title="Gestion factures"
+                        class="aw-railnav__item @(_tab == 5 ? "aw-railnav__item--active" : "")"
+                        @onclick="@(async () => await OnTabChange(5))">
+                    <i class="bi bi-receipt" aria-hidden="true"></i>
+                    Factures
+                </button>
+                <button type="button" role="tab" aria-selected="@(_tab == 6)" title="Gestion livraisons"
+                        class="aw-railnav__item @(_tab == 6 ? "aw-railnav__item--active" : "")"
+                        @onclick="@(async () => await OnTabChange(6))">
+                    <i class="bi bi-box-seam" aria-hidden="true"></i>
+                    Livraisons
+                </button>
+                <button type="button" role="tab" aria-selected="@(_tab == 7)" title="Localisations"
+                        class="aw-railnav__item @(_tab == 7 ? "aw-railnav__item--active" : "")"
+                        @onclick="@(async () => await OnTabChange(7))">
+                    <i class="bi bi-building" aria-hidden="true"></i>
+                    Localisations
+                </button>
+                <button type="button" role="tab" aria-selected="@(_tab == 8)" title="Licences modules"
+                        class="aw-railnav__item @(_tab == 8 ? "aw-railnav__item--active" : "")"
+                        @onclick="@(async () => await OnTabChange(8))">
+                    <i class="bi bi-puzzle" aria-hidden="true"></i>
+                    Licences
+                </button>
+            </nav>
+
+            <div class="aw-workspace__body">
+
+            @* ══════════════════ UTILISATEURS ══════════════════ *@
+            @if (_tab == 0)
+            {
+                var userPageItems = PageOf(_userFiltered, _userPage, _userPageSize).ToList();
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search"
+                               placeholder="Rechercher (login, nom, email, rôle…)"
+                               aria-label="Rechercher un utilisateur"
+                               @bind="_userSearch"
+                               @bind:event="oninput"
+                               @bind:after="ApplyUserFilter" />
+                    </div>
+                    <div class="aw-actionbar__filters">
+                        <AwSearchSelect AriaLabel="Rôle"
+                                        Placeholder="Rôle"
+                                        Value="@(_userRoleFilter ?? "")"
+                                        ValueChanged="OnUserRoleFilterChanged"
+                                        Options="@UserRoleSelectOptions()" />
+                        <AwSearchSelect AriaLabel="Statut"
+                                        Placeholder="Statut"
+                                        Searchable="false"
+                                        Value="@(_userStatusFilter ?? "")"
+                                        ValueChanged="OnUserStatusFilterChanged"
+                                        Options="@UserStatusSelectOptions()" />
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--primary" @onclick="OnAddUser">
+                            <i class="bi bi-person-plus"></i> Ajouter
+                        </button>
+                    </div>
+                </div>
+
+                @if (_userLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!userPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-people"></i>
+                            <p>Aucun utilisateur pour ces filtres.</p>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>Login</th>
+                                        <th>Nom</th>
+                                        <th>Rôle</th>
+                                        <th>Email</th>
+                                        <th>Statut</th>
+                                        <th>Localisations</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in userPageItems)
+                                    {
+                                        var locs = _userLocalisationsMap.GetValueOrDefault(item.Login, new List<string>());
+                                        <tr style="cursor:pointer;" @onclick="@(() => OnUserRowClick(item))">
+                                            <td><span class="aw-table__title">@item.Login</span></td>
+                                            <td>@item.Name</td>
+                                            <td>
+                                                <span class="aw-badge @(item.RoleId.HasValue ? "aw-badge--primary" : "aw-badge--muted")">
+                                                    @(item.Role?.DescriptionRole ?? "Non attribué")
+                                                </span>
+                                            </td>
+                                            <td><span class="aw-table__meta">@item.Email</span></td>
+                                            <td>
+                                                <span class="aw-badge @(item.Activated == true ? "aw-badge--brand" : "aw-badge--danger")">
+                                                    @(item.Activated == true ? "Actif" : "Inactif")
+                                                </span>
+                                            </td>
+                                            <td>
+                                                @if (locs.Any())
+                                                {
+                                                    @foreach (var loc in locs)
+                                                    {
+                                                        <span class="aw-badge aw-badge--brand" style="margin:0 0.2rem 0.2rem 0;">@loc</span>
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-badge aw-badge--muted">Non assignée</span>
+                                                }
+                                            </td>
+                                            <td @onclick:stopPropagation="true">
+                                                <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon"
+                                                        title="Supprimer" @onclick="@(() => OnDeleteUser(item))">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="_userFiltered.Count"
+                                 Page="_userPage"
+                                 PageSize="_userPageSize"
+                                 ItemLabel="utilisateur"
+                                 PageChanged="SetUserPage"
+                                 PageSizeChanged="SetUserPageSize" />
+                    </div>
+                }
+            }
+
+            @* ══════════════════ FOURNISSEURS ══════════════════ *@
+            @if (_tab == 1)
+            {
+                var supplierPageItems = PageOf(_supplierFiltered, _supplierPage, _supplierPageSize).ToList();
+                var totalDue = _supplierData.Sum(s => s.CcAmountToPay ?? 0);
+                var totalPaid = _supplierData.Sum(s => s.CcAmountPay ?? 0);
+                var totalSolde = totalDue - totalPaid;
+
+                @if (_supplierData.Any())
+                {
+                    <section class="aw-overview" aria-label="Vue d'ensemble fournisseurs">
+                        <div class="aw-overview__top">
+                            <div class="aw-overview__intro">
+                                <h2 class="aw-overview__title">Vue d'ensemble</h2>
+                                <p class="aw-overview__lead">Soldes fournisseurs et historique des paiements.</p>
+                            </div>
+                            <div class="@($"aw-overview__cover {(totalSolde > 0 ? "aw-overview__cover--accent" : "aw-overview__cover--brand")}")">
+                                <span class="aw-overview__cover-value"><CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="totalSolde" Taux="_displayTaux" /></span>
+                                <span class="aw-overview__cover-label">solde restant</span>
+                            </div>
+                        </div>
+                        <div class="aw-overview__metrics">
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-cash-stack"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Total à payer</span>
+                                    <span class="aw-overview__metric-value" style="font-size:0.95rem;"><CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="totalDue" Taux="_displayTaux" /></span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-check-circle"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Total payé</span>
+                                    <span class="aw-overview__metric-value" style="font-size:0.95rem;"><CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="totalPaid" Taux="_displayTaux" /></span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-truck"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Fournisseurs</span>
+                                    <span class="aw-overview__metric-value">@_supplierData.Count</span>
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+                }
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search"
+                               placeholder="Rechercher (nom, n°, contact, email, adresse…)"
+                               aria-label="Rechercher un fournisseur"
+                               @bind="_supplierSearch"
+                               @bind:event="oninput"
+                               @bind:after="ApplySupplierFilter" />
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--primary" @onclick="OnAddSupplier">
+                            <i class="bi bi-person-plus"></i> Nouveau fournisseur
+                        </button>
+                    </div>
+                </div>
+
+                @if (_supplierLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!supplierPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty"><i class="bi bi-truck"></i><p>Aucun fournisseur pour ces filtres.</p></div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>Fournisseur</th>
+                                        <th>Contact</th>
+                                        <th>Adresse</th>
+                                        <th>À payer</th>
+                                        <th>Payé</th>
+                                        <th>Solde</th>
+                                        <th>Depuis</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in supplierPageItems)
+                                    {
+                                        var s = (item.CcAmountToPay ?? 0) - (item.CcAmountPay ?? 0);
+                                        <tr style="cursor:pointer;" @onclick="@(() => OnEditSupplier(item))">
+                                            <td>
+                                                <span class="aw-table__title">@item.SupplierName</span>
+                                                <span class="aw-table__meta">@item.SupplierNumber</span>
+                                            </td>
+                                            <td>
+                                                <span class="aw-table__title">@item.Contact</span>
+                                                @if (!string.IsNullOrWhiteSpace(item.Email))
+                                                {
+                                                    <span class="aw-table__meta">@item.Email</span>
+                                                }
+                                            </td>
+                                            <td>@item.Adresse</td>
+                                            <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="(item.CcAmountToPay ?? 0)" Taux="_displayTaux" /></td>
+                                            <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="(item.CcAmountPay ?? 0)" Taux="_displayTaux" /></td>
+                                            <td>
+                                                <span class="aw-badge @(s > 0 ? "aw-badge--danger" : "aw-badge--brand")">
+                                                    <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="s" Taux="_displayTaux" />
+                                                </span>
+                                            </td>
+                                            <td><span class="aw-table__meta">@(item.CreationDate?.ToString("dd/MM/yyyy") ?? "—")</span></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="_supplierFiltered.Count"
+                                 Page="_supplierPage" PageSize="_supplierPageSize"
+                                 ItemLabel="fournisseur"
+                                 PageChanged="SetSupplierPage" PageSizeChanged="SetSupplierPageSize" />
+                    </div>
+                }
+            }
+
+            @* ══════════════════ TAUX DE CHANGE ══════════════════ *@
+            @if (_tab == 2)
+            {
+                var tauxPageItems = PageOf(_tauxFiltered, _tauxPage, _tauxPageSize).ToList();
+                var latestTaux = _tauxData.OrderByDescending(t => t.DateSys ?? DateOnly.MinValue).FirstOrDefault();
+
+                @if (latestTaux != null)
+                {
+                    <section class="aw-overview" aria-label="Taux actuel">
+                        <div class="aw-overview__top">
+                            <div class="aw-overview__intro">
+                                <h2 class="aw-overview__title">Taux de change</h2>
+                                <p class="aw-overview__lead">
+                                    Mis à jour le @(latestTaux.DateSys?.ToString("dd/MM/yyyy") ?? latestTaux.Date?.ToString("dd/MM/yyyy") ?? "—")
+                                    @if (latestTaux.RateLow.HasValue && latestTaux.RateUp.HasValue)
+                                    {
+                                        <text> · Plage @latestTaux.RateLow.Value.ToString("N0") – @latestTaux.RateUp.Value.ToString("N0")</text>
+                                    }
+                                </p>
+                            </div>
+                            <div class="aw-overview__cover aw-overview__cover--brand">
+                                <span class="aw-overview__cover-value">@latestTaux.TauxValue.ToString("N0")</span>
+                                <span class="aw-overview__cover-label">CDF / USD</span>
+                            </div>
+                        </div>
+                    </section>
+                }
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search"
+                               placeholder="Rechercher (taux, commentaire, opérateur…)"
+                               aria-label="Rechercher un taux"
+                               @bind="_tauxSearch"
+                               @bind:event="oninput"
+                               @bind:after="ApplyTauxFilter" />
+                    </div>
+                    <div class="aw-actionbar__filters">
+                        <AwSearchSelect AriaLabel="Opérateur"
+                                        Placeholder="Opérateur"
+                                        Value="@(_tauxUserFilter ?? "")"
+                                        ValueChanged="OnTauxUserFilterChanged"
+                                        Options="@TauxUserSelectOptions()" />
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--primary" @onclick="OnAddTaux">
+                            <i class="bi bi-plus-circle"></i> Ajouter
+                        </button>
+                    </div>
+                </div>
+
+                @if (_tauxLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!tauxPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty"><i class="bi bi-currency-exchange"></i><p>Aucun taux pour ces filtres.</p></div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>N°</th>
+                                        <th>Taux (CDF/USD)</th>
+                                        <th>Plage</th>
+                                        <th>Date saisie</th>
+                                        <th>Commentaire</th>
+                                        <th>Opérateur</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in tauxPageItems)
+                                    {
+                                        <tr style="cursor:pointer;" @onclick="@(() => OnTauxRowClick(item))">
+                                            <td>@item.Id</td>
+                                            <td>
+                                                <span class="aw-table__title">@item.TauxValue.ToString("N0")</span>
+                                                @if (latestTaux != null && item.Id == latestTaux.Id)
+                                                {
+                                                    <span class="aw-badge aw-badge--primary">Actuel</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (item.RateLow.HasValue && item.RateUp.HasValue)
+                                                {
+                                                    <span class="aw-badge aw-badge--muted">@item.RateLow.Value.ToString("N0") – @item.RateUp.Value.ToString("N0")</span>
+                                                }
+                                                else { <span class="aw-table__meta">—</span> }
+                                            </td>
+                                            <td><span class="aw-table__meta">@(item.DateSys?.ToString("dd/MM/yyyy") ?? item.Date?.ToString("dd/MM/yyyy") ?? "—")</span></td>
+                                            <td>@item.Comment</td>
+                                            <td><i class="bi bi-person-circle" aria-hidden="true"></i> @item.UserLogin</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="_tauxFiltered.Count"
+                                 Page="_tauxPage" PageSize="_tauxPageSize"
+                                 ItemLabel="taux"
+                                 PageChanged="SetTauxPage" PageSizeChanged="SetTauxPageSize" />
+                    </div>
+                }
+            }
+
+            @* ══════════════════ PÉRIODES ══════════════════ *@
+            @if (_tab == 3)
+            {
+                var periodePageItems = PageOf(_periodeAuditsFiltered, _periodePage, _periodePageSize).ToList();
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search"
+                               placeholder="Rechercher (description, opérateur, n° factures…)"
+                               aria-label="Rechercher une période"
+                               @bind="_periodeSearch"
+                               @bind:event="oninput"
+                               @bind:after="ApplyPeriodeFilter" />
+                    </div>
+                    <div class="aw-actionbar__filters">
+                        <AwSearchSelect AriaLabel="Opérateur"
+                                        Placeholder="Opérateur"
+                                        Value="@(_periodeUserFilter ?? "")"
+                                        ValueChanged="OnPeriodeUserFilterChanged"
+                                        Options="@PeriodeUserSelectOptions()" />
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--primary" @onclick="OnAddPeriode">
+                            <i class="bi bi-plus-circle"></i> Nouvelle période
+                        </button>
+                    </div>
+                </div>
+
+                @if (_periodeLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!_periodeAudits.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty"><i class="bi bi-calendar-x"></i><p>Aucune période définie.</p></div>
+                    </div>
+                }
+                else if (!periodePageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty"><i class="bi bi-search"></i><p>Aucune période ne correspond à votre recherche.</p></div>
+                    </div>
+                }
+                else
+                {
+                    <div class="d-flex flex-column gap-3">
+                        @foreach (var pa in periodePageItems)
+                        {
+                            var p = pa.Periode;
+                            var today = DateTime.Today;
+                            bool isExpired = p.Activated == true && p.ToDate.HasValue && p.ToDate.Value.Date < today;
+                            bool isActive = p.Activated == true && !isExpired;
+                            var badgeCls = isActive ? "aw-badge--brand" : isExpired ? "aw-badge--accent" : "aw-badge--muted";
+                            var badgeLabel = isActive ? "Active" : isExpired ? "Expirée" : "Clôturée";
+                            var badgeIcon = isActive ? "bi-check-circle-fill" : isExpired ? "bi-exclamation-circle-fill" : "bi-x-circle-fill";
+                            var solde = pa.PayTotal - pa.VersTotal;
+
+                            <article class="aw-ref-card">
+                                <div class="aw-ref-card__head">
+                                    <div style="min-width:0;">
+                                        <h3 class="aw-ref-card__title">
+                                            <span class="aw-badge aw-badge--muted" style="font-weight:700;">#@p.Id</span>
+                                            @(p.Comment ?? "Période sans description")
+                                        </h3>
+                                        <span class="aw-ref-card__meta">
+                                            <i class="bi bi-calendar3" aria-hidden="true"></i>
+                                            @(p.FromDate?.ToString("dd/MM/yyyy") ?? "—") → @(p.ToDate?.ToString("dd/MM/yyyy") ?? "—")
+                                            @if (pa.Duree > 0)
+                                            {
+                                                <text> · @pa.Duree j</text>
+                                            }
+                                            · <i class="bi bi-person" aria-hidden="true"></i> @(p.UserLogin ?? "—")
+                                        </span>
+                                    </div>
+                                    <span class="aw-badge @badgeCls"><i class="bi @badgeIcon" aria-hidden="true"></i>@badgeLabel</span>
+                                </div>
+                                <div class="aw-ref-card__body">
+                                    <div class="aw-dash-grid aw-dash-grid--2" style="margin-top:0;">
+                                        <div class="aw-settings__card">
+                                            <div class="aw-settings__row">
+                                                <div class="aw-settings__meta">
+                                                    <p class="aw-settings__label"><i class="bi bi-receipt" aria-hidden="true"></i> Factures</p>
+                                                    <p class="aw-settings__hint">Total : <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="pa.FactTotal" Taux="_displayTaux" Format="N0" /></p>
+                                                </div>
+                                                <span class="aw-dash-summary__value">@pa.FactCount</span>
+                                            </div>
+                                        </div>
+                                        <div class="aw-settings__card">
+                                            <div class="aw-settings__row">
+                                                <div class="aw-settings__meta">
+                                                    <p class="aw-settings__label"><i class="bi bi-cash-coin" aria-hidden="true"></i> Paiements</p>
+                                                    <p class="aw-settings__hint">Encaissé : <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="pa.PayTotal" Taux="_displayTaux" Format="N0" /></p>
+                                                </div>
+                                                <span class="aw-dash-summary__value">@pa.PayCount</span>
+                                            </div>
+                                        </div>
+                                        <div class="aw-settings__card">
+                                            <div class="aw-settings__row">
+                                                <div class="aw-settings__meta">
+                                                    <p class="aw-settings__label"><i class="bi bi-bank" aria-hidden="true"></i> Versements</p>
+                                                    <p class="aw-settings__hint">Montant : <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="pa.VersTotal" Taux="_displayTaux" Format="N0" /></p>
+                                                </div>
+                                                <span class="aw-dash-summary__value">@pa.VersCount</span>
+                                            </div>
+                                        </div>
+                                        <div class="aw-settings__card">
+                                            <div class="aw-settings__row">
+                                                <div class="aw-settings__meta">
+                                                    <p class="aw-settings__label"><i class="bi bi-calculator" aria-hidden="true"></i> Solde caisse</p>
+                                                    <p class="aw-settings__hint">Encaissé − Versé</p>
+                                                </div>
+                                                <span class="aw-dash-summary__value" style="@(solde < 0 ? "color:var(--aw-danger);" : null)">
+                                                    <CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="solde" Taux="_displayTaux" Format="N0" />
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style="display:flex;flex-wrap:wrap;gap:0.4rem;padding:0.55rem 0.15rem 0.1rem;align-items:center;">
+                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm"
+                                                @onclick="@(() => ToggleActivated(p))"
+                                                title="@(isActive ? "Clôturer la période" : "Activer la période")">
+                                            <i class="bi @(isActive ? "bi-lock" : "bi-unlock")"></i>
+                                            @(isActive ? "Clôturer" : "Activer")
+                                        </button>
+                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="@(() => OnEditPeriode(p))">
+                                            <i class="bi bi-pencil"></i> Modifier
+                                        </button>
+                                        <button type="button" class="aw-btn aw-btn--danger aw-btn--sm aw-btn--icon" style="margin-left:auto;"
+                                                @onclick="@(() => OnDeletePeriode(p))" title="Supprimer cette période">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </article>
+                        }
+                    </div>
+                    <AwPager TotalCount="_periodeAuditsFiltered.Count"
+                             Page="_periodePage" PageSize="_periodePageSize"
+                             ItemLabel="période"
+                             PageChanged="SetPeriodePage" PageSizeChanged="SetPeriodePageSize" />
+                }
+            }
+
+            @* ══════════════════ VERSEMENTS ══════════════════ *@
+            @if (_tab == 4)
+            {
+                var versPageItems = PageOf(_versementFiltered, _versPage, _versPageSize).ToList();
+                var versAcceptes = _versementData.Where(v => v.Statut == "Accepté").ToList();
+                var versEnAttente = _versementData.Where(v => v.Statut != "Accepté" && v.Statut != "Rejeté").ToList();
+                var versRejetes = _versementData.Where(v => v.Statut == "Rejeté").ToList();
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search"
+                               placeholder="Rechercher (description, déposant, commentaire, opérateur…)"
+                               aria-label="Rechercher un versement"
+                               @bind="_versSearch"
+                               @bind:event="oninput"
+                               @bind:after="ApplyVersementFilter" />
+                    </div>
+                    <div class="aw-actionbar__filters">
+                        <AwDateRange AriaLabel="Période des versements"
+                                     PersistKey="admin.versements"
+                                     From="_versDateFrom"
+                                     To="_versDateTo"
+                                     FromChanged="@(v => _versDateFrom = v)"
+                                     ToChanged="@(v => _versDateTo = v)"
+                                     Changed="LoadVersements" />
+                        <AwSearchSelect AriaLabel="Origine"
+                                        Placeholder="Origine"
+                                        Searchable="false"
+                                        Value="@(_versStatutFilter ?? "")"
+                                        ValueChanged="OnVersStatutFilterChanged"
+                                        Options="@VersOrigineSelectOptions()" />
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--ghost" title="Filtrer" @onclick="LoadVersements">
+                            <i class="bi bi-funnel"></i>
+                        </button>
+                        <button type="button" class="aw-btn aw-btn--primary" @onclick="OnAddVersement">
+                            <i class="bi bi-plus-circle"></i> Ajouter
+                        </button>
+                    </div>
+                </div>
+
+                @if (_pendingClotures.Any())
+                {
+                    <article class="aw-ref-card">
+                        <div class="aw-ref-card__head">
+                            <h3 class="aw-ref-card__title">
+                                <i class="bi bi-hourglass-split" aria-hidden="true"></i>
+                                Clôtures en attente (@_pendingClotures.Count)
+                            </h3>
+                            <span class="aw-ref-card__meta">Bloque les ventes du vendeur tant qu'elles ne sont pas validées</span>
+                        </div>
+                        <div class="aw-ref-card__body" style="padding:0;">
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Vendeur</th>
+                                            <th>Localisation</th>
+                                            <th>Montant</th>
+                                            <th>Ventes</th>
+                                            <th>Destination</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var item in _pendingClotures)
+                                        {
+                                            <tr>
+                                                <td>
+                                                    <span class="aw-table__title">@item.DateCloture.ToString("dd/MM/yyyy")</span>
+                                                    <span class="aw-table__meta">@item.HeureCloture.ToString("HH:mm")</span>
+                                                </td>
+                                                <td><i class="bi bi-person-circle" aria-hidden="true"></i> @item.UserLogin</td>
+                                                <td>@(item.Localisation?.DescriptionLocalisation ?? "—")</td>
+                                                <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="item.Montant" Taux="_displayTaux" /></td>
+                                                <td>@item.NombreOperations</td>
+                                                <td>@item.ModeVersement</td>
+                                                <td>
+                                                    @if (CanModerateAdminCloture(item))
+                                                    {
+                                                        <div style="display:flex;gap:0.25rem;">
+                                                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Approuver"
+                                                                    @onclick="@(() => OnApprouverClotureAdmin(item))">
+                                                                <i class="bi bi-check-circle" style="color:var(--aw-brand);"></i>
+                                                            </button>
+                                                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Rejeter"
+                                                                    @onclick="@(() => OnRejeterClotureAdmin(item))">
+                                                                <i class="bi bi-x-circle" style="color:var(--aw-danger);"></i>
+                                                            </button>
+                                                        </div>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="aw-table__meta">Votre propre clôture</span>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </article>
+                }
+
+                @if (_versementData.Any())
+                {
+                    <section class="aw-overview" aria-label="Vue d'ensemble versements">
+                        <div class="aw-overview__top">
+                            <div class="aw-overview__intro">
+                                <h2 class="aw-overview__title">Versements caisse</h2>
+                                <p class="aw-overview__lead">Après approbation clôture ou saisie manuelle.</p>
+                            </div>
+                            <div class="aw-overview__cover aw-overview__cover--brand">
+                                <span class="aw-overview__cover-value">@versAcceptes.Count</span>
+                                <span class="aw-overview__cover-label">accepté(s)</span>
+                            </div>
+                        </div>
+                        <div class="aw-overview__metrics">
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-check-circle"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Acceptés</span>
+                                    <span class="aw-overview__metric-value">@versAcceptes.Count</span>
+                                    <span class="aw-overview__metric-hint"><CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Dashboard" Amount="@versAcceptes.Sum(VersementUsdAmount)" Taux="_displayTaux" /></span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-hourglass-split"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">En attente</span>
+                                    <span class="aw-overview__metric-value">@versEnAttente.Count</span>
+                                    <span class="aw-overview__metric-hint"><CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Dashboard" Amount="@versEnAttente.Sum(VersementUsdAmount)" Taux="_displayTaux" /></span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-x-circle"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Rejetés</span>
+                                    <span class="aw-overview__metric-value">@versRejetes.Count</span>
+                                    <span class="aw-overview__metric-hint"><CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Dashboard" Amount="@versRejetes.Sum(VersementUsdAmount)" Taux="_displayTaux" /></span>
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+                }
+
+                @if (_versementLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!versPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty"><i class="bi bi-bank"></i><p>Aucun versement pour ces filtres.</p></div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>N°</th>
+                                        <th>Origine</th>
+                                        <th>Description</th>
+                                        <th>Montant</th>
+                                        <th>Déposeur</th>
+                                        <th>Statut</th>
+                                        <th>Date</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in versPageItems)
+                                    {
+                                        <tr style="cursor:pointer;" @onclick="@(() => OnVersementRowClick(item))">
+                                            <td>@item.Id</td>
+                                            <td>
+                                                @if (item.VersementId.HasValue)
+                                                {
+                                                    <span class="aw-badge aw-badge--primary">Clôture N°@item.VersementId</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-badge aw-badge--muted">Manuel</span>
+                                                }
+                                            </td>
+                                            <td>@item.Description</td>
+                                            <td class="aw-table__num"><VersementMoneyCell Item="item" FallbackTaux="_displayTaux" /></td>
+                                            <td><i class="bi bi-person-circle" aria-hidden="true"></i> @item.Depositeur</td>
+                                            <td>
+                                                @switch (item.Statut)
+                                                {
+                                                    case "Accepté":
+                                                        <span class="aw-badge aw-badge--brand"><i class="bi bi-check-circle" aria-hidden="true"></i>Accepté</span>
+                                                        break;
+                                                    case "Rejeté":
+                                                        <span class="aw-badge aw-badge--danger"><i class="bi bi-x-circle" aria-hidden="true"></i>Rejeté</span>
+                                                        break;
+                                                    default:
+                                                        <span class="aw-badge aw-badge--accent"><i class="bi bi-hourglass-split" aria-hidden="true"></i>En attente</span>
+                                                        break;
+                                                }
+                                            </td>
+                                            <td><span class="aw-table__meta">@(item.CreationDate?.ToString("dd/MM/yyyy") ?? "—")</span></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="_versementFiltered.Count"
+                                 Page="_versPage" PageSize="_versPageSize"
+                                 ItemLabel="versement"
+                                 PageChanged="SetVersPage" PageSizeChanged="SetVersPageSize" />
+                    </div>
+                }
+            }
+
+            @* ══════════════════ GESTION FACTURES ══════════════════ *@
+            @if (_tab == 5)
+            {
+                var factPageItems = PageOf(_factAdminFiltered, _factAdminPage, _factAdminPageSize).ToList();
+                var paid = _factAdminData.Where(f => f.Status == 2).ToList();
+                var draft = _factAdminData.Where(f => f.Status == 0).ToList();
+                var paidNet = paid.Sum(f => f.TotalApresReduction ?? f.Total ?? 0);
+
+                @if (!_factAdminLoading && _factAdminData.Any())
+                {
+                    <section class="aw-overview" aria-label="Vue d'ensemble factures">
+                        <div class="aw-overview__top">
+                            <div class="aw-overview__intro">
+                                <h2 class="aw-overview__title">Gestion factures</h2>
+                                <p class="aw-overview__lead">Consultation, filtres et suppression des factures.</p>
+                            </div>
+                            <div class="aw-overview__cover aw-overview__cover--brand">
+                                <span class="aw-overview__cover-value">@_factAdminData.Count</span>
+                                <span class="aw-overview__cover-label">facture(s)</span>
+                            </div>
+                        </div>
+                        <div class="aw-overview__metrics">
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-check-circle"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Payées</span>
+                                    <span class="aw-overview__metric-value">@paid.Count</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-clock"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Brouillons</span>
+                                    <span class="aw-overview__metric-value">@draft.Count</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-cash-stack"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Montant encaissé</span>
+                                    <span class="aw-overview__metric-value" style="font-size:0.95rem;"><CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="paidNet" Taux="_displayTaux" Format="N0" /></span>
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+                }
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search"
+                               placeholder="Rechercher (n° facture, client, téléphone, article, opérateur…)"
+                               aria-label="Rechercher une facture"
+                               @bind="_factAdminSearch"
+                               @bind:event="oninput"
+                               @bind:after="ApplyFactAdminFilter" />
+                    </div>
+                    <div class="aw-actionbar__filters">
+                        <AwDateRange AriaLabel="Période des factures"
+                                     PersistKey="admin.factures"
+                                     From="_factDateFrom"
+                                     To="_factDateTo"
+                                     FromChanged="@(v => _factDateFrom = v)"
+                                     ToChanged="@(v => _factDateTo = v)"
+                                     Changed="LoadAdminFactures" />
+                        <AwSearchSelect AriaLabel="Statut facture"
+                                        Placeholder="Statut"
+                                        Searchable="false"
+                                        Value="@_factStatusFilter.ToString()"
+                                        ValueChanged="OnFactStatusFilterChanged"
+                                        Options="@FactStatusSelectOptions()" />
+                        <AwSearchSelect AriaLabel="Opérateur"
+                                        Placeholder="Opérateur"
+                                        Value="@(_factAdminUserFilter ?? "")"
+                                        ValueChanged="OnFactAdminUserFilterChanged"
+                                        Options="@AdminFactUserSelectOptions()" />
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--ghost" title="Filtrer" @onclick="LoadAdminFactures">
+                            <i class="bi bi-funnel"></i>
+                        </button>
+                    </div>
+                </div>
+
+                @if (_factAdminLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!factPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty"><i class="bi bi-receipt"></i><p>Aucune facture pour ces filtres.</p></div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>N° / Date</th>
+                                        <th>Client</th>
+                                        <th>Montant</th>
+                                        <th>Taux</th>
+                                        <th>Statut</th>
+                                        <th>Opérateur</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in factPageItems)
+                                    {
+                                        var taux = item.Taux > 0 ? item.Taux : _displayTaux;
+                                        var (lbl, badgeCls, icon) = item.Status switch {
+                                            0 => ("Brouillon", "aw-badge--accent", "bi-pencil"),
+                                            1 => ("Validée", "aw-badge--primary", "bi-check"),
+                                            2 => ("Payée", "aw-badge--brand", "bi-check-circle"),
+                                            3 => ("Annulée", "aw-badge--danger", "bi-x-circle"),
+                                            _ => ("Inconnu", "aw-badge--muted", "bi-question")
+                                        };
+                                        <tr>
+                                            <td>
+                                                <span class="aw-table__title">#@item.Id</span>
+                                                <span class="aw-table__meta">@item.Date.ToString("dd/MM/yyyy")</span>
+                                            </td>
+                                            <td>
+                                                <span class="aw-table__title">@item.DescriptionName</span>
+                                                @if (!string.IsNullOrWhiteSpace(item.Telephone))
+                                                {
+                                                    <span class="aw-table__meta">@item.Telephone</span>
+                                                }
+                                            </td>
+                                            <td class="aw-table__num">
+                                                <CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="(item.TotalApresReduction ?? item.Total ?? 0)" Taux="taux" />
+                                                @if ((item.Reduction ?? 0) > 0)
+                                                {
+                                                    <span class="aw-table__meta text-decoration-line-through">
+                                                        <CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="(item.Total ?? 0)" Taux="taux" />
+                                                    </span>
+                                                }
+                                            </td>
+                                            <td><span class="aw-badge aw-badge--muted">@item.Taux.ToString("N0")</span></td>
+                                            <td><span class="aw-badge @badgeCls"><i class="bi @icon" aria-hidden="true"></i>@lbl</span></td>
+                                            <td><i class="bi bi-person" aria-hidden="true"></i> @item.User</td>
+                                            <td>
+                                                <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Supprimer"
+                                                        @onclick="@(() => OnDeleteAdminFacture(item))">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="_factAdminFiltered.Count"
+                                 Page="_factAdminPage" PageSize="_factAdminPageSize"
+                                 ItemLabel="facture"
+                                 PageChanged="SetFactAdminPage" PageSizeChanged="SetFactAdminPageSize" />
+                    </div>
+                }
+            }
+
+            @* ══════════════════ GESTION LIVRAISONS ══════════════════ *@
+            @if (_tab == 6)
+            {
+                var livPageItems = PageOf(_adminLivraisonsFiltered, _livAdminPage, _livAdminPageSize).ToList();
+                var cmdPageItems = PageOf(_adminCommandesFiltered, _cmdAdminPage, _cmdAdminPageSize).ToList();
+                var livTotal = _adminLivraisonsFiltered.Count;
+                var cmdTotal = _adminCommandesFiltered.Count;
+                var cmdSolde = _adminCommandes.Sum(c => c.MontantRest);
+                var cmdSoldeAll = _adminCommandes.Sum(c => c.MontantTotal);
+
+                @if (_adminLivraisons.Any() || _adminCommandes.Any())
+                {
+                    <section class="aw-overview" aria-label="Vue d'ensemble livraisons">
+                        <div class="aw-overview__top">
+                            <div class="aw-overview__intro">
+                                <h2 class="aw-overview__title">Livraisons &amp; commandes</h2>
+                                <p class="aw-overview__lead">Sur la période sélectionnée.</p>
+                            </div>
+                            <div class="@($"aw-overview__cover {(cmdSolde > 0 ? "aw-overview__cover--accent" : "aw-overview__cover--brand")}")">
+                                <span class="aw-overview__cover-value">@livTotal</span>
+                                <span class="aw-overview__cover-label">livraison(s)</span>
+                            </div>
+                        </div>
+                        <div class="aw-overview__metrics">
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-truck"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Livraisons</span>
+                                    <span class="aw-overview__metric-value">@livTotal</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-cart-check"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Commandes</span>
+                                    <span class="aw-overview__metric-value">@cmdTotal</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon @(cmdSolde > 0 ? "aw-overview__icon--accent" : "aw-overview__icon--brand")" aria-hidden="true"><i class="bi bi-cash"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Reste à payer</span>
+                                    <span class="aw-overview__metric-value" style="font-size:0.95rem;">
+                                        <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Business" Amount="cmdSolde" />
+                                        <span class="aw-overview__metric-unit">/ <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.Business" Amount="cmdSoldeAll" /></span>
+                                    </span>
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+                }
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search"
+                               placeholder="Rechercher livraison (n°, client, porteur, opérateur…)"
+                               aria-label="Rechercher une livraison"
+                               @bind="_livAdminSearch"
+                               @bind:event="oninput"
+                               @bind:after="ApplyLivAdminFilters" />
+                    </div>
+                    <div class="aw-actionbar__filters">
+                        <AwDateRange AriaLabel="Période livraisons / commandes"
+                                     PersistKey="admin.livraisons"
+                                     From="_livCmdDateFrom"
+                                     To="_livCmdDateTo"
+                                     FromChanged="@(v => _livCmdDateFrom = v)"
+                                     ToChanged="@(v => _livCmdDateTo = v)"
+                                     Changed="LoadLivraisonCommandes" />
+                        <AwSearchSelect AriaLabel="Opérateur livraison"
+                                        Placeholder="Opérateur"
+                                        Value="@(_livAdminUserFilter ?? "")"
+                                        ValueChanged="OnLivAdminUserFilterChanged"
+                                        Options="@LivAdminUserSelectOptions()" />
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--ghost" title="Filtrer" @onclick="LoadLivraisonCommandes">
+                            <i class="bi bi-funnel"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <h6 class="mb-2 d-flex align-items-center gap-2">
+                    <i class="bi bi-truck text-info"></i> Livraisons
+                    <span class="aw-badge aw-badge--muted">@livTotal</span>
+                </h6>
+
+                @if (_livCmdLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!livPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty"><i class="bi bi-truck"></i><p>Aucune livraison pour ces filtres.</p></div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region mb-3">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>N°</th>
+                                        <th>Porteur</th>
+                                        <th>Client</th>
+                                        <th>Statut</th>
+                                        <th>Date</th>
+                                        <th>Opérateur</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in livPageItems)
+                                    {
+                                        <tr>
+                                            <td>@item.LivraisonId</td>
+                                            <td>
+                                                @if (!string.IsNullOrWhiteSpace(item.Porteur))
+                                                {
+                                                    <span><i class="bi bi-person" aria-hidden="true"></i> @item.Porteur</span>
+                                                }
+                                                else { <span class="aw-table__meta">—</span> }
+                                            </td>
+                                            <td>
+                                                @if (item.Customer != null)
+                                                {
+                                                    <span class="aw-table__title">@item.Customer.CustomerName</span>
+                                                }
+                                                else if (item.ClientId.HasValue)
+                                                {
+                                                    <span class="aw-table__meta">Client #@item.ClientId</span>
+                                                }
+                                                else { <span class="aw-table__meta">—</span> }
+                                            </td>
+                                            <td>
+                                                @switch (item.Status)
+                                                {
+                                                    case 1:
+                                                        <span class="aw-badge aw-badge--brand"><i class="bi bi-check-circle" aria-hidden="true"></i>Livrée</span>
+                                                        break;
+                                                    case 2:
+                                                        <span class="aw-badge aw-badge--danger"><i class="bi bi-x-circle" aria-hidden="true"></i>Annulée</span>
+                                                        break;
+                                                    default:
+                                                        <span class="aw-badge aw-badge--accent"><i class="bi bi-hourglass-split" aria-hidden="true"></i>En cours</span>
+                                                        break;
+                                                }
+                                            </td>
+                                            <td><span class="aw-table__meta">@(item.Date?.ToString("dd/MM/yyyy") ?? "—")</span></td>
+                                            <td><i class="bi bi-person-circle" aria-hidden="true"></i> @item.UserLogin</td>
+                                            <td>
+                                                <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Supprimer"
+                                                        @onclick="@(() => OnDeleteAdminLivraison(item))">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="_adminLivraisonsFiltered.Count"
+                                 Page="_livAdminPage" PageSize="_livAdminPageSize"
+                                 ItemLabel="livraison"
+                                 PageChanged="SetLivAdminPage" PageSizeChanged="SetLivAdminPageSize" />
+                    </div>
+                }
+
+                <h6 class="mb-2 d-flex align-items-center gap-2">
+                    <i class="bi bi-cart-check text-primary"></i> Commandes &amp; paiements
+                    <span class="aw-badge aw-badge--muted">@cmdTotal</span>
+                </h6>
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search"
+                               placeholder="Rechercher commande (n°, description, opérateur…)"
+                               aria-label="Rechercher une commande"
+                               @bind="_cmdAdminSearch"
+                               @bind:event="oninput"
+                               @bind:after="ApplyLivAdminFilters" />
+                    </div>
+                    <div class="aw-actionbar__filters">
+                        <AwSearchSelect AriaLabel="Client"
+                                        Placeholder="Client"
+                                        Value="@(_cmdAdminClientFilter ?? "")"
+                                        ValueChanged="OnCmdAdminClientFilterChanged"
+                                        Options="@CmdAdminClientSelectOptions()" />
+                    </div>
+                </div>
+
+                @if (_livCmdLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!cmdPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty"><i class="bi bi-cart"></i><p>Aucune commande pour ces filtres.</p></div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>N° Cmd</th>
+                                        <th>Description</th>
+                                        <th>Total</th>
+                                        <th>Payé</th>
+                                        <th>Reste</th>
+                                        <th>Date</th>
+                                        <th>Opérateur</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in cmdPageItems)
+                                    {
+                                        <tr>
+                                            <td>@item.CommandeId</td>
+                                            <td>@item.CommandeDescription</td>
+                                            <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.Business" Amount="item.MontantTotal" /></td>
+                                            <td class="aw-table__num"><CurrencyText Mode="@CurrencyText.DisplayMode.Business" Amount="item.MontantPaye" /></td>
+                                            <td>
+                                                <span class="aw-badge @(item.MontantRest == 0 ? "aw-badge--brand" : "aw-badge--accent")">
+                                                    <CurrencyText Mode="@CurrencyText.DisplayMode.Business" Amount="item.MontantRest" />
+                                                </span>
+                                            </td>
+                                            <td><span class="aw-table__meta">@(item.CreationDate?.ToString("dd/MM/yyyy") ?? "—")</span></td>
+                                            <td><i class="bi bi-person-circle" aria-hidden="true"></i> @item.UserLogin</td>
+                                            <td>
+                                                <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Supprimer"
+                                                        @onclick="@(() => OnDeleteAdminCommande(item))">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="_adminCommandesFiltered.Count"
+                                 Page="_cmdAdminPage" PageSize="_cmdAdminPageSize"
+                                 ItemLabel="commande"
+                                 PageChanged="SetCmdAdminPage" PageSizeChanged="SetCmdAdminPageSize" />
+                    </div>
+                }
+            }
+
+            @* ══════════════════ LOCALISATIONS ══════════════════ *@
+            @if (_tab == 7)
+            {
+                var locPageItems = PageOf(_localisationsFiltered, _locPage, _locPageSize).ToList();
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search"
+                               placeholder="Rechercher (nom, ID…)"
+                               aria-label="Rechercher une localisation"
+                               @bind="_locSearch"
+                               @bind:event="oninput"
+                               @bind:after="ApplyLocalisationFilter" />
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--primary" @onclick="OnAddLocalisation">
+                            <i class="bi bi-plus-lg"></i> Ajouter
+                        </button>
+                    </div>
+                </div>
+
+                @if (_localisationsLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!_localisations.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty"><i class="bi bi-geo-alt"></i><p>Aucune localisation configurée.</p></div>
+                    </div>
+                }
+                else if (!locPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty"><i class="bi bi-search"></i><p>Aucune localisation ne correspond à votre recherche.</p></div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-dash-grid aw-dash-grid--3" style="margin-top:0;">
+                        @foreach (var loc in locPageItems)
+                        {
+                            var userCount = loc.UserLocalisations?.Count ?? 0;
+                            <article class="aw-ref-card" style="cursor:pointer;" @onclick="@(() => OnViewLocalisation(loc))">
+                                <div class="aw-ref-card__head">
+                                    <div style="min-width:0;">
+                                        <h3 class="aw-ref-card__title">
+                                            <i class="bi bi-geo-alt-fill" aria-hidden="true"></i>
+                                            @loc.DescriptionLocalisation
+                                            @if (loc.IsDepot)
+                                            {
+                                                <span class="aw-badge aw-badge--primary">Dépôt</span>
+                                            }
+                                        </h3>
+                                        <span class="aw-ref-card__meta">ID : @loc.IdLocalisation</span>
+                                    </div>
+                                    <div style="display:inline-flex;gap:0.2rem;" @onclick:stopPropagation="true">
+                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon"
+                                                @onclick="@(() => OnEditLocalisation(loc))" title="Modifier">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <button type="button" class="aw-btn aw-btn--danger aw-btn--sm aw-btn--icon"
+                                                @onclick="@(() => OnDeleteLocalisation(loc))" title="Supprimer">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="aw-ref-card__body" style="padding:0.55rem 0.7rem;">
+                                    <span class="aw-badge @(userCount > 0 ? "aw-badge--brand" : "aw-badge--muted")">
+                                        <i class="bi bi-people" aria-hidden="true"></i>@userCount utilisateur@(userCount > 1 ? "s" : "")
+                                    </span>
+                                </div>
+                            </article>
+                        }
+                    </div>
+                    <AwPager TotalCount="_localisationsFiltered.Count"
+                             Page="_locPage" PageSize="_locPageSize"
+                             ItemLabel="localisation"
+                             PageChanged="SetLocPage" PageSizeChanged="SetLocPageSize" />
+                }
+            }
+
+            @* ══════════════════ LICENCES MODULES ══════════════════ *@
+            @if (_tab == 8)
+            {
+                @if (!_vendorAuthenticated)
+                {
+                    <div class="aw-table-region" style="min-height:280px;">
+                        <div class="aw-empty">
+                            <i class="bi bi-shield-lock"></i>
+                            <p><strong>Section protégée</strong><br />L'accès à la gestion des licences modules requiert le mot de passe vendeur.</p>
+                            <button type="button" class="aw-btn aw-btn--primary" @onclick="OnRequestVendorAccess">
+                                <i class="bi bi-key"></i> Saisir le mot de passe
+                            </button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    var licensePageItems = PageOf(_moduleLicensesFiltered, _licensePage, _licensePageSize).ToList();
+
+                    <div class="aw-actionbar">
+                        <div class="aw-actionbar__search">
+                            <i class="bi bi-search" aria-hidden="true"></i>
+                            <input type="search"
+                                   placeholder="Rechercher (nom, code, description…)"
+                                   aria-label="Rechercher une licence"
+                                   @bind="_licenseSearch"
+                                   @bind:event="oninput"
+                                   @bind:after="ApplyLicenseFilter" />
+                        </div>
+                        <div class="aw-actionbar__actions">
+                            <button type="button" class="aw-btn aw-btn--ghost" @onclick="OnLockVendorAccess" title="Verrouiller l'accès vendeur">
+                                <i class="bi bi-lock"></i> Verrouiller
+                            </button>
+                            <button type="button" class="aw-btn aw-btn--ghost" @onclick="OnChangeVendorPassword" title="Changer le mot de passe vendeur">
+                                <i class="bi bi-key"></i> Changer le mot de passe
+                            </button>
+                        </div>
+                    </div>
+
+                    @if (_moduleLicenses.Any())
+                    {
+                        <section class="aw-overview" aria-label="Vue d'ensemble licences">
+                            <div class="aw-overview__metrics">
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-puzzle"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">Disponibles</span>
+                                        <span class="aw-overview__metric-value">@_moduleLicenses.Count</span>
+                                    </div>
+                                </article>
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-check-circle"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">Actifs</span>
+                                        <span class="aw-overview__metric-value">@_moduleLicenses.Count(m => m.IsActive)</span>
+                                    </div>
+                                </article>
+                                <article class="aw-overview__metric">
+                                    <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-pause-circle"></i></span>
+                                    <div class="aw-overview__metric-body">
+                                        <span class="aw-overview__metric-label">Inactifs</span>
+                                        <span class="aw-overview__metric-value">@_moduleLicenses.Count(m => !m.IsActive)</span>
+                                    </div>
+                                </article>
+                            </div>
+                        </section>
+                    }
+
+                    @if (_moduleLoading)
+                    {
+                        <div class="aw-table-region">
+                            <AwSkeleton Variant="table" Rows="5" />
+                        </div>
+                    }
+                    else if (!_moduleLicenses.Any())
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-empty"><i class="bi bi-puzzle"></i><p>Aucun module configuré.</p></div>
+                        </div>
+                    }
+                    else if (!licensePageItems.Any())
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-empty"><i class="bi bi-search"></i><p>Aucun module ne correspond à votre recherche.</p></div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="aw-dash-grid aw-dash-grid--3" style="margin-top:0;">
+                            @foreach (var mod in licensePageItems)
+                            {
+                                <article class="aw-ref-card">
+                                    <div class="aw-ref-card__head">
+                                        <h3 class="aw-ref-card__title">
+                                            <i class="bi @(mod.Icon ?? "bi-puzzle")" aria-hidden="true"></i>
+                                            @mod.ModuleName
+                                        </h3>
+                                        <div style="display:inline-flex;align-items:center;gap:0.35rem;">
+                                            @if (mod.IsCore)
+                                            {
+                                                <span class="aw-badge aw-badge--primary">CORE</span>
+                                            }
+                                            <span class="aw-badge @(mod.IsActive ? "aw-badge--brand" : "aw-badge--muted")">
+                                                @(mod.IsActive ? "Actif" : "Inactif")
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div class="aw-ref-card__body" style="padding:0;">
+                                        <div class="aw-settings__card" style="border:none;box-shadow:none;border-radius:0;">
+                                            <div class="aw-settings__row aw-settings__row--stack">
+                                                <div class="aw-settings__meta">
+                                                    <p class="aw-settings__hint" style="margin:0;">@(string.IsNullOrWhiteSpace(mod.Description) ? "—" : mod.Description)</p>
+                                                </div>
+                                            </div>
+                                            <div class="aw-settings__row">
+                                                <div class="aw-settings__meta">
+                                                    <p class="aw-settings__label">Prix de référence</p>
+                                                </div>
+                                                @if (mod.IsCore)
+                                                {
+                                                    <span class="aw-badge aw-badge--brand">Inclus</span>
+                                                }
+                                                else if (mod.Price.HasValue)
+                                                {
+                                                    <span class="aw-ref-card__meta">@mod.Price.Value.ToString("N2") €</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-ref-card__meta">Non défini</span>
+                                                }
+                                            </div>
+                                            @if (mod.ExpiresAt.HasValue)
+                                            {
+                                                <div class="aw-settings__row">
+                                                    <div class="aw-settings__meta">
+                                                        <p class="aw-settings__label">Expiration</p>
+                                                    </div>
+                                                    <span class="aw-badge @(mod.ExpiresAt.Value < DateTime.Now ? "aw-badge--danger" : "aw-badge--muted")">
+                                                        @mod.ExpiresAt.Value.ToString("dd/MM/yyyy")
+                                                    </span>
+                                                </div>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(mod.LicenseNotes))
+                                            {
+                                                <div class="aw-settings__row aw-settings__row--stack">
+                                                    <p class="aw-settings__hint" style="margin:0;font-style:italic;">@mod.LicenseNotes</p>
+                                                </div>
+                                            }
+                                            <div class="aw-settings__row">
+                                                <div class="form-check form-switch mb-0">
+                                                    <input class="form-check-input" type="checkbox"
+                                                           checked="@mod.IsActive"
+                                                           disabled="@mod.IsCore"
+                                                           @onchange="@(async e => await OnToggleModule(mod, (bool)(e.Value ?? false)))"
+                                                           id="mod-toggle-@mod.Id" />
+                                                    <label class="form-check-label small" for="mod-toggle-@mod.Id">
+                                                        @(mod.IsCore ? "Toujours actif" : (mod.IsActive ? "Désactiver" : "Activer"))
+                                                    </label>
+                                                </div>
+                                                <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon"
+                                                        @onclick="@(() => OnEditModuleLicense(mod))"
+                                                        title="Modifier les détails de licence">
+                                                    <i class="bi bi-pencil"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </article>
+                            }
+                        </div>
+                        <AwPager TotalCount="_moduleLicensesFiltered.Count"
+                                 Page="_licensePage" PageSize="_licensePageSize"
+                                 ItemLabel="module"
+                                 PageChanged="SetLicensePage" PageSizeChanged="SetLicensePageSize" />
+                    }
+                }
+            }
+
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /* ── Hub ── */
+    int _tab;
+    bool _loaded;
+    bool _isAdministrator;
+    bool _canAccessAdmin;
+    readonly bool[] _adminTabLoaded = new bool[9];
+
+    /* ── Utilisateurs ── */
+    List<User> _userData = new();
+    List<User> _userFiltered = new();
+    string _userSearch = "";
+    string? _userRoleFilter;
+    string? _userStatusFilter;
+    Dictionary<string, List<string>> _userLocalisationsMap = new();
+    bool _userLoading;
+    string? _selectedUserLogin;
+    int? _selectedUserRoleId;
+    List<RolePermissionRow> _userAccessRows = new();
+#pragma warning disable CS0414
+    bool _userAccessLoading;
+#pragma warning restore CS0414
+
+    /* ── Rôles & permissions (legacy panel) ── */
+    List<Role> _roleData = new();
+    List<RolePermissionRow> _rolePermissionRows = new();
+    int? _selectedRoleId;
+#pragma warning disable CS0414
+    bool _rolePermissionLoading;
+#pragma warning restore CS0414
+
+    /* ── Référentiel activités ── */
+    List<Fonction> _fonctionData = new();
+    List<Activity> _activityData = new();
+#pragma warning disable CS0414
+    bool _activityLoading;
+#pragma warning restore CS0414
+    int? _newActivityFonctionId;
+    string _newActivityCode = string.Empty;
+    string _newActivityLabel = string.Empty;
+
+    /* ── Activités utilisateur ── */
+    string? _selectedActivityUserLogin;
+    int? _activityFilterFonctionId = null;
+#pragma warning disable CS0414
+    bool _userActivitiesLoading;
+#pragma warning restore CS0414
+    List<UserActivityRow> _allUserActivityRows = new();
+    List<UserActivityRow> _userActivityRows = new();
+
+    /* ── Licences modules ── */
+    IList<ModuleLicense> _moduleLicenses = new List<ModuleLicense>();
+    IList<ModuleLicense> _moduleLicensesFiltered = new List<ModuleLicense>();
+    string _licenseSearch = "";
+    bool _moduleLoading;
+    bool _vendorAuthenticated;
+
+    /* ── Fournisseurs ── */
+    List<Supplier> _supplierData = new();
+    List<Supplier> _supplierFiltered = new();
+    string _supplierSearch = "";
+    bool _supplierLoading;
+
+    /* ── Taux ── */
+    List<Taux> _tauxData = new();
+    List<Taux> _tauxFiltered = new();
+    string _tauxSearch = "";
+    string? _tauxUserFilter;
+    bool _tauxLoading;
+    decimal _displayTaux;
+
+    /* ── Périodes ── */
+    List<Periode> _periodeData = new();
+    List<PeriodeAudit> _periodeAudits = new();
+    List<PeriodeAudit> _periodeAuditsFiltered = new();
+    string _periodeSearch = "";
+    string? _periodeUserFilter;
+    bool _periodeLoading;
+
+    /* ── Versements ── */
+    List<ApproExpense> _versementData = new();
+    List<ApproExpense> _versementFiltered = new();
+    List<Versement> _pendingClotures = new();
+    string _adminLogin = "";
+    string _versSearch = "";
+    string? _versStatutFilter;
+    bool _versementLoading;
+    DateTime? _versDateFrom = new DateTime(DateTime.Today.Year, 1, 1);
+    DateTime? _versDateTo = DateTime.Today;
+
+    /* ── Gestion factures ── */
+    List<Fact> _factAdminData = new();
+    List<Fact> _factAdminFiltered = new();
+    string _factAdminSearch = "";
+    string? _factAdminUserFilter;
+    bool _factAdminLoading;
+    DateTime? _factDateFrom = new DateTime(DateTime.Today.Year, 1, 1);
+    DateTime? _factDateTo = DateTime.Today;
+    int _factStatusFilter = -1; // -1 = tous
+
+    /* ── Gestion livraisons & commandes ── */
+    List<Livraison> _adminLivraisons = new();
+    List<Livraison> _adminLivraisonsFiltered = new();
+    List<Commande> _adminCommandes = new();
+    List<Commande> _adminCommandesFiltered = new();
+    string _livAdminSearch = "";
+    string? _livAdminUserFilter;
+    string _cmdAdminSearch = "";
+    string? _cmdAdminClientFilter;
+    bool _livCmdLoading;
+    DateTime? _livCmdDateFrom = new DateTime(DateTime.Today.Year, 1, 1);
+    DateTime? _livCmdDateTo = DateTime.Today;
+
+    /* ── Localisations ── */
+    List<Localisation> _localisations = new();
+    List<Localisation> _localisationsFiltered = new();
+    string _locSearch = "";
+    bool _localisationsLoading;
+
+    /* ── Pagination ── */
+    static readonly int[] PageSizeChoices = [10, 25, 50, 100];
+    int _userPage = 1, _userPageSize = 25;
+    int _supplierPage = 1, _supplierPageSize = 25;
+    int _tauxPage = 1, _tauxPageSize = 25;
+    int _periodePage = 1, _periodePageSize = 25;
+    int _versPage = 1, _versPageSize = 25;
+    int _factAdminPage = 1, _factAdminPageSize = 25;
+    int _livAdminPage = 1, _livAdminPageSize = 25;
+    int _cmdAdminPage = 1, _cmdAdminPageSize = 25;
+    int _locPage = 1, _locPageSize = 25;
+    int _licensePage = 1, _licensePageSize = 25;
+
+    /* ════════════════════ FILTRES CLIENT ════════════════════ */
+
+    string FilterCountText(int filtered, int total) =>
+        total > 0 ? $"{filtered} affiché{(filtered > 1 ? "s" : "")} sur {total}" : "";
+    IList<T> PageOf<T>(IList<T> items, int page, int pageSize) =>
+        items.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+    int PageCount(int total, int pageSize) =>
+        total <= 0 ? 1 : (int)Math.Ceiling(total / (double)Math.Max(1, pageSize));
+
+    void SetUserPage(int page) => _userPage = Math.Clamp(page, 1, PageCount(_userFiltered.Count, _userPageSize));
+    void SetUserPageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _userPageSize = size; _userPage = 1; }
+    void SetSupplierPage(int page) => _supplierPage = Math.Clamp(page, 1, PageCount(_supplierFiltered.Count, _supplierPageSize));
+    void SetSupplierPageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _supplierPageSize = size; _supplierPage = 1; }
+    void SetTauxPage(int page) => _tauxPage = Math.Clamp(page, 1, PageCount(_tauxFiltered.Count, _tauxPageSize));
+    void SetTauxPageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _tauxPageSize = size; _tauxPage = 1; }
+    void SetPeriodePage(int page) => _periodePage = Math.Clamp(page, 1, PageCount(_periodeAuditsFiltered.Count, _periodePageSize));
+    void SetPeriodePageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _periodePageSize = size; _periodePage = 1; }
+    void SetVersPage(int page) => _versPage = Math.Clamp(page, 1, PageCount(_versementFiltered.Count, _versPageSize));
+    void SetVersPageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _versPageSize = size; _versPage = 1; }
+    void SetFactAdminPage(int page) => _factAdminPage = Math.Clamp(page, 1, PageCount(_factAdminFiltered.Count, _factAdminPageSize));
+    void SetFactAdminPageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _factAdminPageSize = size; _factAdminPage = 1; }
+    void SetLivAdminPage(int page) => _livAdminPage = Math.Clamp(page, 1, PageCount(_adminLivraisonsFiltered.Count, _livAdminPageSize));
+    void SetLivAdminPageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _livAdminPageSize = size; _livAdminPage = 1; }
+    void SetCmdAdminPage(int page) => _cmdAdminPage = Math.Clamp(page, 1, PageCount(_adminCommandesFiltered.Count, _cmdAdminPageSize));
+    void SetCmdAdminPageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _cmdAdminPageSize = size; _cmdAdminPage = 1; }
+    void SetLocPage(int page) => _locPage = Math.Clamp(page, 1, PageCount(_localisationsFiltered.Count, _locPageSize));
+    void SetLocPageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _locPageSize = size; _locPage = 1; }
+    void SetLicensePage(int page) => _licensePage = Math.Clamp(page, 1, PageCount(_moduleLicensesFiltered.Count, _licensePageSize));
+    void SetLicensePageSize(int size) { if (!PageSizeChoices.Contains(size)) return; _licensePageSize = size; _licensePage = 1; }
+
+    Task OnUserRoleFilterChanged(string? v) { _userRoleFilter = string.IsNullOrEmpty(v) ? null : v; ApplyUserFilter(); return Task.CompletedTask; }
+    Task OnUserStatusFilterChanged(string? v) { _userStatusFilter = string.IsNullOrEmpty(v) ? null : v; ApplyUserFilter(); return Task.CompletedTask; }
+    Task OnTauxUserFilterChanged(string? v) { _tauxUserFilter = string.IsNullOrEmpty(v) ? null : v; ApplyTauxFilter(); return Task.CompletedTask; }
+    Task OnPeriodeUserFilterChanged(string? v) { _periodeUserFilter = string.IsNullOrEmpty(v) ? null : v; ApplyPeriodeFilter(); return Task.CompletedTask; }
+    Task OnVersStatutFilterChanged(string? v) { _versStatutFilter = string.IsNullOrEmpty(v) ? null : v; ApplyVersementFilter(); return Task.CompletedTask; }
+    Task OnFactAdminUserFilterChanged(string? v) { _factAdminUserFilter = string.IsNullOrEmpty(v) ? null : v; ApplyFactAdminFilter(); return Task.CompletedTask; }
+    async Task OnFactStatusFilterChanged(string? v)
+    {
+        _factStatusFilter = int.TryParse(v, out var code) ? code : -1;
+        await LoadAdminFactures();
+    }
+    Task OnLivAdminUserFilterChanged(string? v) { _livAdminUserFilter = string.IsNullOrEmpty(v) ? null : v; ApplyLivAdminFilters(); return Task.CompletedTask; }
+    Task OnCmdAdminClientFilterChanged(string? v) { _cmdAdminClientFilter = string.IsNullOrEmpty(v) ? null : v; ApplyLivAdminFilters(); return Task.CompletedTask; }
+
+
+    void ApplyUserFilter()
+    {
+        _userPage = 1;
+        _userFiltered = _userData.Where(u =>
+        {
+            if (!HubFilterHelper.MatchesSearch(_userSearch, u.Login, u.Name, u.Email, u.Role?.DescriptionRole))
+                return false;
+            if (!HubFilterHelper.MatchesFilter(_userRoleFilter, u.Role?.DescriptionRole)) return false;
+            if (_userStatusFilter == "Actif" && u.Activated != true) return false;
+            if (_userStatusFilter == "Inactif" && u.Activated == true) return false;
+            return true;
+        }).ToList();
+    }
+
+    void ApplySupplierFilter()
+    {
+        _supplierPage = 1;
+        _supplierFiltered = _supplierData.Where(s =>
+            HubFilterHelper.MatchesSearch(_supplierSearch, s.SupplierName, s.SupplierNumber, s.Contact, s.Email, s.Adresse))
+            .ToList();
+    }
+
+    void ApplyTauxFilter()
+    {
+        _tauxPage = 1;
+        _tauxFiltered = _tauxData.Where(t =>
+        {
+            if (!HubFilterHelper.MatchesSearch(_tauxSearch, t.UserLogin, t.Comment, t.TauxValue.ToString()))
+                return false;
+            if (!HubFilterHelper.MatchesFilter(_tauxUserFilter, t.UserLogin)) return false;
+            return true;
+        }).ToList();
+    }
+
+    void ApplyPeriodeFilter()
+    {
+        _periodePage = 1;
+        _periodeAuditsFiltered = _periodeAudits.Where(a =>
+        {
+            if (!HubFilterHelper.MatchesSearch(_periodeSearch,
+                a.Periode.Comment, a.Periode.UserLogin, a.FactCount.ToString()))
+                return false;
+            if (!HubFilterHelper.MatchesFilter(_periodeUserFilter, a.Periode.UserLogin)) return false;
+            return true;
+        }).ToList();
+    }
+
+    void ApplyVersementFilter()
+    {
+        _versPage = 1;
+        _versementFiltered = _versementData.Where(e =>
+        {
+            var statut = e.VersementId.HasValue ? "Clôture" : "Manuel";
+            if (!HubFilterHelper.MatchesSearch(_versSearch, e.Description, e.Depositeur, e.Comment, e.UserLogin, statut))
+                return false;
+            if (!HubFilterHelper.MatchesExact(_versStatutFilter, statut)) return false;
+            return true;
+        }).ToList();
+    }
+
+    void ApplyFactAdminFilter()
+    {
+        _factAdminPage = 1;
+        _factAdminFiltered = _factAdminData.Where(f =>
+        {
+            if (!HubFilterHelper.MatchesSearch(_factAdminSearch, f.Id.ToString(), f.DescriptionName, f.Telephone, f.User, f.DescriptionArticle))
+                return false;
+            if (!HubFilterHelper.MatchesFilter(_factAdminUserFilter, f.User)) return false;
+            return true;
+        }).ToList();
+    }
+
+    void ApplyLivAdminFilters()
+    {
+        _livAdminPage = 1;
+        _cmdAdminPage = 1;
+        _adminLivraisonsFiltered = _adminLivraisons.Where(l =>
+        {
+            if (!HubFilterHelper.MatchesSearch(_livAdminSearch, l.LivraisonId.ToString(), l.Customer?.CustomerName, l.Porteur, l.UserLogin))
+                return false;
+            if (!HubFilterHelper.MatchesFilter(_livAdminUserFilter, l.UserLogin)) return false;
+            return true;
+        }).ToList();
+
+        _adminCommandesFiltered = _adminCommandes.Where(c =>
+        {
+            if (!HubFilterHelper.MatchesSearch(_cmdAdminSearch, c.CommandeId.ToString(), c.Customer?.CustomerName, c.UserLogin))
+                return false;
+            if (!HubFilterHelper.MatchesFilter(_cmdAdminClientFilter, c.Customer?.CustomerName)) return false;
+            return true;
+        }).ToList();
+    }
+
+    void ApplyLocalisationFilter()
+    {
+        _locPage = 1;
+        _localisationsFiltered = _localisations.Where(l =>
+            HubFilterHelper.MatchesSearch(_locSearch, l.DescriptionLocalisation, l.IdLocalisation.ToString()))
+            .ToList();
+    }
+
+    void ApplyLicenseFilter()
+    {
+        _licensePage = 1;
+        _moduleLicensesFiltered = _moduleLicenses.Where(m =>
+            HubFilterHelper.MatchesSearch(_licenseSearch, m.ModuleName, m.Description, m.ModuleCode))
+            .ToList();
+    }
+
+    static List<AwSearchSelect.Option> ToSelectOptions(IEnumerable<string> values, string allLabel)
+    {
+        var list = new List<AwSearchSelect.Option> { new("", allLabel) };
+        foreach (var v in values)
+            list.Add(new(v, v));
+        return list;
+    }
+
+    List<AwSearchSelect.Option> UserRoleSelectOptions() =>
+        ToSelectOptions(HubFilterHelper.DistinctNonEmpty(_userData.Select(u => u.Role?.DescriptionRole)), "Tous les rôles");
+
+    List<AwSearchSelect.Option> UserStatusSelectOptions() =>
+        new() { new("", "Tous les statuts"), new("Actif", "Actif"), new("Inactif", "Inactif") };
+
+    List<AwSearchSelect.Option> TauxUserSelectOptions() =>
+        ToSelectOptions(HubFilterHelper.DistinctNonEmpty(_tauxData.Select(t => t.UserLogin)), "Tous les opérateurs");
+
+    List<AwSearchSelect.Option> PeriodeUserSelectOptions() =>
+        ToSelectOptions(HubFilterHelper.DistinctNonEmpty(_periodeAudits.Select(a => a.Periode.UserLogin)), "Tous les opérateurs");
+
+    List<AwSearchSelect.Option> VersOrigineSelectOptions() =>
+        new() { new("", "Toutes origines"), new("Clôture", "Clôture"), new("Manuel", "Manuel") };
+
+    List<AwSearchSelect.Option> AdminFactUserSelectOptions() =>
+        ToSelectOptions(HubFilterHelper.DistinctNonEmpty(_factAdminData.Select(f => f.User)), "Tous les opérateurs");
+
+    List<AwSearchSelect.Option> FactStatusSelectOptions() =>
+        new()
+        {
+            new("-1", "Statut : tous"),
+            new("0", "Brouillon"),
+            new("1", "Validées"),
+            new("2", "Payées"),
+            new("3", "Annulées")
+        };
+
+    List<AwSearchSelect.Option> LivAdminUserSelectOptions() =>
+        ToSelectOptions(HubFilterHelper.DistinctNonEmpty(_adminLivraisons.Select(l => l.UserLogin)), "Tous les opérateurs");
+
+    List<AwSearchSelect.Option> CmdAdminClientSelectOptions() =>
+        ToSelectOptions(HubFilterHelper.DistinctNonEmpty(_adminCommandes.Select(c => c.Customer?.CustomerName)), "Tous les clients");
+
+    /* ════════════════════════════════════════════════════════════
+       INIT
+       ════════════════════════════════════════════════════════════ */
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        _isAdministrator = AppFunctions.Normalize(user.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+        var login = user.FindFirst("login")?.Value
+            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var permissions = await PermissionResolver.GetPermissionsAsync(login);
+        _canAccessAdmin = _isAdministrator && !permissions.HasHierarchicalGrants
+            || permissions.CanAccessTab("administration")
+            || (!permissions.HasHierarchicalGrants && permissions.CanRead(AppFunctions.Administration));
+        _adminLogin = user.Identity?.Name ?? user.FindFirst(ClaimTypes.Name)?.Value ?? "";
+        _loaded = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        try
+        {
+            var savedTab = await JS.InvokeAsync<int>("tabNavigation.getTab", "admin", 0);
+            if (savedTab != _tab)
+                _tab = savedTab;
+        }
+        catch { }
+
+        await LoadAdminTabAsync(_tab);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    async Task LoadAdminTabAsync(int tab)
+    {
+        if (tab < 0 || tab >= _adminTabLoaded.Length || _adminTabLoaded[tab])
+            return;
+
+        switch (tab)
+        {
+            case 0:
+                await LoadUsers();
+                await LoadRolePermissions(false);
+                await LoadFonctions();
+                await LoadActivities();
+                await InitializeUserAccessPanel();
+                await InitializeUserActivitiesPanel();
+                break;
+            case 1:
+                await LoadSuppliers();
+                break;
+            case 2:
+                await LoadTaux();
+                break;
+            case 3:
+                await LoadPeriodes();
+                break;
+            case 4:
+                await LoadVersements();
+                break;
+            case 5:
+                await LoadAdminFactures();
+                break;
+            case 6:
+                await LoadLivraisonCommandes();
+                break;
+            case 7:
+                await LoadLocalisations();
+                break;
+            case 8:
+                await LoadModuleLicenses();
+                break;
+        }
+
+        _adminTabLoaded[tab] = true;
+    }
+
+    async Task OnTabChange(int tabIndex)
+    {
+        _tab = tabIndex;
+        try
+        {
+            await JS.InvokeVoidAsync("tabNavigation.saveTab", "admin", tabIndex);
+        }
+        catch { }
+
+        await LoadAdminTabAsync(tabIndex);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       UTILISATEURS
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadUsers()
+    {
+        _userLoading = true;
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        _userData = await ctx.Users
+            .Include(u => u.Role)
+            .OrderBy(u => u.Login)
+            .ToListAsync();
+
+        // Load user localisations
+        var allUserLocs = await ctx.UserLocalisations
+            .Where(ul => ul.Activate == true)
+            .ToListAsync();
+
+        var locDict = await ctx.Localisations.ToDictionaryAsync(l => l.IdLocalisation, l => l.DescriptionLocalisation ?? "");
+
+        _userLocalisationsMap = allUserLocs
+            .Where(ul => ul.UserId != null && ul.LocalisationId.HasValue)
+            .GroupBy(ul => ul.UserId!)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(ul => locDict.GetValueOrDefault(ul.LocalisationId!.Value, "")).ToList()
+            );
+
+        _userLoading = false;
+        ApplyUserFilter();
+    }
+
+    void OnUserRowClick(User item) => OnEditUser(item);
+
+    void OnAddUser()
+    {
+        Navigation.NavigateTo("/admin/utilisateur/nouveau");
+    }
+
+    void OnEditUser(User item)
+    {
+        Navigation.NavigateTo($"/admin/utilisateur/modifier/{item.Login}");
+    }
+
+    async Task OnManageUserAccess(User item)
+    {
+        var parameters = new DialogParameters<UserAccessForm> { { x => x.UserLogin, item.Login } };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<UserAccessForm>($"Accès utilisateur — {item.Login}", parameters, options);
+        var result = await dialog.Result;
+
+        if (result?.Canceled == false)
+        {
+            await LoadUsers();
+        }
+    }
+
+    async Task OnDeleteUser(User item)
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Confirmation",
+            $"Supprimer l'utilisateur '{item.Login}' ? Cette action est irréversible.",
+            yesText: "Supprimer",
+            cancelText: "Annuler");
+        if (confirm == true)
+        {
+            try
+            {
+                await UserAdminService.DeleteUserAsync(item.Login);
+                Snackbar.Add($"Utilisateur '{item.Login}' supprimé.", Severity.Success);
+                await LoadUsers();
+                await InitializeUserAccessPanel();
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Erreur : {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    async Task InitializeUserAccessPanel()
+    {
+        if (!_userData.Any())
+        {
+            _selectedUserLogin = null;
+            _selectedUserRoleId = null;
+            _userAccessRows = new();
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_selectedUserLogin) || !_userData.Any(u => u.Login == _selectedUserLogin))
+        {
+            _selectedUserLogin = _userData.First().Login;
+        }
+
+        var user = _userData.FirstOrDefault(u => u.Login == _selectedUserLogin);
+        _selectedUserRoleId = user?.RoleId;
+
+        await LoadUserAccessRows();
+    }
+
+    async Task OnSelectedUserChanged()
+    {
+        var user = _userData.FirstOrDefault(u => u.Login == _selectedUserLogin);
+        _selectedUserRoleId = user?.RoleId;
+        await LoadUserAccessRows();
+    }
+
+    async Task OnSelectedUserRoleChanged()
+    {
+        await LoadUserAccessRows();
+    }
+
+    async Task LoadUserAccessRows()
+    {
+        _userAccessLoading = true;
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+
+        var fonctions = await ctx.Fonctions
+            .OrderBy(f => f.DescriptionFonction)
+            .ToListAsync();
+
+        if (!_selectedUserRoleId.HasValue)
+        {
+            _userAccessRows = fonctions
+                .Select(f => new RolePermissionRow
+                {
+                    FonctionId = f.IdFonction,
+                    FonctionLabel = f.DescriptionFonction ?? $"Fonction #{f.IdFonction}",
+                    CanRead = false,
+                    CanWrite = false,
+                    CanDelete = false
+                })
+                .ToList();
+
+            _userAccessLoading = false;
+            return;
+        }
+
+        var permissions = await ctx.Permissions
+            .Where(p => p.RoleId == _selectedUserRoleId.Value)
+            .ToListAsync();
+
+        _userAccessRows = fonctions
+            .Select(f =>
+            {
+                var permission = permissions.FirstOrDefault(p => p.FonctionId == f.IdFonction);
+                return new RolePermissionRow
+                {
+                    FonctionId = f.IdFonction,
+                    FonctionLabel = f.DescriptionFonction ?? $"Fonction #{f.IdFonction}",
+                    CanRead = permission?.CanRead ?? false,
+                    CanWrite = permission?.CanWrite ?? false,
+                    CanDelete = permission?.CanDelete ?? false
+                };
+            })
+            .ToList();
+
+        _userAccessLoading = false;
+    }
+
+    async Task SaveUserAccess()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedUserLogin))
+        {
+            Snackbar.Add("Sélectionnez un utilisateur.", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+
+            var user = await ctx.Users.FirstOrDefaultAsync(u => u.Login == _selectedUserLogin);
+            if (user is null)
+            {
+                Snackbar.Add("Utilisateur introuvable.", Severity.Error);
+                return;
+            }
+
+            user.RoleId = _selectedUserRoleId;
+            await ctx.SaveChangesAsync();
+
+            Snackbar.Add("Rôle enregistré.", Severity.Success);
+            await LoadUsers();
+            await LoadRolePermissions();
+            await InitializeUserAccessPanel();
+        }
+        catch (Exception ex)
+        {
+            var message = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(message, Severity.Error);
+        }
+    }
+
+    async Task LoadFonctions()
+    {
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        _fonctionData = await ctx.Fonctions
+            .OrderBy(f => f.DescriptionFonction)
+            .ToListAsync();
+
+        if (!_newActivityFonctionId.HasValue && _fonctionData.Any())
+        {
+            _newActivityFonctionId = _fonctionData.First().IdFonction;
+        }
+    }
+
+    async Task LoadActivities()
+    {
+        _activityLoading = true;
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        _activityData = await ctx.Activities
+            .Include(a => a.Fonction)
+            .OrderBy(a => a.Fonction!.DescriptionFonction)
+            .ThenBy(a => a.DescriptionActivity)
+            .ToListAsync();
+        _activityLoading = false;
+    }
+
+    async Task AddActivity()
+    {
+        if (!_newActivityFonctionId.HasValue || string.IsNullOrWhiteSpace(_newActivityCode) || string.IsNullOrWhiteSpace(_newActivityLabel))
+        {
+            Snackbar.Add("Fonction, code et description sont obligatoires.", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+            var code = _newActivityCode.Trim().ToLowerInvariant();
+
+            var exists = await ctx.Activities.AnyAsync(a => a.Code == code);
+            if (exists)
+            {
+                Snackbar.Add("Ce code existe déjà.", Severity.Warning);
+                return;
+            }
+
+            ctx.Activities.Add(new Activity
+            {
+                FonctionId = _newActivityFonctionId.Value,
+                Code = code,
+                DescriptionActivity = _newActivityLabel.Trim(),
+                IsActive = true
+            });
+
+            await ctx.SaveChangesAsync();
+            _newActivityCode = string.Empty;
+            _newActivityLabel = string.Empty;
+
+            Snackbar.Add("Activité ajoutée.", Severity.Success);
+            await LoadActivities();
+            await LoadUserActivities();
+        }
+        catch (Exception ex)
+        {
+            var message = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(message, Severity.Error);
+        }
+    }
+
+    async Task ToggleActivityState(Activity activity)
+    {
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        var entity = await ctx.Activities.FirstOrDefaultAsync(a => a.ActivityId == activity.ActivityId);
+        if (entity is null) return;
+
+        entity.IsActive = !entity.IsActive;
+        await ctx.SaveChangesAsync();
+        await LoadActivities();
+        await LoadUserActivities();
+    }
+
+    async Task DeleteActivity(Activity activity)
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Confirmation",
+            $"Supprimer l'activité '{activity.DescriptionActivity}' ?",
+            yesText: "Supprimer",
+            cancelText: "Annuler");
+        if (confirm != true) return;
+
+        try
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+            var entity = await ctx.Activities.FirstOrDefaultAsync(a => a.ActivityId == activity.ActivityId);
+            if (entity is null) return;
+
+            var links = await ctx.UserActivities.Where(ua => ua.ActivityId == entity.ActivityId).ToListAsync();
+            if (links.Any()) ctx.UserActivities.RemoveRange(links);
+
+            ctx.Activities.Remove(entity);
+            await ctx.SaveChangesAsync();
+
+            Snackbar.Add("Activité supprimée.", Severity.Success);
+            await LoadActivities();
+            await LoadUserActivities();
+        }
+        catch (Exception ex)
+        {
+            var message = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(message, Severity.Error);
+        }
+    }
+
+    async Task InitializeUserActivitiesPanel()
+    {
+        if (!_userData.Any())
+        {
+            _selectedActivityUserLogin = null;
+            _allUserActivityRows = new();
+            _userActivityRows = new();
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_selectedActivityUserLogin) || !_userData.Any(u => u.Login == _selectedActivityUserLogin))
+        {
+            _selectedActivityUserLogin = _userData.First().Login;
+        }
+
+        await LoadUserActivities();
+    }
+
+    async Task OnActivityUserChanged()
+    {
+        await LoadUserActivities();
+    }
+
+    void ApplyActivityUserFilter()
+    {
+        _userActivityRows = _allUserActivityRows
+            .Where(a => !_activityFilterFonctionId.HasValue || a.FonctionId == _activityFilterFonctionId.Value)
+            .ToList();
+    }
+
+    async Task LoadUserActivities()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedActivityUserLogin))
+        {
+            _allUserActivityRows = new();
+            _userActivityRows = new();
+            return;
+        }
+
+        _userActivitiesLoading = true;
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+
+        var activities = await ctx.Activities
+            .Include(a => a.Fonction)
+            .Where(a => a.IsActive)
+            .OrderBy(a => a.Fonction!.DescriptionFonction)
+            .ThenBy(a => a.DescriptionActivity)
+            .ToListAsync();
+
+        var grantedIds = await ctx.UserActivities
+            .Where(ua => ua.UserLogin == _selectedActivityUserLogin && ua.IsGranted)
+            .Select(ua => ua.ActivityId)
+            .ToListAsync();
+
+        var grantedSet = grantedIds.ToHashSet();
+
+        _allUserActivityRows = activities
+            .Select(a => new UserActivityRow
+            {
+                ActivityId = a.ActivityId,
+                FonctionId = a.FonctionId,
+                FonctionLabel = a.Fonction?.DescriptionFonction ?? "-",
+                ActivityCode = a.Code,
+                ActivityLabel = a.DescriptionActivity,
+                IsGranted = grantedSet.Contains(a.ActivityId)
+            })
+            .ToList();
+
+        ApplyActivityUserFilter();
+        _userActivitiesLoading = false;
+    }
+
+    async Task SaveUserActivities()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedActivityUserLogin))
+            return;
+
+        try
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+            var existing = await ctx.UserActivities
+                .Where(ua => ua.UserLogin == _selectedActivityUserLogin)
+                .ToListAsync();
+
+            if (existing.Any())
+            {
+                ctx.UserActivities.RemoveRange(existing);
+                await ctx.SaveChangesAsync();
+            }
+
+            var rows = _allUserActivityRows
+                .Where(a => a.IsGranted)
+                .Select(a => new UserActivity
+                {
+                    UserLogin = _selectedActivityUserLogin,
+                    ActivityId = a.ActivityId,
+                    IsGranted = true,
+                    AssignedDate = DateTime.Now
+                })
+                .ToList();
+
+            if (rows.Any())
+            {
+                await ctx.UserActivities.AddRangeAsync(rows);
+                await ctx.SaveChangesAsync();
+            }
+
+            Snackbar.Add("Activités enregistrées.", Severity.Success);
+            await LoadUserActivities();
+        }
+        catch (Exception ex)
+        {
+            var message = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(message, Severity.Error);
+        }
+    }
+
+    async Task LoadRolePermissions(bool preserveSelection = true)
+    {
+        _rolePermissionLoading = true;
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+
+        _roleData = await ctx.Roles
+            .Where(r => r.IsActive)
+            .OrderBy(r => r.DescriptionRole)
+            .ToListAsync();
+
+        if (!_roleData.Any())
+        {
+            _selectedRoleId = null;
+            _rolePermissionRows = new();
+            _rolePermissionLoading = false;
+            return;
+        }
+
+        if (!preserveSelection || !_selectedRoleId.HasValue || !_roleData.Any(r => r.RoleId == _selectedRoleId.Value))
+        {
+            _selectedRoleId = _roleData.First().RoleId;
+        }
+
+        var fonctions = await ctx.Fonctions
+            .OrderBy(f => f.DescriptionFonction)
+            .ToListAsync();
+
+        var permissions = await ctx.Permissions
+            .Where(p => p.RoleId == _selectedRoleId.Value)
+            .ToListAsync();
+
+        _rolePermissionRows = fonctions
+            .Select(f =>
+            {
+                var permission = permissions.FirstOrDefault(p => p.FonctionId == f.IdFonction);
+                return new RolePermissionRow
+                {
+                    FonctionId = f.IdFonction,
+                    FonctionLabel = f.DescriptionFonction ?? $"Fonction #{f.IdFonction}",
+                    CanRead = permission?.CanRead ?? false,
+                    CanWrite = permission?.CanWrite ?? false,
+                    CanDelete = permission?.CanDelete ?? false
+                };
+            })
+            .ToList();
+
+        _rolePermissionLoading = false;
+    }
+
+    async Task OnSelectedRoleChanged()
+    {
+        await LoadRolePermissions();
+    }
+
+    async Task SaveRolePermissions()
+    {
+        if (!_selectedRoleId.HasValue)
+            return;
+
+        try
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+
+            var existing = await ctx.Permissions
+                .Where(p => p.RoleId == _selectedRoleId.Value)
+                .ToListAsync();
+
+            if (existing.Any())
+            {
+                ctx.Permissions.RemoveRange(existing);
+                await ctx.SaveChangesAsync();
+            }
+
+            var newPermissions = _rolePermissionRows
+                .Where(p => p.CanRead || p.CanWrite || p.CanDelete)
+                .Select(p => new Permission
+                {
+                    RoleId = _selectedRoleId.Value,
+                    FonctionId = p.FonctionId,
+                    CanRead = p.CanRead || p.CanWrite || p.CanDelete,
+                    CanWrite = p.CanWrite,
+                    CanDelete = p.CanDelete
+                })
+                .ToList();
+
+            if (newPermissions.Any())
+            {
+                await ctx.Permissions.AddRangeAsync(newPermissions);
+                await ctx.SaveChangesAsync();
+            }
+
+            Snackbar.Add("Les fonctions du rôle ont été mises à jour.", Severity.Success);
+            await LoadRolePermissions();
+        }
+        catch (Exception ex)
+        {
+            var message = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(message, Severity.Error);
+        }
+    }
+
+    async Task ApplyDefaultPermissions()
+    {
+        if (!_selectedRoleId.HasValue) return;
+
+        var confirm = await DialogService.ShowMessageBox("Permissions par défaut",
+            "Voulez-vous appliquer les permissions par défaut pour ce rôle ?\nCela remplacera les permissions actuelles.",
+            yesText: "Appliquer", cancelText: "Annuler");
+
+        if (confirm == true)
+        {
+            try
+            {
+                await RoleService.SetDefaultPermissionsForRoleAsync(_selectedRoleId.Value, overwrite: true);
+                Snackbar.Add("Permissions par défaut appliquées", Severity.Success);
+                await LoadRolePermissions();
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Erreur : {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       FOURNISSEURS
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadSuppliers()
+    {
+        _supplierLoading = true;
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        _supplierData = await ctx.Suppliers.OrderBy(s => s.SupplierName).ToListAsync();
+        _supplierLoading = false;
+        ApplySupplierFilter();
+    }
+
+    void OnAddSupplier()
+    {
+        Navigation.NavigateTo("/admin/fournisseur/nouveau");
+    }
+
+    void OnEditSupplier(Supplier s)
+    {
+        Navigation.NavigateTo($"/admin/fournisseur/modifier/{s.SupplierId}");
+    }
+
+    async Task OnDeleteSupplier(Supplier s)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Confirmation",
+            $"Supprimer le fournisseur « {s.SupplierName} » ?",
+            yesText: "Supprimer",
+            cancelText: "Annuler");
+
+        if (confirmed != true) return;
+
+        try
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+            var entity = await ctx.Suppliers.FindAsync(s.SupplierId);
+            if (entity != null)
+            {
+                ctx.Suppliers.Remove(entity);
+                await ctx.SaveChangesAsync();
+                Snackbar.Add(s.SupplierName ?? string.Empty, Severity.Success);
+                await LoadSuppliers();
+            }
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(msg, Severity.Error);
+        }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       TAUX DE CHANGE
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadTaux()
+    {
+        _tauxLoading = true;
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        _tauxData = await ctx.TauxChanges.OrderByDescending(t => t.Date).ToListAsync();
+        _displayTaux = _tauxData.FirstOrDefault()?.TauxValue ?? 0;
+        _tauxLoading = false;
+        ApplyTauxFilter();
+    }
+
+    Task OnTauxRowClick(Taux item) => OnEditTaux(item);
+
+    async Task OnAddTaux()
+    {
+        var parameters = new DialogParameters<TauxForm>();
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<TauxForm>("Nouveau taux", parameters, options);
+        var result = await dialog.Result;
+        if (result?.Canceled == false) await LoadTaux();
+    }
+
+    async Task OnEditTaux(Taux item)
+    {
+        var parameters = new DialogParameters<TauxForm> { { x => x.TauxId, item.Id } };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<TauxForm>("Modifier le taux", parameters, options);
+        var result = await dialog.Result;
+        if (result?.Canceled == false) await LoadTaux();
+    }
+
+    async Task OnDeleteTaux(Taux item)
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Confirmation",
+            $"Supprimer le taux N° {item.Id} ?",
+            yesText: "Supprimer",
+            cancelText: "Annuler");
+        if (confirm == true)
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+            ctx.TauxChanges.Remove(item);
+            await ctx.SaveChangesAsync();
+            await LoadTaux();
+        }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       PÉRIODES
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadPeriodes()
+    {
+        _periodeLoading = true;
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+
+        _periodeData = await ctx.Periodes.OrderByDescending(p => p.FromDate).ToListAsync();
+
+        // Charger les données liées pour l'audit en une seule requête par type
+        var allFacts   = await ctx.Facts.Select(f => new { f.Date, Total = f.TotalApresReduction ?? f.Total ?? 0 }).ToListAsync();
+        var allPays    = await ctx.Payments.Select(p => new { p.Date, p.Montant }).ToListAsync();
+        var allVers    = await ctx.Versements.Select(v => new { v.DateCloture, v.Montant }).ToListAsync();
+
+        _periodeAudits = _periodeData.Select(p =>
+        {
+            var from = p.FromDate.HasValue ? DateOnly.FromDateTime(p.FromDate.Value) : DateOnly.MinValue;
+            var to   = p.ToDate.HasValue   ? DateOnly.FromDateTime(p.ToDate.Value)   : DateOnly.MaxValue;
+
+            var facts = allFacts.Where(f => f.Date >= from && f.Date <= to).ToList();
+            var pays  = allPays.Where(x => x.Date >= from && x.Date <= to).ToList();
+            var vers  = allVers.Where(v => v.DateCloture >= from && v.DateCloture <= to).ToList();
+
+            int duree = (p.FromDate.HasValue && p.ToDate.HasValue)
+                ? (int)(p.ToDate.Value - p.FromDate.Value).TotalDays
+                : 0;
+
+            return new PeriodeAudit(
+                p,
+                facts.Count, facts.Sum(f => f.Total),
+                pays.Count,  pays.Sum(x => x.Montant),
+                vers.Count,  vers.Sum(v => v.Montant),
+                duree);
+        }).ToList();
+
+        _periodeLoading = false;
+        ApplyPeriodeFilter();
+    }
+
+    Task OnPeriodeRowClick(Periode item) => OnEditPeriode(item);
+
+    async Task OnAddPeriode()
+    {
+        var parameters = new DialogParameters<PeriodeForm>();
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<PeriodeForm>("Nouvelle période", parameters, options);
+        var result = await dialog.Result;
+        if (result?.Canceled == false) await LoadPeriodes();
+    }
+
+    async Task OnEditPeriode(Periode item)
+    {
+        var parameters = new DialogParameters<PeriodeForm> { { x => x.PeriodeId, item.Id } };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<PeriodeForm>("Modifier la période", parameters, options);
+        var result = await dialog.Result;
+        if (result?.Canceled == false) await LoadPeriodes();
+    }
+
+    async Task ToggleActivated(Periode item)
+    {
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        item.Activated = !(item.Activated ?? false);
+        ctx.Periodes.Update(item);
+        await ctx.SaveChangesAsync();
+        Snackbar.Add(item.Activated == true ? "Période activée" : "Période clôturée", Severity.Info);
+        await LoadPeriodes();
+    }
+
+    async Task OnDeletePeriode(Periode item)
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Confirmation",
+            $"Supprimer la période N° {item.Id} ?",
+            yesText: "Supprimer",
+            cancelText: "Annuler");
+        if (confirm == true)
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+            ctx.Periodes.Remove(item);
+            await ctx.SaveChangesAsync();
+            await LoadPeriodes();
+        }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       VERSEMENTS
+       ════════════════════════════════════════════════════════════ */
+
+    decimal VersementUsdAmount(ApproExpense v) =>
+        v.AmountUSD is > 0
+            ? v.AmountUSD.Value
+            : CurrencyFormat.CdfStoredToUsd(v.AmountCDF ?? 0, _displayTaux);
+
+    async Task LoadVersements()
+    {
+        _versementLoading = true;
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        var query = ctx.ApproExpenses.AsQueryable();
+        if (_versDateFrom.HasValue)
+            query = query.Where(e => e.CreationDate >= _versDateFrom.Value);
+        if (_versDateTo.HasValue)
+            query = query.Where(e => e.CreationDate < _versDateTo.Value.Date.AddDays(1));
+        _versementData = await query.OrderByDescending(e => e.CreationDate).ToListAsync();
+        _versementLoading = false;
+        ApplyVersementFilter();
+        await LoadPendingCloturesAsync();
+    }
+
+    async Task LoadPendingCloturesAsync()
+    {
+        var all = await ClotureService.GetCloturesByLocalisationsAsync(new List<int>());
+        var from = _versDateFrom.HasValue ? DateOnly.FromDateTime(_versDateFrom.Value) : (DateOnly?)null;
+        var to = _versDateTo.HasValue ? DateOnly.FromDateTime(_versDateTo.Value) : (DateOnly?)null;
+
+        _pendingClotures = all
+            .Where(v => v.StatutCloture == 0)
+            .Where(v => !from.HasValue || v.DateCloture >= from.Value)
+            .Where(v => !to.HasValue || v.DateCloture <= to.Value)
+            .OrderByDescending(v => v.DateCloture)
+            .ThenByDescending(v => v.HeureCloture)
+            .ToList();
+    }
+
+    bool CanModerateAdminCloture(Versement v) =>
+        v.StatutCloture == 0
+        && !string.Equals(v.UserLogin, _adminLogin, StringComparison.OrdinalIgnoreCase);
+
+    async Task OnApprouverClotureAdmin(Versement v)
+    {
+        if (!CanModerateAdminCloture(v))
+        {
+            Snackbar.Add("Vous ne pouvez pas approuver votre propre clôture.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBox(
+            "Approuver la clôture",
+            $"Approuver la clôture du {v.DateCloture:dd/MM/yyyy} par {v.UserLogin} ? Le vendeur pourra reprendre ses ventes.",
+            yesText: "Approuver",
+            cancelText: "Annuler");
+        if (confirm != true) return;
+
+        var ok = await ClotureService.UpdateClotureStatutAsync(v.Id, 1, _adminLogin);
+        if (!ok)
+        {
+            Snackbar.Add("Impossible de mettre à jour la clôture.", Severity.Error);
+            return;
+        }
+
+        await ClotureService.EnsureClotureExpenseAsync(v.Id);
+        Snackbar.Add("Clôture approuvée. Versement caisse créé en attente.", Severity.Success);
+        await LoadVersements();
+    }
+
+    async Task OnRejeterClotureAdmin(Versement v)
+    {
+        if (!CanModerateAdminCloture(v))
+        {
+            Snackbar.Add("Vous ne pouvez pas rejeter votre propre clôture.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBox(
+            "Rejeter la clôture",
+            (MarkupString)$"Rejeter la clôture du <b>{v.DateCloture:dd/MM/yyyy}</b> par <b>{v.UserLogin}</b> ?<br/><small>Le vendeur reprendra immédiatement ses transactions.</small>",
+            yesText: "Rejeter",
+            cancelText: "Annuler");
+        if (confirm != true) return;
+
+        var ok = await ClotureService.UpdateClotureStatutAsync(v.Id, 2, _adminLogin, "Rejetée par l'administrateur");
+        if (!ok)
+        {
+            Snackbar.Add("Impossible de mettre à jour la clôture.", Severity.Error);
+            return;
+        }
+
+        Snackbar.Add("Clôture rejetée.", Severity.Warning);
+        await LoadVersements();
+    }
+
+    async Task OnVersementRowClick(ApproExpense item)
+    {
+        if (item == null) return;
+        var parameters = new DialogParameters<VersementDetailDialog> { { x => x.ExpenseId, item.Id } };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<VersementDetailDialog>($"Versement N° {item.Id}", parameters, options);
+        var result = await dialog.Result;
+        await LoadVersements();
+    }
+
+    void OnAddVersement()
+    {
+        Navigation.NavigateTo("/admin/versement/nouveau");
+    }
+
+    void OnEditVersement(ApproExpense item)
+    {
+        Navigation.NavigateTo($"/admin/versement/modifier/{item.Id}");
+    }
+
+    async Task OnDeleteVersement(ApproExpense item)
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Confirmation",
+            $"Supprimer le versement N° {item.Id} ?",
+            yesText: "Supprimer",
+            cancelText: "Annuler");
+        if (confirm == true)
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+            ctx.ApproExpenses.Remove(item);
+            await ctx.SaveChangesAsync();
+            await LoadVersements();
+        }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       GESTION FACTURES (ADMIN)
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadAdminFactures()
+    {
+        _factAdminLoading = true;
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        var query = ctx.Facts.AsQueryable();
+        if (_factDateFrom.HasValue)
+        {
+            var from = DateOnly.FromDateTime(_factDateFrom.Value);
+            query = query.Where(f => f.Date >= from);
+        }
+        if (_factDateTo.HasValue)
+        {
+            var to = DateOnly.FromDateTime(_factDateTo.Value);
+            query = query.Where(f => f.Date <= to);
+        }
+        if (_factStatusFilter >= 0)
+        {
+            query = query.Where(f => f.Status == _factStatusFilter);
+        }
+        _factAdminData = await query.OrderByDescending(f => f.Date).ToListAsync();
+        _factAdminLoading = false;
+        ApplyFactAdminFilter();
+    }
+
+    async Task OnDeleteAdminFacture(Fact item)
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Confirmation",
+            $"Supprimer la facture N° {item.Id} ? Le stock sera réintégré si la facture était validée.",
+            yesText: "Supprimer",
+            cancelText: "Annuler");
+        if (confirm != true) return;
+
+        var result = await FacturationService.DeleteFactureAsync(item.Id);
+        if (!result.Success)
+        {
+            Snackbar.Add(result.Message, Severity.Error);
+            return;
+        }
+        Snackbar.Add(result.Message, Severity.Success);
+        await LoadAdminFactures();
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       GESTION LIVRAISONS & COMMANDES (ADMIN)
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadLivraisonCommandes()
+    {
+        _livCmdLoading = true;
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        var lQuery = ctx.Livraisons.AsQueryable();
+        var cQuery = ctx.Commandes.AsQueryable();
+        if (_livCmdDateFrom.HasValue)
+        {
+            lQuery = lQuery.Where(l => l.Date >= _livCmdDateFrom.Value);
+            cQuery = cQuery.Where(c => c.CreationDate >= _livCmdDateFrom.Value);
+        }
+        if (_livCmdDateTo.HasValue)
+        {
+            lQuery = lQuery.Where(l => l.Date <= _livCmdDateTo.Value);
+            cQuery = cQuery.Where(c => c.CreationDate <= _livCmdDateTo.Value);
+        }
+        _adminLivraisons = await lQuery.Include(l => l.Customer).OrderByDescending(l => l.Date).ToListAsync();
+        _adminCommandes = await cQuery.OrderByDescending(c => c.CreationDate).ToListAsync();
+        _livCmdLoading = false;
+        ApplyLivAdminFilters();
+    }
+
+    async Task OnDeleteAdminLivraison(Livraison item)
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Confirmation",
+            $"Supprimer la livraison N° {item.LivraisonId} ? Le stock sera réintégré.",
+            yesText: "Supprimer",
+            cancelText: "Annuler");
+        if (confirm != true) return;
+
+        try
+        {
+            await LivraisonPosting.DeleteAsync(item.LivraisonId, _adminLogin);
+            Snackbar.Add("Livraison supprimée avec succès.", Severity.Success);
+            await LoadLivraisonCommandes();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    async Task OnDeleteAdminCommande(Commande item)
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Confirmation",
+            $"Supprimer la commande N° {item.CommandeId} ?",
+            yesText: "Supprimer",
+            cancelText: "Annuler");
+        if (confirm == true)
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+            ctx.Commandes.Remove(item);
+            await ctx.SaveChangesAsync();
+            await LoadLivraisonCommandes();
+        }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       GESTION LOCALISATIONS
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadLocalisations()
+    {
+        _localisationsLoading = true;
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        _localisations = await ctx.Localisations
+            .Include(l => l.UserLocalisations)
+            .OrderBy(l => l.DescriptionLocalisation)
+            .ToListAsync();
+        _localisationsLoading = false;
+        ApplyLocalisationFilter();
+    }
+
+    void OnLocalisationRowClick(Localisation item) => OnViewLocalisation(item);
+
+    async Task OnAddLocalisation()
+    {
+        var dialog = await DialogService.ShowAsync<LocalisationDialog>("Ajouter une localisation",
+            new DialogParameters<LocalisationDialog>(),
+            new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.ExtraSmall, NoHeader = true });
+
+        var result = await dialog.Result;
+        if (result?.Canceled == false)
+        {
+            await LoadLocalisations();
+        }
+    }
+
+    async Task OnEditLocalisation(Localisation item)
+    {
+        var dialog = await DialogService.ShowAsync<LocalisationDialog>("Modifier localisation",
+            new DialogParameters<LocalisationDialog> { { x => x.Model, item } },
+            new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.ExtraSmall, NoHeader = true });
+
+        var result = await dialog.Result;
+        if (result?.Canceled == false)
+        {
+            await LoadLocalisations();
+        }
+    }
+
+    void OnViewLocalisation(Localisation item)
+    {
+        Navigation.NavigateTo($"/localisation/{item.IdLocalisation}");
+    }
+
+    async Task OnDeleteLocalisation(Localisation item)
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Confirmation",
+            $"Supprimer la localisation « {item.DescriptionLocalisation} » ?",
+            yesText: "Supprimer",
+            cancelText: "Annuler");
+        if (confirm == true)
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+            ctx.Localisations.Remove(item);
+            await ctx.SaveChangesAsync();
+            Snackbar.Add("Localisation supprimée.", Severity.Success);
+            await LoadLocalisations();
+        }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       SÉCURITÉ VENDEUR
+       ════════════════════════════════════════════════════════════ */
+
+    async Task OnRequestVendorAccess()
+    {
+        var isConfigured = await VendorSecurity.IsPasswordConfiguredAsync();
+
+        if (!isConfigured)
+        {
+            // Première fois : définir le mot de passe
+            var setup = await DialogService.ShowAsync<SetVendorPasswordDialog>("Définir le mot de passe vendeur",
+                new DialogParameters<SetVendorPasswordDialog> { { x => x.IsFirstSetup, true } },
+                new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Small, NoHeader = true });
+
+            var result = await setup.Result;
+            if (result?.Canceled == false)
+            {
+                _vendorAuthenticated = true;
+                await LoadModuleLicenses();
+            }
+        }
+        else
+        {
+            // Vérifier le mot de passe
+            var dlg = await DialogService.ShowAsync<VendorPasswordDialog>("Accès restreint",
+                new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.ExtraSmall, NoHeader = true });
+
+            var result = await dlg.Result;
+            if (result?.Canceled == false)
+            {
+                _vendorAuthenticated = true;
+                await LoadModuleLicenses();
+            }
+        }
+    }
+
+    void OnLockVendorAccess()
+    {
+        _vendorAuthenticated = false;
+        _moduleLicenses = new List<ModuleLicense>();
+    }
+
+    async Task OnChangeVendorPassword()
+    {
+        var dlg = await DialogService.ShowAsync<SetVendorPasswordDialog>("Changer le mot de passe vendeur",
+            new DialogParameters<SetVendorPasswordDialog> { { x => x.IsFirstSetup, false } },
+            new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Small, NoHeader = true });
+
+        await dlg.Result;
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       LICENCES MODULES
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadModuleLicenses()
+    {
+        _moduleLoading = true;
+        StateHasChanged();
+        _moduleLicenses = await ModuleLicenseService.GetAllModulesAsync();
+        _moduleLoading = false;
+        ApplyLicenseFilter();
+    }
+
+    async Task OnToggleModule(ModuleLicense mod, bool newState)
+    {
+        if (mod.IsCore) return;
+        var ok = await ModuleLicenseService.ToggleModuleAsync(mod.Id, newState);
+        if (ok)
+        {
+            mod.IsActive = newState;
+            Snackbar.Add($"Module « {mod.ModuleName} » {(newState ? "activé" : "désactivé")}.", Severity.Success);
+        }
+        else
+        {
+            Snackbar.Add("Impossible de modifier ce module.", Severity.Error);
+        }
+    }
+
+    async Task OnEditModuleLicense(ModuleLicense mod)
+    {
+        var dialog = await DialogService.ShowAsync<ModuleLicenseDialog>("Modifier la licence",
+            new DialogParameters<ModuleLicenseDialog> { { x => x.Module, mod } },
+            new DialogOptions { FullWidth = true, MaxWidth = MaxWidth.Small, NoHeader = true });
+
+        var result = await dialog.Result;
+        if (result?.Canceled == false)
+        {
+            await LoadModuleLicenses();
+            Snackbar.Add("Licence mise à jour.", Severity.Success);
+        }
+    }
+
+    record PeriodeAudit(
+        Periode Periode,
+        int FactCount, decimal FactTotal,
+        int PayCount,  decimal PayTotal,
+        int VersCount, decimal VersTotal,
+        int Duree);
+
+    class RolePermissionRow
+    {
+        public int FonctionId { get; set; }
+        public string FonctionLabel { get; set; } = string.Empty;
+        public bool CanRead { get; set; }
+        public bool CanWrite { get; set; }
+        public bool CanDelete { get; set; }
+    }
+
+    class UserActivityRow
+    {
+        public int ActivityId { get; set; }
+        public int FonctionId { get; set; }
+        public string FonctionLabel { get; set; } = string.Empty;
+        public string ActivityCode { get; set; } = string.Empty;
+        public string ActivityLabel { get; set; } = string.Empty;
+        public bool IsGranted { get; set; }
+    }
+}
+
+

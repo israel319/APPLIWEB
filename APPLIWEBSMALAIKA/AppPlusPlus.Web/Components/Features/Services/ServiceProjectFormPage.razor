@@ -1,0 +1,150 @@
+@page "/services/projet/nouveau"
+@page "/services/projet/modifier/{ProjectId:int}"
+@rendermode InteractiveServer
+@using AppPlusPlus.Application.DTOs.Prestations
+@using AppPlusPlus.Application.Services.Prestations
+@using AppPlusPlus.Application.Services.Clients
+@using AppPlusPlus.Domain.Enums
+@inject IServiceManagementService ServiceManagement
+@inject ICustomerService CustomerService
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+
+<PageTitle>@AppSettings.AppName — @(_isEdit ? "Modifier mission" : "Nouvelle mission")</PageTitle>
+
+<div class="aw-page">
+    <div class="aw-form aw-form--wide">
+        <header class="aw-form__head">
+            <div>
+                <p class="aw-form__eyebrow">Services</p>
+                <h1 class="aw-form__title">@(_isEdit ? "Modifier la mission" : "Nouvelle mission client")</h1>
+            </div>
+            <div class="aw-form__actions">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                    <i class="bi bi-arrow-left"></i> Retour
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="SaveAsync" disabled="@_saving">
+                    <i class="bi bi-check-lg"></i> Enregistrer
+                </button>
+            </div>
+        </header>
+        <div class="aw-form__body">
+            <p class="aw-field__hint" style="margin-bottom:0.9rem;">
+                Une mission = un travail que vous facturerez à un client (audit, installation, conseil…).
+                Indiquez comment vous comptez facturer : à l'heure ou au forfait.
+            </p>
+            <div class="aw-form__grid">
+                <div class="aw-field aw-form__span-2">
+                    <label class="aw-field__label">Nom de la mission *</label>
+                    <input type="text" class="aw-input" @bind="_model.Title" maxlength="120" placeholder="Ex. Audit comptable — Client ABC" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Client</label>
+                    <select class="aw-select" @bind="_model.CustomerId">
+                        <option value="">— Sans client —</option>
+                        @foreach (var c in _customers)
+                        {
+                            <option value="@c.CustomerId">@c.CustomerName</option>
+                        }
+                    </select>
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Comment facturer ?</label>
+                    <select class="aw-select" @bind="_model.BillingMode">
+                        <option value="@((int)ServiceBillingMode.Hourly)">À l'heure (on compte les heures travaillées)</option>
+                        <option value="@((int)ServiceBillingMode.Flat)">Au forfait (montant fixe)</option>
+                        <option value="@((int)ServiceBillingMode.Mixed)">Les deux (heures + forfait)</option>
+                    </select>
+                </div>
+                @if (_model.BillingMode is (int)ServiceBillingMode.Hourly or (int)ServiceBillingMode.Mixed)
+                {
+                    <div class="aw-field">
+                        <label class="aw-field__label">Prix d'une heure (FC)</label>
+                        <input type="number" step="0.01" min="0" class="aw-input" @bind="_model.HourlyRate" placeholder="Ex. 50000" />
+                    </div>
+                }
+                @if (_model.BillingMode is (int)ServiceBillingMode.Flat or (int)ServiceBillingMode.Mixed)
+                {
+                    <div class="aw-field">
+                        <label class="aw-field__label">Montant forfait (FC)</label>
+                        <input type="number" step="0.01" min="0" class="aw-input" @bind="_model.FlatAmount" placeholder="Ex. 500000" />
+                    </div>
+                }
+                @if (_isEdit)
+                {
+                    <div class="aw-field">
+                        <label class="aw-field__label">Statut</label>
+                        <select class="aw-select" @bind="_model.Status">
+                            @foreach (var s in _statusOptions)
+                            {
+                                <option value="@s.Key">@s.Value</option>
+                            }
+                        </select>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public int? ProjectId { get; set; }
+
+    bool _isEdit => ProjectId.HasValue;
+    bool _saving;
+    string _login = "";
+    ServiceProjectDetailDto _model = new() { Status = (int)ServiceProjectStatus.Active, BillingMode = (int)ServiceBillingMode.Hourly };
+    List<Domain.Entities.Clients.Customer> _customers = new();
+
+    static readonly Dictionary<int, string> _statusOptions = new()
+    {
+        [(int)ServiceProjectStatus.Draft] = "Brouillon",
+        [(int)ServiceProjectStatus.Active] = "En cours",
+        [(int)ServiceProjectStatus.Completed] = "Terminée",
+        [(int)ServiceProjectStatus.Cancelled] = "Annulée",
+        [(int)ServiceProjectStatus.Invoiced] = "Facturée"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        _login = auth.User.FindFirst("login")?.Value
+            ?? auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "";
+
+        _customers = await CustomerService.GetAllAsync();
+
+        if (ProjectId.HasValue)
+        {
+            var existing = await ServiceManagement.GetProjectAsync(ProjectId.Value);
+            if (existing != null) _model = existing;
+        }
+    }
+
+    async Task SaveAsync()
+    {
+        _saving = true;
+        try
+        {
+            var result = await ServiceManagement.SaveProjectAsync(_model, _login);
+            if (!result.Success)
+            {
+                Snackbar.Add(result.Message, Severity.Error);
+                return;
+            }
+            Snackbar.Add(result.Message, Severity.Success);
+            Navigation.NavigateTo($"/services/projet/{result.Data}");
+        }
+        finally { _saving = false; }
+    }
+
+    void Cancel()
+    {
+        if (ProjectId.HasValue)
+            Navigation.NavigateTo($"/services/projet/{ProjectId.Value}");
+        else
+            Navigation.NavigateTo("/services");
+    }
+}

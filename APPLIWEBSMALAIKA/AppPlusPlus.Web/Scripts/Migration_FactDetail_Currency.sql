@@ -1,0 +1,4 @@
+-- ============================================================================
+-- OBSOLÈTE — remplacé par Migration_FactDetail_Monetary_Standard.sql
+-- Conservé pour historique uniquement.
+-- ============================================================================

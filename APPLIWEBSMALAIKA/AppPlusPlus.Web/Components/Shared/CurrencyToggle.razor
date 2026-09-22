@@ -1,0 +1,67 @@
+@inject IUserCurrencyPreferenceService UserCurrency
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+@if (_ready)
+{
+    <div class="currency-toggle @CssClass" title="Devise d'affichage et de saisie" role="group" aria-label="Devise">
+        <button type="button"
+                class="currency-toggle-btn @(_activeUsd ? "active" : null)"
+                aria-pressed="@_activeUsd"
+                @onclick="@(() => SelectCurrencyAsync(CurrencyDefaults.MoneyIdUsd))">
+            USD
+        </button>
+        <button type="button"
+                class="currency-toggle-btn @(!_activeUsd ? "active" : null)"
+                aria-pressed="@(!_activeUsd)"
+                @onclick="@(() => SelectCurrencyAsync(CurrencyDefaults.MoneyIdCdf))">
+            FC
+        </button>
+    </div>
+}
+else
+{
+    <div class="currency-toggle currency-toggle--skeleton @CssClass" aria-hidden="true"></div>
+}
+
+@code {
+    [Parameter] public string CssClass { get; set; } = "";
+
+    bool _ready;
+    bool _activeUsd;
+
+    protected override async Task OnInitializedAsync()
+    {
+        UserCurrency.OnChanged += OnPreferenceChanged;
+        await UserCurrency.EnsureLoadedAsync();
+        _activeUsd = UserCurrency.IsUsdDisplay;
+        _ready = true;
+    }
+
+    async Task SelectCurrencyAsync(int moneyId)
+    {
+        if (UserCurrency.PreferredMoneyId == moneyId)
+            return;
+
+        _activeUsd = moneyId == CurrencyDefaults.MoneyIdUsd;
+        await UserCurrency.SetPreferredMoneyIdAsync(moneyId);
+        Snackbar.Add(
+            moneyId == CurrencyDefaults.MoneyIdUsd
+                ? "Devise : dollars (USD)"
+                : "Devise : francs congolais (FC)",
+            Severity.Info,
+            cfg => cfg.VisibleStateDuration = 1500);
+    }
+
+    void OnPreferenceChanged()
+    {
+        var next = UserCurrency.IsUsdDisplay;
+        if (_ready && next == _activeUsd)
+            return;
+        _activeUsd = next;
+        _ready = true;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => UserCurrency.OnChanged -= OnPreferenceChanged;
+}

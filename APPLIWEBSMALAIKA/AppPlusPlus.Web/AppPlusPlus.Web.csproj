@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Charset>utf-8</Charset>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <UserSecretsId>df639bbe-60d8-486c-852c-12ea123bcfdd</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MudBlazor" Version="8.5.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AppPlusPlus.Application\AppPlusPlus.Application.csproj" />
+    <ProjectReference Include="..\AppPlusPlus.Infrastructure\AppPlusPlus.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

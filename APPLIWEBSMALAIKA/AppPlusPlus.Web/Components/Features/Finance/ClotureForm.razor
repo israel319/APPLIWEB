@@ -1,0 +1,289 @@
+﻿@using AppPlusPlus.Application.DTOs.Finance
+@using AppPlusPlus.Domain.Entities.Administration
+@inject IClotureService ClotureService
+@inject IFinanceService FinanceService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        @if (_loading)
+        {
+            <div class="d-flex justify-content-center py-4">
+                <div class="spinner-border text-primary" role="status"></div>
+            </div>
+        }
+        else
+        {
+            <div class="aw-dialog">
+                <header class="aw-dialog__head">
+                    <div class="aw-dialog__title-wrap">
+                        <i class="bi bi-calendar-check" aria-hidden="true"></i>
+                        <h2 class="aw-dialog__title">Clôture de journée</h2>
+                    </div>
+                </header>
+                <div class="aw-dialog__body">
+                    <div class="alert alert-info mb-0">
+                        @if (_availableLocalisations.Count > 1)
+                        {
+                            <div class="mb-2">
+                                <label class="aw-field__label">Localisation</label>
+                                <MudSelect T="int" Value="_localisationId" ValueChanged="OnLocalisationChanged"
+                                           Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                                    @foreach (var loc in _availableLocalisations)
+                                    {
+                                        <MudSelectItem T="int" Value="@loc.IdLocalisation">@FormatLocOption(loc)</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </div>
+                        }
+                        <strong>@SelectedLocName</strong> — Journée du @_dateCloture.ToString("dd/MM/yyyy")
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_otherLocHint))
+                    {
+                        <div class="alert alert-warning mb-0 py-2 small" style="margin-top:0.65rem;">
+                            <i class="bi bi-exclamation-triangle me-1"></i>@_otherLocHint
+                        </div>
+                    }
+
+                    <div class="aw-stats" style="margin:0.85rem 0;">
+                        <div class="aw-stat">
+                            <span class="aw-stat__label">Factures payées</span>
+                            <span class="aw-stat__value">@_nbFactures</span>
+                            <span class="aw-table__meta" style="color:var(--aw-brand);">@ClotureUsdDisplay(_totalFactures)</span>
+                        </div>
+                        <div class="aw-stat">
+                            <span class="aw-stat__label">Encaissements</span>
+                            <span class="aw-stat__value">@_nbPaiements</span>
+                            <span class="aw-table__meta">liés aux factures</span>
+                        </div>
+                        <div class="aw-stat" style="border-color:var(--aw-brand);">
+                            <span class="aw-stat__label">Total</span>
+                            <span class="aw-stat__value" style="color:var(--aw-brand);">@ClotureUsdDisplay(_montantTotal)</span>
+                        </div>
+                    </div>
+
+                    @if (_dejaCloture)
+                    {
+                        <div class="alert alert-warning mb-0">
+                            <i class="bi bi-exclamation-triangle me-1"></i>
+                            Une clôture est déjà <strong>en attente d'approbation</strong> pour cette date et localisation.
+                        </div>
+                    }
+
+                    @if (_montantTotal == 0)
+                    {
+                        <div class="alert alert-secondary mb-0">
+                            Aucune vente trouvée pour cette journée et cette localisation. Vous pouvez quand même clôturer (montant 0) — un responsable devra approuver.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="alert alert-light border mb-0 small">
+                            <i class="bi bi-receipt me-1"></i><strong>@_totalOperations</strong> vente(s) comptabilisée(s) —
+                            la clôture sera <strong>en attente</strong> jusqu'à approbation par un autre utilisateur habilité.
+                            @if (_apresCloturePrecedente)
+                            {
+                                <span class="d-block mt-1 text-primary">
+                                    <i class="bi bi-plus-circle me-1"></i>Seules les ventes de la <strong>nouvelle période</strong> (après la dernière clôture approuvée) sont incluses.
+                                </span>
+                            }
+                        </div>
+                    }
+
+                    <div class="aw-field" style="margin-top:0.85rem;">
+                        <label class="aw-field__label">Destination des fonds *</label>
+                        <MudSelect T="string" @bind-Value="_modeVersement" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                                   Placeholder="Choisir">
+                            @foreach (var m in _modes)
+                            {
+                                <MudSelectItem T="string" Value="@m">@m</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </div>
+
+                    <div class="aw-field" style="margin-top:0.75rem;">
+                        <label class="aw-field__label">Observation (optionnel)</label>
+                        <textarea class="aw-input" @bind="_observation" rows="2" placeholder="Optionnel" style="height:auto;padding:0.55rem 0.7rem;"></textarea>
+                    </div>
+                </div>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (!_loading)
+        {
+            <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                    <i class="bi bi-x-lg"></i> Annuler
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="OnCloture"
+                        disabled="@(_dejaCloture || string.IsNullOrEmpty(_modeVersement) || _submitting)">
+                    <i class="bi bi-check-circle"></i> Soumettre la clôture
+                </button>
+            </div>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int LocalisationId { get; set; }
+    [Parameter] public string LocalisationName { get; set; } = "";
+    [Parameter] public string UserLogin { get; set; } = "";
+    [Parameter] public List<Localisation> AvailableLocalisations { get; set; } = new();
+
+    bool _loading = true;
+    bool _dejaCloture;
+    bool _submitting;
+    int _localisationId;
+    List<Localisation> _availableLocalisations = new();
+    Dictionary<int, ClotureSummaryDto> _summariesByLoc = new();
+    string? _otherLocHint;
+
+    string SelectedLocName => _availableLocalisations
+        .FirstOrDefault(l => l.IdLocalisation == _localisationId)?.DescriptionLocalisation
+        ?? LocalisationName;
+
+    int _nbFactures;
+    decimal _totalFactures;
+    int _nbPaiements;
+    decimal _totalPaiements;
+    decimal _montantTotal;
+    decimal _displayTaux;
+    int _totalOperations;
+    bool _apresCloturePrecedente;
+
+    DateOnly _dateCloture = DateOnly.FromDateTime(DateTime.Today);
+    string _modeVersement = "Caisse";
+    string? _observation;
+    List<string> _modes = new() { "Caisse", "Banque", "Mobile Money", "Chèque", "Autre" };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _availableLocalisations = AvailableLocalisations.Any()
+            ? AvailableLocalisations
+            : new List<Localisation> { new() { IdLocalisation = LocalisationId, DescriptionLocalisation = LocalisationName } };
+
+        var locIds = _availableLocalisations.Select(l => l.IdLocalisation).ToList();
+        _summariesByLoc = await ClotureService.GetClotureSummariesAsync(_dateCloture, locIds);
+
+        var suggestedLocId = await ClotureService.GetSuggestedLocalisationForClotureAsync(_dateCloture, locIds)
+            ?? LocalisationId;
+        _localisationId = suggestedLocId;
+
+        await ReloadSummaryAsync();
+    }
+
+    async Task OnLocalisationChanged(int locId)
+    {
+        _localisationId = locId;
+        await ReloadSummaryAsync();
+    }
+
+    string FormatLocOption(Localisation loc)
+    {
+        if (!_summariesByLoc.TryGetValue(loc.IdLocalisation, out var summary))
+            return loc.DescriptionLocalisation ?? $"Loc. {loc.IdLocalisation}";
+
+        var ops = summary.NbOperations;
+        if (ops <= 0)
+            return $"{loc.DescriptionLocalisation} (0 vente)";
+
+        return $"{loc.DescriptionLocalisation} ({ops} vente{(ops > 1 ? "s" : "")} — {ClotureUsdDisplay(summary.MontantTotal)})";
+    }
+
+    void UpdateOtherLocHint()
+    {
+        _otherLocHint = null;
+        if (_montantTotal > 0) return;
+
+        var autres = _availableLocalisations
+            .Where(l => l.IdLocalisation != _localisationId
+                && _summariesByLoc.TryGetValue(l.IdLocalisation, out var s)
+                && s.MontantTotal > 0)
+            .Select(l =>
+            {
+                var s = _summariesByLoc[l.IdLocalisation];
+                return $"{l.DescriptionLocalisation} ({s.NbOperations} vente{(s.NbOperations > 1 ? "s" : "")})";
+            })
+            .ToList();
+
+        if (autres.Any())
+            _otherLocHint = $"Des ventes existent ailleurs aujourd'hui : {string.Join(", ", autres)}. Choisissez la bonne localisation.";
+    }
+
+    async Task ReloadSummaryAsync()
+    {
+        _loading = true;
+
+        var tauxList = await FinanceService.GetTauxAsync();
+        _displayTaux = tauxList.OrderByDescending(t => t.Id).FirstOrDefault()?.TauxValue ?? 0;
+
+        var summary = await ClotureService.GetClotureSummaryAsync(_dateCloture, _localisationId);
+        _dejaCloture = summary.DejaClotureExiste;
+        _nbFactures = summary.NbFactures;
+        _totalFactures = summary.TotalFactures;
+        _nbPaiements = summary.NbPaiements;
+        _totalPaiements = summary.TotalPaiements;
+        _montantTotal = summary.MontantTotal;
+        _totalOperations = summary.NbOperations;
+        _apresCloturePrecedente = summary.ApresCloturePrecedente;
+        UpdateOtherLocHint();
+
+        _loading = false;
+    }
+
+    string ClotureUsdDisplay(decimal amountFc) =>
+        UserCurrency.FormatFromFcStored(amountFc, _displayTaux);
+
+    void Cancel() => MudDialog.Cancel();
+
+    async Task OnCloture()
+    {
+        if (_dejaCloture || string.IsNullOrEmpty(_modeVersement) || _submitting) return;
+
+        _submitting = true;
+        try
+        {
+            var existe = await ClotureService.ClotureExistsAsync(_dateCloture, _localisationId);
+
+            if (existe)
+            {
+                Snackbar.Add("Une clôture est déjà en attente d'approbation pour cette date.", Severity.Warning);
+                return;
+            }
+
+            var versement = new Versement
+            {
+                DateCloture = _dateCloture,
+                HeureCloture = DateTime.Now,
+                LocalisationId = _localisationId,
+                TypeOperation = "Journalière",
+                Montant = _montantTotal,
+                ModeVersement = _modeVersement,
+                NombreOperations = _totalOperations,
+                Observation = _observation,
+                UserLogin = UserLogin,
+                DateSys = DateTime.Now,
+                StatutCloture = 0
+            };
+
+            MonetaryStandard.ApplyVersement(versement, _displayTaux);
+            await ClotureService.CreateClotureAsync(versement);
+
+            var montantLabel = _montantTotal > 0 ? ClotureUsdDisplay(_montantTotal) : "0 $";
+            Snackbar.Add($"Clôture soumise ({montantLabel}) — en attente d'approbation admin.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(msg, Severity.Error);
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+}

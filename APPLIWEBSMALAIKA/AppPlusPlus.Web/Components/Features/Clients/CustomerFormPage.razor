@@ -1,0 +1,222 @@
+@page "/commandes/client/nouveau"
+@page "/commandes/client/modifier/{CustomerId:int}"
+@rendermode InteractiveServer
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@inject ICustomerService CustomerService
+@inject ICommandeService CommandeService
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>@AppSettings.AppName — @(_isEdit ? "Modifier le client" : "Nouveau client")</PageTitle>
+
+<div class="aw-page">
+    <div class="aw-form">
+        <header class="aw-form__head">
+            <div>
+                <p class="aw-form__eyebrow">Commandes &amp; clients</p>
+                <h1 class="aw-form__title">@(_isEdit ? "Modifier le client" : "Nouveau client")</h1>
+            </div>
+            <div class="aw-form__actions">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="OnCancel">
+                    <i class="bi bi-arrow-left"></i> Annuler
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="OnSave" disabled="@_saving">
+                    <i class="bi bi-check-lg"></i> Enregistrer
+                </button>
+            </div>
+        </header>
+        <div class="aw-form__body">
+            <div class="aw-pref__row" style="border:1px solid var(--aw-line);border-radius:8px;margin-bottom:1rem;padding:0.75rem 0.9rem;">
+                <div class="aw-pref__meta">
+                    <i class="bi bi-person-check" aria-hidden="true"></i>
+                    <div>
+                        <p class="aw-pref__label">Client permanent</p>
+                        <p class="aw-pref__hint">@(_isPermanent ? "Client avec compte (permanent)" : "Client passager (sans compte)")</p>
+                    </div>
+                </div>
+                <input class="aw-switch" type="checkbox" role="switch" @bind="_isPermanent" />
+            </div>
+
+            <div class="aw-form__grid">
+                <div class="aw-field aw-form__span-2">
+                    <label class="aw-field__label">Nom / Description</label>
+                    <input type="text" class="aw-input" @bind="_customer.CustomerName" maxlength="50"
+                           placeholder="Nom du client"
+                           style="@(_showError ? "border-color:var(--aw-danger);" : null)" />
+                    @if (_showError)
+                    {
+                        <p class="aw-field__error">Obligatoire</p>
+                    }
+                </div>
+                <div class="aw-field aw-form__span-2">
+                    <label class="aw-field__label">Contact</label>
+                    <input type="text" class="aw-input" @bind="_customer.Contact" maxlength="50"
+                           placeholder="Téléphone ou contact" />
+                </div>
+                @if (_isPermanent)
+                {
+                    <div class="aw-field">
+                        <label class="aw-field__label">Email</label>
+                        <input type="text" class="aw-input" @bind="_customer.Email" maxlength="50"
+                               placeholder="email@exemple.com" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Adresse</label>
+                        <input type="text" class="aw-input" @bind="_customer.Adress" maxlength="50"
+                               placeholder="Adresse du client" />
+                    </div>
+                }
+            </div>
+
+            @if (_isEdit && _loyaltySummary != null)
+            {
+                <div style="margin-top:1.15rem;padding-top:1rem;border-top:1px solid var(--aw-line);">
+                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                        <div>
+                            <h6 class="aw-dialog__section" style="margin:0;text-transform:none;letter-spacing:0;font-size:0.92rem;">
+                                <i class="bi bi-star-fill" style="color:var(--aw-accent);"></i> Points fidélité
+                            </h6>
+                            <p class="aw-field__hint">@CustomerLoyaltyRules.RuleSummary</p>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2">
+                            <span class="aw-badge aw-badge--brand">
+                                @(_loyaltySummary.AcquiredPoints) pt@(_loyaltySummary.AcquiredPoints > 1 ? "s" : "") acquis
+                            </span>
+                            @if (_loyaltySummary.PendingPoints > 0)
+                            {
+                                <span class="aw-badge aw-badge--accent">
+                                    +@(_loyaltySummary.PendingPoints) en attente
+                                </span>
+                            }
+                        </div>
+                    </div>
+
+                    @if (_loyaltyOrders.Any())
+                    {
+                        <div class="aw-table-wrap">
+                            <table class="aw-table" style="min-width:0;">
+                                <thead>
+                                    <tr>
+                                        <th>Commande</th>
+                                        <th>Date</th>
+                                        <th>Montant FC</th>
+                                        <th>Points</th>
+                                        <th>Statut points</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var line in _loyaltyOrders)
+                                    {
+                                        <tr style="cursor:default;">
+                                            <td>N° @line.CommandeId</td>
+                                            <td>@(line.CreationDate?.ToString("dd/MM/yyyy") ?? "—")</td>
+                                            <td class="aw-table__num">@CurrencyFormat.Cdf(line.MontantFc, "N0")</td>
+                                            <td class="aw-table__num">@line.Points</td>
+                                            <td>
+                                                @if (line.IsAcquired)
+                                                {
+                                                    <span class="aw-badge aw-badge--brand">@line.StatusLabel</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-badge aw-badge--accent">@line.StatusLabel</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="aw-field__hint">Aucune commande d'au moins 1 000 FC pour ce client.</p>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public int? CustomerId { get; set; }
+
+    bool _isEdit;
+    Customer _customer = new() { CreationDate = DateOnly.FromDateTime(DateTime.Today) };
+    bool _isPermanent = true;
+    bool _saving;
+    bool _showError;
+    string _currentLogin = "";
+    string? _returnUrl;
+    CustomerLoyaltySummaryDto? _loyaltySummary;
+    List<CustomerLoyaltyOrderLineDto> _loyaltyOrders = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+        }
+
+        // Check for returnUrl query param
+        var uri = new Uri(Navigation.Uri);
+        var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        _returnUrl = query["returnUrl"];
+
+        if (CustomerId.HasValue)
+        {
+            _isEdit = true;
+            var existing = await CustomerService.GetByIdAsync(CustomerId.Value);
+            if (existing != null)
+            {
+                _customer = existing;
+                _isPermanent = _customer.IsPermanent ?? true;
+                var summaries = await CommandeService.GetCustomerLoyaltySummariesAsync();
+                _loyaltySummary = summaries.GetValueOrDefault(_customer.CustomerId)
+                                  ?? new CustomerLoyaltySummaryDto { CustomerId = _customer.CustomerId };
+                _loyaltyOrders = await CommandeService.GetCustomerLoyaltyOrdersAsync(_customer.CustomerId);
+            }
+        }
+    }
+
+    void OnCancel() => Navigation.NavigateTo(_returnUrl ?? "/commandes");
+
+    async Task OnSave()
+    {
+        _showError = string.IsNullOrWhiteSpace(_customer.CustomerName);
+        if (_showError) return;
+
+        try
+        {
+            _saving = true;
+            _customer.IsPermanent = _isPermanent;
+            if (_isEdit)
+            {
+                await CustomerService.UpdateAsync(_customer);
+            }
+            else
+            {
+                _customer.UserLogin = _currentLogin;
+                await CustomerService.AddAsync(_customer);
+            }
+            Snackbar.Add("Client enregistré", Severity.Success);
+            Navigation.NavigateTo(_returnUrl ?? "/commandes");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.InnerException?.Message ?? ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

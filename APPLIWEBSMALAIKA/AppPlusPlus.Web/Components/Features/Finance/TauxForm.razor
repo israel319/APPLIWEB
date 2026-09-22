@@ -1,0 +1,99 @@
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@inject IFinanceService FinanceService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<MudDialog>
+    <DialogContent>
+        <div class="lov-form-header">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-currency-exchange text-primary"></i>
+                <h5 class="mb-0">@(TauxId.HasValue ? "Modifier le taux" : "Nouveau taux")</h5>
+            </div>
+        </div>
+        <div class="lov-form-body">
+
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <div class="lov-field">
+                        <label class="form-label">Taux</label>
+                        <MudNumericField @bind-Value="_taux.TauxValue" T="decimal" Format="N2"
+                                         Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="0.00" />
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="lov-field">
+                        <label class="form-label">Taux bas</label>
+                        <MudNumericField @bind-Value="_taux.RateLow" T="decimal?" Format="N2"
+                                         Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="0.00" />
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="lov-field">
+                        <label class="form-label">Taux haut</label>
+                        <MudNumericField @bind-Value="_taux.RateUp" T="decimal?" Format="N2"
+                                         Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="0.00" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="lov-field">
+                <label class="form-label">Commentaire</label>
+                <textarea class="form-control" @bind="_taux.Comment" rows="2" placeholder="Optionnel"></textarea>
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="hub-dialog-actions px-1 pb-1">
+            <div></div>
+            <div class="hub-dialog-actions-right">
+                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="Cancel">
+                    <i class="bi bi-x-lg me-1"></i>Annuler
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" @onclick="OnSubmit">
+                    <i class="bi bi-check-lg me-1"></i>Enregistrer
+                </button>
+            </div>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int? TauxId { get; set; }
+
+    Taux _taux = new();
+    string _currentLogin = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+        }
+
+        if (TauxId.HasValue)
+        {
+            var existing = await FinanceService.GetTauxByIdAsync(TauxId.Value);
+            if (existing != null) _taux = existing;
+        }
+    }
+
+    void Cancel() => MudDialog.Close();
+
+    async Task OnSubmit()
+    {
+        _taux.UserLogin = _currentLogin;
+        _taux.DateSys = DateOnly.FromDateTime(DateTime.Now);
+        if (TauxId.HasValue)
+            await FinanceService.UpdateTauxAsync(_taux);
+        else
+            await FinanceService.AddTauxAsync(_taux);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+}

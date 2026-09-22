@@ -1,0 +1,340 @@
+@using AppPlusPlus.Application.DTOs.Prestations
+@using AppPlusPlus.Application.Services.Prestations
+@using AppPlusPlus.Application.Interfaces
+@using AppPlusPlus.Domain.Common
+@inject IServiceManagementService ServiceManagement
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+@inject INumberToWordsConverter NumberToWords
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using System.Globalization
+
+@if (!_loaded)
+{
+    <div class="aw-page fact-shell fact-shell--loading">
+        <div class="aw-loading" style="flex:1;">
+            <span class="aw-spinner" role="status" aria-hidden="true"></span>
+            <span>Chargement…</span>
+        </div>
+    </div>
+}
+else if (!_canRead || _invoice == null)
+{
+    <div class="aw-page fact-shell fact-shell--loading">
+        <div class="aw-empty" style="flex:1;">
+            <i class="bi bi-receipt"></i>
+            <p>Facture introuvable</p>
+            <button type="button" class="aw-btn aw-btn--primary" @onclick="GoBack">Retour</button>
+        </div>
+    </div>
+}
+else
+{
+    <PageTitle>@AppSettings.AppName — Facture prestation @FactId</PageTitle>
+
+    <div class="aw-page fact-shell">
+        <header class="aw-object-head fact-header">
+            <div class="fact-header-left">
+                <button type="button" class="aw-btn aw-btn--ghost aw-btn--icon aw-btn--sm"
+                        @onclick="GoBack" title="Retour">
+                    <i class="bi bi-arrow-left"></i>
+                </button>
+                <div class="aw-object-head__identity">
+                    <p class="aw-object-head__eyebrow">Facturation prestation</p>
+                    <h1 class="aw-object-head__title">Facture N° @_invoice.Id</h1>
+                </div>
+            </div>
+            <div class="fact-header-right" style="display:inline-flex;align-items:center;gap:0.45rem;">
+                <span class="aw-badge aw-badge--muted">FAC-@_invoice.Id</span>
+                <span class="aw-badge @StatusBadgeClass(_invoice.Status)">@StatusLabel(_invoice.Status)</span>
+                <span class="aw-badge aw-badge--accent">
+                    @_invoice.Date.ToString("dd MMM yyyy", CultureInfo.GetCultureInfo("fr-FR"))
+                </span>
+            </div>
+        </header>
+
+        <div class="fact-svc-strip">
+            <ServicesSubNav />
+        </div>
+
+        <div class="fact-body">
+            <div class="fact-left">
+                <div class="fact-client-bar">
+                    <div class="fact-client-pill fact-client-pill--readonly">
+                        <MudIcon Icon="@Icons.Material.Filled.Person" Style="font-size:15px;" />
+                        <span class="fact-client-pill-name">@_invoice.ClientName</span>
+                        <span class="aw-badge aw-badge--muted">Client</span>
+                    </div>
+                </div>
+
+                <div class="fact-svc-mission-bar">
+                    <MudIcon Icon="@Icons.Material.Filled.Work" Style="font-size:18px;color:var(--aw-brand);flex-shrink:0;" />
+                    <div class="flex-grow-1 min-w-0">
+                        <div class="fact-svc-mission-label">Mission</div>
+                        <a href="/services/projet/@_invoice.ProjectId" class="fact-svc-mission-link">@_invoice.ProjectTitle</a>
+                    </div>
+                    <span class="aw-badge aw-badge--primary">Prestation</span>
+                </div>
+
+                <div class="fact-items-area">
+                    @if (!_invoice.Lines.Any())
+                    {
+                        <div class="fact-empty">
+                            <div class="fact-empty-circle">
+                                <MudIcon Icon="@Icons.Material.Filled.Schedule" />
+                            </div>
+                            <p class="fact-empty-title">Aucune ligne</p>
+                            <p class="fact-empty-hint">Cette facture ne contient pas de prestations.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="fact-items-list">
+                            @{ var rowIdx = 0; }
+                            @foreach (var line in _invoice.Lines)
+                            {
+                                rowIdx++;
+                                var isHours = line.Label.Contains("Prestation", StringComparison.OrdinalIgnoreCase)
+                                    || line.Qte != Math.Floor(line.Qte) || line.Qte > 0 && line.Qte <= 500;
+                                var puDual = CurrencyFormat.FactLineDualParts(
+                                    null, null, null, null,
+                                    (decimal)line.Pu, 1,
+                                    _invoice.MoneyId ?? CurrencyDefaults.MoneyIdCdf, _invoice.Taux, puStoredInCdf: false);
+                                var lineDual = CurrencyFormat.FactLineDualParts(
+                                    line.Montant, line.MoneyId, line.Taux, line.MontantApresConversion,
+                                    (decimal)line.Pu, (decimal)line.Qte,
+                                    _invoice.MoneyId ?? CurrencyDefaults.MoneyIdCdf, _invoice.Taux, puStoredInCdf: false);
+                                <div class="fact-item-card">
+                                    <div class="fact-item-main">
+                                        <span class="fact-item-idx">@rowIdx</span>
+                                        <div class="fact-item-info">
+                                            <p class="fact-item-name">@LineTitle(line.Label)</p>
+                                            <p class="fact-item-meta">
+                                                <span class="aw-badge aw-badge--muted">@(isHours ? "Heures" : "Forfait")</span>
+                                                <span>@puDual.Primary / @(isHours ? "heure" : "unité") · @puDual.Equivalent</span>
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div class="fact-item-actions">
+                                        <div class="fact-qty fact-qty--readonly">
+                                            <span class="fact-qty-val">@FormatQty(line.Qte)</span>
+                                            <span class="fact-qty-unit">@(isHours ? "h" : "")</span>
+                                        </div>
+                                        <div class="fact-item-total-block">
+                                            <span class="fact-item-total">@lineDual.Primary</span>
+                                            <span class="fact-item-total-equiv">@lineDual.Equivalent</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="fact-right">
+                <div class="fact-sb-section">
+                    <span class="fact-sb-label">Type de facture</span>
+                    <div class="fact-loc-readonly">
+                        <i class="bi bi-briefcase me-1"></i> Prestation / Service client
+                    </div>
+                    <p class="fact-svc-hint mb-0 mt-2">Même écran que la caisse magasin, mais pour les heures et forfaits — pas les produits stock.</p>
+                </div>
+
+                <div class="fact-sb-section">
+                    <div class="fact-sb-two-cols">
+                        <div>
+                            <span class="fact-sb-label">Date</span>
+                            <div class="fact-loc-readonly">@_invoice.Date.ToString("dd/MM/yyyy")</div>
+                        </div>
+                        <div>
+                            <span class="fact-sb-label">Lignes</span>
+                            <div class="fact-loc-readonly">@_invoice.Lines.Count</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="fact-sb-section fact-sb-totals">
+                    <div class="fact-sb-row">
+                        <span>Sous-total</span>
+                        <span style="font-weight:500;">@CurrencyFormat.Fact(_invoice.Total, _invoice.IsUsd, _invoice.Taux)</span>
+                    </div>
+                    <div class="fact-sb-divider"></div>
+                    <div class="fact-sb-row fact-sb-net">
+                        <span>Net à payer</span>
+                        <span class="fact-net-amount">@CurrencyFormat.Fact(NetAmount, _invoice.IsUsd, _invoice.Taux)</span>
+                    </div>
+                    <div class="fact-amount-words">
+                        @(string.IsNullOrEmpty(_invoice.MontantEnLettres) ? AmountInWords() : _invoice.MontantEnLettres)
+                    </div>
+                    @if (_invoice.Taux > 0)
+                    {
+                        <div class="fact-amount-equiv">
+                            Taux : <strong>@(_invoice.Taux.ToString("N0"))</strong>
+                            @if (!_invoice.IsUsd)
+                            {
+                                <span> · Équiv. USD : <strong>@CurrencyFormat.Usd(CurrencyFormat.CdfStoredToUsd(NetAmount, _invoice.Taux))</strong></span>
+                            }
+                            else
+                            {
+                                <span> · Équiv. FC : <strong>@CurrencyFormat.Cdf(CurrencyFormat.NormalizeLegacyFactCdf(NetAmount, _invoice.Taux), "N0")</strong></span>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <div class="fact-sb-actions" style="flex-direction:column;align-items:stretch;">
+                    @if (_canWrite && _invoice.Status == 0)
+                    {
+                        <button type="button" class="aw-btn aw-btn--primary"
+                                style="width:100%;justify-content:center;"
+                                @onclick="ValidateAsync" disabled="@_busy">
+                            <i class="bi bi-receipt"></i> Valider la facture
+                        </button>
+                        <button type="button" class="aw-btn aw-btn--ghost"
+                                style="width:100%;justify-content:center;"
+                                @onclick="@(() => Navigation.NavigateTo($"/services/projet/{_invoice.ProjectId}"))" disabled="@_busy">
+                            <i class="bi bi-arrow-left"></i> Retour à la mission
+                        </button>
+                        <button type="button" class="aw-btn aw-btn--danger"
+                                style="width:100%;justify-content:center;"
+                                @onclick="DeleteAsync" disabled="@_busy">
+                            <i class="bi bi-trash"></i> Supprimer le brouillon
+                        </button>
+                    }
+                    else if (_invoice.Status is 1 or 2)
+                    {
+                        <button type="button" class="aw-btn aw-btn--primary"
+                                style="width:100%;justify-content:center;"
+                                @onclick="Print">
+                            <i class="bi bi-printer"></i> Imprimer
+                        </button>
+                        <button type="button" class="aw-btn aw-btn--ghost"
+                                style="width:100%;justify-content:center;"
+                                @onclick="@(() => Navigation.NavigateTo($"/services/projet/{_invoice.ProjectId}"))">
+                            <i class="bi bi-folder2"></i> Voir la mission
+                        </button>
+                    }
+                    else
+                    {
+                        <button type="button" class="aw-btn aw-btn--ghost"
+                                style="width:100%;justify-content:center;" @onclick="GoBack">
+                            Retour à la liste
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int FactId { get; set; }
+    [Parameter] public bool CanWrite { get; set; }
+    [Parameter] public bool CanRead { get; set; }
+    [Parameter] public EventCallback OnBack { get; set; }
+
+    bool _loaded;
+    bool _busy;
+    bool _canRead;
+    bool _canWrite;
+    string _login = "";
+    ServiceInvoiceDetailDto? _invoice;
+
+    decimal NetAmount => _invoice?.TotalApresReduction ?? _invoice?.Total ?? 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        _login = auth.User.FindFirst("login")?.Value
+            ?? auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "";
+        var isAdmin = AppFunctions.Normalize(auth.User.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+        var perms = await PermissionResolver.GetPermissionsAsync(_login);
+        _canRead = CanRead || isAdmin || perms.CanRead(AppFunctions.Services);
+        _canWrite = CanWrite || isAdmin || perms.CanWrite(AppFunctions.Services);
+
+        if (_canRead)
+            _invoice = await ServiceManagement.GetServiceInvoiceAsync(FactId);
+
+        _loaded = true;
+    }
+
+    async Task GoBack()
+    {
+        if (OnBack.HasDelegate)
+            await OnBack.InvokeAsync();
+        else
+            Navigation.NavigateTo("/services/facturation");
+    }
+
+    static string StatusLabel(int s) => s switch
+    {
+        0 => "Brouillon",
+        1 => "Validée",
+        2 => "Payée",
+        3 => "Annulée",
+        _ => "—"
+    };
+
+    static string StatusBadgeClass(int s) => s switch
+    {
+        0 => "aw-badge--accent",
+        1 => "aw-badge--primary",
+        2 => "aw-badge--brand",
+        3 => "aw-badge--danger",
+        _ => "aw-badge--muted"
+    };
+
+    static string LineTitle(string label)
+    {
+        if (label.StartsWith("Prestation — ", StringComparison.OrdinalIgnoreCase))
+            return label["Prestation — ".Length..];
+        if (label.StartsWith("Forfait — ", StringComparison.OrdinalIgnoreCase))
+            return label["Forfait — ".Length..];
+        return label;
+    }
+
+    static string FormatQty(double q) => q % 1 == 0 ? q.ToString("0") : q.ToString("0.##");
+
+    string AmountInWords()
+    {
+        if (_invoice == null) return "";
+        var display = _invoice.IsUsd && _invoice.Taux > 0
+            ? Math.Round(NetAmount / _invoice.Taux, 2)
+            : NetAmount;
+        return NumberToWords.Convert(display,
+            _invoice.IsUsd ? "dollars" : "francs",
+            _invoice.IsUsd ? "cents" : "centimes");
+    }
+
+    async Task ValidateAsync()
+    {
+        _busy = true;
+        try
+        {
+            var r = await ServiceManagement.ValidateServiceInvoiceAsync(FactId, _login);
+            Snackbar.Add(r.Message, r.Success ? Severity.Success : Severity.Error);
+            if (r.Success)
+                Navigation.NavigateTo($"/services/facturation/imprimer/{FactId}/true");
+        }
+        finally { _busy = false; }
+    }
+
+    async Task DeleteAsync()
+    {
+        _busy = true;
+        try
+        {
+            var r = await ServiceManagement.DeleteServiceInvoiceDraftAsync(FactId, _login);
+            Snackbar.Add(r.Message, r.Success ? Severity.Success : Severity.Error);
+            if (r.Success)
+                await GoBack();
+        }
+        finally { _busy = false; }
+    }
+
+    void Print() => Navigation.NavigateTo($"/services/facturation/imprimer/{FactId}/true");
+}

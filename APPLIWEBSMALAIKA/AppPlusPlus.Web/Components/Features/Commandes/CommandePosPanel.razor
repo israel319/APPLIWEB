@@ -1,0 +1,357 @@
+@using System.Security.Claims
+@inject ICatalogueService CatalogueService
+@inject ICommandeService CommandeService
+@inject ICustomerService CustomerService
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IUserCurrencyPreferenceService UserCurrency
+@using AppPlusPlus.Application.Services.Shared
+@using AppPlusPlus.Domain.Common
+
+<div class="pos-shell">
+    <div class="pos-catalog-panel">
+        <div class="pos-catalog-header">
+            <div>
+                <h5 class="pos-title mb-0">Catalogue</h5>
+                <small class="text-muted">Touchez une photo pour ajouter — chaque touche = 1 unité</small>
+            </div>
+            <input type="text" class="form-control form-control-sm pos-search"
+                   placeholder="Rechercher…" @bind="_search" @bind:event="oninput" />
+        </div>
+
+        @if (_loading)
+        {
+            <div class="aw-skel" style="padding:1.25rem;">
+                <AwSkeleton Variant="rows" Rows="6" />
+            </div>
+        }
+        else if (!FilteredArticles().Any())
+        {
+            <div class="pos-empty">
+                <i class="bi bi-image"></i>
+                <p>Aucun article avec photo.</p>
+                <small>Ajoutez une image sur la fiche article (Stock → modifier l'article).</small>
+            </div>
+        }
+        else
+        {
+            <div class="pos-catalog-grid">
+                @foreach (var art in FilteredArticles())
+                {
+                    var qty = GetCartQty(art.IdArticle);
+                    <button type="button" class="pos-product-card @(qty > 0 ? "pos-product-card--active" : "")"
+                            @onclick="@(() => AddOne(art))">
+                        @if (qty > 0)
+                        {
+                            <span class="pos-qty-badge">@qty</span>
+                        }
+                        <div class="pos-product-card__img">
+                            <img src="@art.ImageArticle" alt="@art.Description" loading="lazy" decoding="async" />
+                        </div>
+                        <div class="pos-product-card__info">
+                            <div class="pos-product-card__name">@art.Description</div>
+                            <div class="pos-product-card__price">@FormatPrice(art)</div>
+                        </div>
+                    </button>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="pos-cart-panel">
+        <div class="pos-cart-header">
+            <h5 class="pos-title mb-0"><i class="bi bi-cart3 me-2"></i>Panier</h5>
+            @if (_cart.Any())
+            {
+                <button type="button" class="aw-btn aw-btn--danger aw-btn--sm" @onclick="ClearCart">
+                    <i class="bi bi-trash"></i> Vider
+                </button>
+            }
+        </div>
+
+        <div class="pos-cart-lines">
+            @if (!_cart.Any())
+            {
+                <p class="text-muted text-center py-4 mb-0">Touchez les produits à gauche</p>
+            }
+            else
+            {
+                @foreach (var line in _cart.OrderBy(l => l.Description))
+                {
+                    <div class="pos-cart-line">
+                        <div class="pos-cart-line__main">
+                            @if (!string.IsNullOrWhiteSpace(line.ImageArticle))
+                            {
+                                <img src="@line.ImageArticle" alt="" class="pos-cart-line__thumb" loading="lazy" decoding="async" />
+                            }
+                            <div class="flex-grow-1 min-width-0">
+                                <div class="fw-semibold text-truncate">@line.Description</div>
+                                <small class="text-muted">@FormatPrice(line) × @line.Qty</small>
+                            </div>
+                        </div>
+                        <div class="pos-cart-line__actions">
+                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--icon aw-btn--sm" @onclick="@(() => ChangeQty(line, -1))" aria-label="Diminuer">−</button>
+                            <span class="pos-cart-line__qty">@line.Qty</span>
+                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--icon aw-btn--sm" @onclick="@(() => ChangeQty(line, 1))" aria-label="Augmenter">+</button>
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+
+        <div class="pos-cart-footer">
+            <label class="form-label small mb-1">Client (optionnel)</label>
+            <MudAutocomplete T="Customer" Value="_selectedCustomer"
+                             ValueChanged="@(c => _selectedCustomer = c)"
+                             SearchFunc="@SearchCustomers"
+                             ToStringFunc="@(c => c?.CustomerName ?? "")"
+                             Placeholder="Passager / client…"
+                             Dense="true" Style="width:100%;"
+                             CoerceText="true" CoerceValue="true" />
+
+            <div class="pos-total-box">
+                <span>Total</span>
+                <strong>@CurrencyFormat.Cdf(_cartTotalFc, "N0")</strong>
+            </div>
+
+            <div class="pos-cart-footer__actions">
+                <button type="button" class="aw-btn aw-btn--primary" style="width:100%;height:2.5rem;" disabled="@(_saving || !_cart.Any())"
+                        @onclick="SaveCommandeAsync">
+                    <i class="bi bi-check-lg"></i> Enregistrer la commande
+                </button>
+                <button type="button" class="aw-btn aw-btn--ghost" style="width:100%;height:2.5rem;" disabled="@(_saving || !_cart.Any())"
+                        @onclick="SaveAndPrintAsync">
+                    <i class="bi bi-printer"></i> Encaisser &amp; imprimer
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="pos-print-root" class="pos-print-root">
+    <div class="pos-print-doc">
+        <h2>@AppSettings.AppName</h2>
+        <p class="mb-1"><strong>Commande client</strong> — @DateTime.Now.ToString("dd/MM/yyyy HH:mm")</p>
+        @if (_selectedCustomer != null)
+        {
+            <p class="mb-2">Client : @_selectedCustomer.CustomerName</p>
+        }
+        <table class="pos-print-table">
+            <thead>
+                <tr><th>Article</th><th>Qté</th><th>P.U.</th><th>Total</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var line in _lastPrintLines)
+                {
+                    <tr>
+                        <td>@line.Description</td>
+                        <td>@line.Qty</td>
+                        <td>@UserCurrency.FormatBusiness(line.Pu)</td>
+                        <td>@UserCurrency.FormatBusiness(line.Qty * line.Pu)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <p class="pos-print-total">TOTAL : @UserCurrency.FormatBusiness(_lastPrintTotal)</p>
+        @if (_lastCommandeId > 0)
+        {
+            <p class="mb-0">N° commande : @_lastCommandeId</p>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    bool _loading = true;
+    bool _saving;
+    string _search = "";
+    string _currentLogin = "";
+    List<Article> _articles = new();
+    List<Customer> _customers = new();
+    List<PosLine> _cart = new();
+    Customer? _selectedCustomer;
+
+    decimal _cartTotalFc => CommandePricing.OrderTotalFc(
+        _cart.Select(l => (l.Pu, l.IdMonais, (decimal)l.Qty)),
+        UserCurrency.CachedTaux);
+    int _lastCommandeId;
+    decimal _lastPrintTotal;
+    List<PosLine> _lastPrintLines = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (auth.User.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = auth.User.FindFirst("login")?.Value
+                ?? auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "";
+        }
+        await UserCurrency.EnsureLoadedAsync();
+        _customers = await CustomerService.GetAllAsync();
+        await ReloadArticlesAsync();
+    }
+
+    public async Task ReloadArticlesAsync()
+    {
+        _loading = true;
+        _articles = await CatalogueService.GetArticlesAsync();
+        _loading = false;
+    }
+
+    IEnumerable<Article> FilteredArticles()
+    {
+        var q = _articles.Where(a => !string.IsNullOrWhiteSpace(a.ImageArticle));
+        if (!string.IsNullOrWhiteSpace(_search))
+        {
+            var s = _search.Trim();
+            q = q.Where(a =>
+                (a.Description?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (a.IdArticle?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+        return q.OrderBy(a => a.Description);
+    }
+
+    Task<IEnumerable<Customer>> SearchCustomers(string filter, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+            return Task.FromResult(_customers.AsEnumerable());
+        return Task.FromResult(_customers
+            .Where(c => c.CustomerName?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false));
+    }
+
+    int GetCartQty(string id) => _cart.FirstOrDefault(l => l.ArticleId == id)?.Qty ?? 0;
+
+    string FormatPrice(Article art) =>
+        CurrencyFormat.CatalogAsCdf((decimal)art.Price, CurrencyDefaults.IsUsdMoneyId(art.IdMonais), UserCurrency.CachedTaux, "N0");
+
+    string FormatPrice(PosLine line) =>
+        CurrencyFormat.CatalogAsCdf(line.Pu, CurrencyDefaults.IsUsdMoneyId(line.IdMonais), UserCurrency.CachedTaux, "N0");
+
+    string FormatLineTotal(PosLine line) =>
+        CurrencyFormat.Cdf(
+            CommandePricing.QuoteLine(line.Pu, line.IdMonais, line.Qty, UserCurrency.CachedTaux).LineFc,
+            "N0");
+
+    void AddOne(Article art)
+    {
+        var line = _cart.FirstOrDefault(l => l.ArticleId == art.IdArticle);
+        if (line != null)
+        {
+            line.Qty++;
+            line.Pu = (decimal)art.Price;
+            line.IdMonais = art.IdMonais;
+        }
+        else
+        {
+            _cart.Add(new PosLine
+            {
+                ArticleId = art.IdArticle,
+                Description = art.Description,
+                ImageArticle = art.ImageArticle,
+                IdMonais = art.IdMonais,
+                Pu = (decimal)art.Price,
+                Qty = 1
+            });
+        }
+    }
+
+    void ChangeQty(PosLine line, int delta)
+    {
+        line.Qty += delta;
+        if (line.Qty <= 0)
+            _cart.Remove(line);
+    }
+
+    void ClearCart()
+    {
+        _cart.Clear();
+        _selectedCustomer = null;
+    }
+
+    async Task SaveCommandeAsync() => await PersistCommandeAsync(printAfter: false);
+
+    async Task SaveAndPrintAsync() => await PersistCommandeAsync(printAfter: true);
+
+    async Task PersistCommandeAsync(bool printAfter)
+    {
+        if (!_cart.Any()) return;
+
+        if (_selectedCustomer?.CustomerId is null or 0)
+            _selectedCustomer = _customers.FirstOrDefault(c => c.IsPermanent != true) ?? _customers.FirstOrDefault();
+
+        if (_selectedCustomer?.CustomerId is null or 0)
+        {
+            Snackbar.Add("Aucun client en base. Créez un client dans l'onglet Clients.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var totalFc = _cartTotalFc;
+            var commande = new Commande
+            {
+                CustomerId = _selectedCustomer.CustomerId,
+                CommandeDescription = "Vente comptoir",
+                MontantTotal = 0,
+                MontantPaye = printAfter ? totalFc : 0,
+                MontantRest = 0,
+                Status = printAfter ? 3 : 0,
+                UserLogin = _currentLogin,
+                CreationDate = DateTime.Now
+            };
+
+            var details = _cart.Select(l => new CommandeDetail
+            {
+                ArticleId = l.ArticleId,
+                Qte = l.Qty,
+                Pu = l.Pu,
+                MoneyId = l.IdMonais,
+                QteRest = l.Qty,
+                QtePrise = printAfter ? l.Qty : 0,
+                Status = printAfter ? 1 : 0
+            }).ToList();
+
+            await CommandeService.SaveCommandeAsync(commande, details);
+            _lastCommandeId = commande.CommandeId;
+            _lastPrintLines = _cart.Select(l => new PosLine
+            {
+                Description = l.Description,
+                Qty = l.Qty,
+                Pu = l.Pu,
+                IdMonais = l.IdMonais
+            }).ToList();
+            _lastPrintTotal = commande.MontantTotal;
+
+            Snackbar.Add($"Commande N° {commande.CommandeId} enregistrée", Severity.Success);
+            ClearCart();
+            await OnSaved.InvokeAsync();
+
+            if (printAfter)
+            {
+                await Task.Delay(100);
+                await JS.InvokeVoidAsync("posPrintTicket");
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.InnerException?.Message ?? ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    class PosLine
+    {
+        public string ArticleId { get; set; } = "";
+        public string Description { get; set; } = "";
+        public string? ImageArticle { get; set; }
+        public int IdMonais { get; set; }
+        public decimal Pu { get; set; }
+        public int Qty { get; set; }
+    }
+}

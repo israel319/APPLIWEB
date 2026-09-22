@@ -1,0 +1,16 @@
+@page "/client/connexion"
+@attribute [AllowAnonymous]
+@layout PublicLayout
+@rendermode PublicRenderMode.Instance
+@inject NavigationManager Navigation
+
+@code {
+    protected override void OnInitialized()
+    {
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        var target = "/auth/connexion";
+        if (!string.IsNullOrEmpty(uri.Query))
+            target += uri.Query;
+        Navigation.NavigateTo(target, replace: true);
+    }
+}

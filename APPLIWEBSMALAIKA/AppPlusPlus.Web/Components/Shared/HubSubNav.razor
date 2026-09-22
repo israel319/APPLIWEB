@@ -1,0 +1,49 @@
+<div class="hub-sub-nav-shell">
+    <div class="hub-sub-nav" role="tablist" aria-label="@AriaLabel">
+        @foreach (var item in Items)
+        {
+            <button type="button"
+                    role="tab"
+                    class="hub-sub-nav-btn @(Value == item.Id ? "active" : "")"
+                    aria-selected="@(Value == item.Id)"
+                    title="@item.Hint"
+                    @onclick="@(() => SelectAsync(item.Id))">
+                @if (!string.IsNullOrEmpty(item.Icon))
+                {
+                    <i class="bi @item.Icon"></i>
+                }
+                <span class="hub-sub-nav-label">@item.Label</span>
+            </button>
+        }
+    </div>
+    @if (Trailing != null || Actions != null)
+    {
+        <div class="hub-sub-nav-trailing">
+            @Trailing
+            @if (Actions != null)
+            {
+                <div class="hub-sub-nav-actions">
+                    @Actions
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Value { get; set; } = "";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public IReadOnlyList<HubSubNavItem> Items { get; set; } = Array.Empty<HubSubNavItem>();
+    [Parameter] public string? AriaLabel { get; set; }
+    [Parameter] public RenderFragment? Trailing { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+
+    async Task SelectAsync(string id)
+    {
+        if (Value == id) return;
+        Value = id;
+        await ValueChanged.InvokeAsync(id);
+    }
+
+    public record HubSubNavItem(string Id, string Label, string? Icon = null, string? Hint = null);
+}

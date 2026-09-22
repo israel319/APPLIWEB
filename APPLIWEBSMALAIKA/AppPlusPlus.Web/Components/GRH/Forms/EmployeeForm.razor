@@ -1,0 +1,366 @@
+@page "/grh/employes/form"
+@page "/grh/employes/form/{Id:int}"
+@rendermode InteractiveServer
+@inject IEmployeeService               EmployeeService
+@inject ICompanyService                CompanyService
+@inject IDepartmentService             DepartmentService
+@inject IServiceService                ServiceService
+@inject IJobPositionService            JobPositionService
+@inject IEmployeeCategoryService       EmployeeCategoryService
+@inject IEmployeeClassificationService EmployeeClassificationService
+@inject ISnackbar                      Snackbar
+@inject NavigationManager              Nav
+
+<PageTitle>@AppSettings.AppName — @(_isEdit ? "Modifier employé" : "Nouvel employé")</PageTitle>
+
+@if (!_loaded)
+{
+    <div class="aw-page">
+        <div class="aw-loading" style="min-height:200px;">
+            <span class="aw-spinner" role="status" aria-hidden="true"></span>
+            <span>Chargement…</span>
+        </div>
+    </div>
+}
+else
+{
+    <div class="aw-page">
+        <div class="aw-form aw-form--xl">
+            <header class="aw-form__head">
+                <div>
+                    <p class="aw-form__eyebrow">GRH · Employés</p>
+                    <h1 class="aw-form__title">@(_isEdit ? "Modifier l'employé" : "Nouvel employé")</h1>
+                </div>
+                <div class="aw-form__actions">
+                    <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                        <i class="bi bi-arrow-left"></i> Annuler
+                    </button>
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="SaveAsync" disabled="@_saving">
+                        <i class="bi bi-check-lg"></i> @(_saving ? "Enregistrement…" : "Enregistrer")
+                    </button>
+                </div>
+            </header>
+            <div class="aw-form__body">
+
+                <div class="aw-dialog__section"><i class="bi bi-person"></i> Identification</div>
+                <div class="aw-form__grid aw-form__grid--3">
+                    <div class="aw-field">
+                        <label class="aw-field__label">Code <span class="text-danger">*</span></label>
+                        <input class="aw-input" @bind="_form.EmployeeCode" placeholder="EMP001" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Prénom <span class="text-danger">*</span></label>
+                        <input class="aw-input" @bind="_form.FirstName" placeholder="Prénom" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Nom <span class="text-danger">*</span></label>
+                        <input class="aw-input" @bind="_form.LastName" placeholder="Nom de famille" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Email <span class="text-danger">*</span></label>
+                        <input class="aw-input" type="email" @bind="_form.Email" placeholder="email@société.com" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Téléphone</label>
+                        <input class="aw-input" @bind="_form.PhoneNumber" placeholder="+216 XX XXX XXX" />
+                    </div>
+                    <div class="aw-field">
+                        <AwDateField Label="Date de naissance" Value="_form.DateOfBirth"
+                                     ValueChanged="@(v => { if (v.HasValue) _form.DateOfBirth = v.Value; })" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Genre</label>
+                        <select class="aw-input" @bind="_form.Gender">
+                            <option value="M">Masculin</option>
+                            <option value="F">Féminin</option>
+                        </select>
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">État civil</label>
+                        <select class="aw-input" @bind="_form.MaritalStatus">
+                            <option value="">— Sélectionner —</option>
+                            <option value="Célibataire">Célibataire</option>
+                            <option value="Marié(e)">Marié(e)</option>
+                            <option value="Divorcé(e)">Divorcé(e)</option>
+                            <option value="Veuf(ve)">Veuf(ve)</option>
+                        </select>
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Nationalité</label>
+                        <input class="aw-input" @bind="_form.Nationality" placeholder="Tunisienne" />
+                    </div>
+                </div>
+
+                <div class="aw-dialog__section" style="margin-top:1.15rem;"><i class="bi bi-geo-alt"></i> Adresse</div>
+                <div class="aw-form__grid aw-form__grid--3">
+                    <div class="aw-field aw-form__span-2">
+                        <label class="aw-field__label">Adresse</label>
+                        <input class="aw-input" @bind="_form.Address" placeholder="Adresse complète" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Ville</label>
+                        <input class="aw-input" @bind="_form.City" placeholder="Tunis" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Code postal</label>
+                        <input class="aw-input" @bind="_form.ZipCode" placeholder="1000" />
+                    </div>
+                </div>
+
+                <div class="aw-dialog__section" style="margin-top:1.15rem;"><i class="bi bi-briefcase"></i> Informations professionnelles</div>
+                <div class="aw-form__grid aw-form__grid--3">
+                    <div class="aw-field">
+                        <label class="aw-field__label">Société <span class="text-danger">*</span></label>
+                        <select class="aw-input" @bind="_form.CompanyId">
+                            <option value="0">— Sélectionner —</option>
+                            @foreach (var c in _companies)
+                            {
+                                <option value="@c.Id">@c.CompanyName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Département <span class="text-danger">*</span></label>
+                        <select class="aw-input" @bind="_form.DepartmentId">
+                            <option value="0">— Sélectionner —</option>
+                            @foreach (var d in _departments)
+                            {
+                                <option value="@d.Id">@d.DepartmentName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Service <span class="text-danger">*</span></label>
+                        <select class="aw-input" @bind="_form.ServiceId">
+                            <option value="0">— Sélectionner —</option>
+                            @foreach (var s in _services)
+                            {
+                                <option value="@s.Id">@s.ServiceName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Poste <span class="text-danger">*</span></label>
+                        <select class="aw-input" @bind="_form.JobPositionId">
+                            <option value="0">— Sélectionner —</option>
+                            @foreach (var p in _positions)
+                            {
+                                <option value="@p.Id">@p.PositionName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Catégorie <span class="text-danger">*</span></label>
+                        <select class="aw-input" @bind="_form.EmployeeCategoryId">
+                            <option value="0">— Sélectionner —</option>
+                            @foreach (var cat in _empCategories)
+                            {
+                                <option value="@cat.Id">@cat.CategoryName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Classification <span class="text-danger">*</span></label>
+                        <select class="aw-input" @bind="_form.EmployeeClassificationId">
+                            <option value="0">— Sélectionner —</option>
+                            @foreach (var cl in _empClassifications)
+                            {
+                                <option value="@cl.Id">@cl.ClassificationName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Type de contrat <span class="text-danger">*</span></label>
+                        <select class="aw-input" @bind="_form.ContractType">
+                            <option value="@ContractTypeEnum.CDI">CDI</option>
+                            <option value="@ContractTypeEnum.CDD">CDD</option>
+                            <option value="@ContractTypeEnum.Internship">Stage</option>
+                            <option value="@ContractTypeEnum.Apprenticeship">Apprentissage</option>
+                        </select>
+                    </div>
+                    <div class="aw-field">
+                        <AwDateField Label="Date d'embauche" Value="_form.HireDate"
+                                     ValueChanged="@(v => { if (v.HasValue) _form.HireDate = v.Value; })" />
+                    </div>
+                </div>
+
+                <div class="aw-dialog__section" style="margin-top:1.15rem;"><i class="bi bi-shield-person"></i> Banque &amp; Contact d'urgence</div>
+                <div class="aw-form__grid">
+                    <div class="aw-field">
+                        <label class="aw-field__label">Banque</label>
+                        <input class="aw-input" @bind="_form.BankName" placeholder="Nom de la banque" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">N° compte</label>
+                        <input class="aw-input" @bind="_form.AccountNumber" placeholder="Numéro de compte" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Contact urgence</label>
+                        <input class="aw-input" @bind="_form.EmergencyContactName" placeholder="Nom du contact" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Tél. urgence</label>
+                        <input class="aw-input" @bind="_form.EmergencyContactPhone" placeholder="+216 XX XXX XXX" />
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    bool _loaded;
+    bool _saving;
+    bool _isEdit => Id > 0;
+
+    EmployeeFormData _form = new();
+
+    List<Company>            _companies          = new();
+    List<DepartmentReadDto>  _departments        = new();
+    List<Service>            _services           = new();
+    List<JobPositionReadDto> _positions          = new();
+    List<EmployeeCategory>   _empCategories      = new();
+    List<EmployeeClassification> _empClassifications = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _companies          = (await CompanyService.GetAllCompaniesAsync()).ToList();
+        _departments        = (await DepartmentService.GetAllDepartmentsAsync())
+                              .Select(d => new DepartmentReadDto { Id = d.Id, DepartmentName = d.DepartmentName }).ToList();
+        _services           = (await ServiceService.GetAllServicesAsync()).ToList();
+        _positions          = (await JobPositionService.GetAllPositionsAsync())
+                              .Select(p => new JobPositionReadDto { Id = p.Id, PositionName = p.PositionName }).ToList();
+        _empCategories      = (await EmployeeCategoryService.GetAllActiveAsync()).ToList();
+        _empClassifications = (await EmployeeClassificationService.GetAllActiveAsync()).ToList();
+
+        if (_isEdit)
+        {
+            try
+            {
+                var emp = await EmployeeService.GetEmployeeByIdAsync(Id);
+                _form = new EmployeeFormData
+                {
+                    EmployeeCode             = emp.EmployeeCode,
+                    FirstName                = emp.FirstName,
+                    LastName                 = emp.LastName,
+                    Email                    = emp.Email,
+                    PhoneNumber              = emp.PhoneNumber,
+                    DateOfBirth              = emp.DateOfBirth,
+                    Gender                   = emp.Gender ?? "M",
+                    MaritalStatus            = emp.MaritalStatus,
+                    Nationality              = emp.Nationality,
+                    Address                  = emp.Address,
+                    City                     = emp.City,
+                    ZipCode                  = emp.ZipCode,
+                    CompanyId                = emp.CompanyId,
+                    DepartmentId             = emp.DepartmentId,
+                    ServiceId                = emp.ServiceId,
+                    JobPositionId            = emp.JobPositionId,
+                    EmployeeCategoryId       = emp.EmployeeCategoryId,
+                    EmployeeClassificationId = emp.EmployeeClassificationId,
+                    ContractType             = emp.ContractType,
+                    HireDate                 = emp.HireDate,
+                    BankName                 = emp.BankName,
+                    AccountNumber            = emp.AccountNumber,
+                    EmergencyContactName     = emp.EmergencyContactName,
+                    EmergencyContactPhone    = emp.EmergencyContactPhone
+                };
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Erreur : {ex.Message}", Severity.Error);
+                Nav.NavigateTo("/grh?tab=1");
+            }
+        }
+        _loaded = true;
+    }
+
+    async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_form.EmployeeCode)) { Snackbar.Add("Le code est obligatoire.", Severity.Warning); return; }
+        if (string.IsNullOrWhiteSpace(_form.FirstName))    { Snackbar.Add("Le prénom est obligatoire.", Severity.Warning); return; }
+        if (string.IsNullOrWhiteSpace(_form.LastName))     { Snackbar.Add("Le nom est obligatoire.", Severity.Warning); return; }
+        if (string.IsNullOrWhiteSpace(_form.Email))        { Snackbar.Add("L'email est obligatoire.", Severity.Warning); return; }
+        if (_form.CompanyId == 0)                          { Snackbar.Add("Veuillez sélectionner une société.", Severity.Warning); return; }
+        if (_form.DepartmentId == 0)                       { Snackbar.Add("Veuillez sélectionner un département.", Severity.Warning); return; }
+
+        _saving = true;
+        try
+        {
+            if (_isEdit)
+            {
+                var emp = await EmployeeService.GetEmployeeByIdAsync(Id);
+                emp.FirstName                = _form.FirstName.Trim();
+                emp.LastName                 = _form.LastName.Trim();
+                emp.Email                    = _form.Email.Trim();
+                emp.PhoneNumber              = _form.PhoneNumber;
+                emp.DateOfBirth              = _form.DateOfBirth;
+                emp.Gender                   = _form.Gender;
+                emp.MaritalStatus            = _form.MaritalStatus;
+                emp.Nationality              = _form.Nationality;
+                emp.Address                  = _form.Address;
+                emp.City                     = _form.City;
+                emp.ZipCode                  = _form.ZipCode;
+                emp.CompanyId                = _form.CompanyId;
+                emp.DepartmentId             = _form.DepartmentId;
+                emp.ServiceId                = _form.ServiceId;
+                emp.JobPositionId            = _form.JobPositionId;
+                emp.EmployeeCategoryId       = _form.EmployeeCategoryId;
+                emp.EmployeeClassificationId = _form.EmployeeClassificationId;
+                emp.ContractType             = _form.ContractType;
+                emp.HireDate                 = _form.HireDate;
+                emp.BankName                 = _form.BankName;
+                emp.AccountNumber            = _form.AccountNumber;
+                emp.EmergencyContactName     = _form.EmergencyContactName;
+                emp.EmergencyContactPhone    = _form.EmergencyContactPhone;
+                emp.UpdatedAt                = DateTime.UtcNow;
+                await EmployeeService.UpdateEmployeeAsync(emp);
+                Snackbar.Add("Employé mis à jour.", Severity.Success);
+            }
+            else
+            {
+                await EmployeeService.CreateEmployeeAsync(
+                    _form.EmployeeCode.Trim(), _form.FirstName.Trim(), _form.LastName.Trim(),
+                    _form.Email.Trim(), _form.CompanyId, _form.DepartmentId,
+                    _form.ServiceId, _form.JobPositionId);
+                Snackbar.Add("Employé créé.", Severity.Success);
+            }
+            Nav.NavigateTo("/grh?tab=1");
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    void Cancel() => Nav.NavigateTo("/grh?tab=1");
+
+    class EmployeeFormData
+    {
+        public string   EmployeeCode            { get; set; } = "";
+        public string   FirstName               { get; set; } = "";
+        public string   LastName                { get; set; } = "";
+        public string   Email                   { get; set; } = "";
+        public string?  PhoneNumber             { get; set; }
+        public DateTime DateOfBirth             { get; set; } = DateTime.Today.AddYears(-25);
+        public string   Gender                  { get; set; } = "M";
+        public string?  MaritalStatus           { get; set; }
+        public string?  Nationality             { get; set; }
+        public string?  Address                 { get; set; }
+        public string?  City                    { get; set; }
+        public string?  ZipCode                 { get; set; }
+        public int      CompanyId               { get; set; }
+        public int      DepartmentId            { get; set; }
+        public int      ServiceId               { get; set; }
+        public int      JobPositionId           { get; set; }
+        public int      EmployeeCategoryId      { get; set; }
+        public int      EmployeeClassificationId { get; set; }
+        public ContractTypeEnum ContractType    { get; set; } = ContractTypeEnum.CDI;
+        public DateTime HireDate                { get; set; } = DateTime.Today;
+        public string?  BankName                { get; set; }
+        public string?  AccountNumber           { get; set; }
+        public string?  EmergencyContactName    { get; set; }
+        public string?  EmergencyContactPhone   { get; set; }
+    }
+}

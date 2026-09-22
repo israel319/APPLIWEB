@@ -1,0 +1,396 @@
+@using MudBlazor
+@using AppPlusPlus.Domain.Common
+@using AppPlusPlus.Domain.Entities.Administration
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <div class="lov-form-header">
+            <div class="d-flex align-items-center gap-2 min-w-0">
+                <i class="bi bi-sliders2-vertical text-primary" aria-hidden="true"></i>
+                <div class="min-w-0">
+                    <h5 class="mb-0">Configuration des accès</h5>
+                    <p class="aw-access-dialog__subtitle mb-0">Étape @_step sur @StepLabels.Length — @StepLabels[_step - 1]</p>
+                </div>
+            </div>
+            <span class="aw-badge aw-badge--brand">@SelectionSummary()</span>
+        </div>
+
+        <div class="lov-form-body aw-access-dialog">
+            <ol class="aw-wizard" aria-label="Progression de la configuration">
+                @for (var i = 0; i < StepLabels.Length; i++)
+                {
+                    var stepNum = i + 1;
+                    var stateClass = stepNum == _step
+                        ? "aw-wizard__step--active"
+                        : stepNum < _step
+                            ? "aw-wizard__step--done"
+                            : "";
+                    <li class="aw-wizard__step @stateClass">
+                        <span class="aw-wizard__marker" aria-hidden="true">
+                            @if (stepNum < _step)
+                            {
+                                <i class="bi bi-check-lg"></i>
+                            }
+                            else
+                            {
+                                @stepNum
+                            }
+                        </span>
+                        <span class="aw-wizard__label">@StepLabels[i]</span>
+                    </li>
+                }
+            </ol>
+
+            @if (_step == 1)
+            {
+                <p class="aw-field__hint aw-access-dialog__lead">
+                    Sélectionnez un ou plusieurs magasins / localisations pour cet utilisateur.
+                </p>
+                @if (Localisations.Any())
+                {
+                    <div class="aw-choice-grid">
+                        @foreach (var loc in Localisations)
+                        {
+                            var selected = _localisationIds.Contains(loc.IdLocalisation);
+                            <label class="aw-choice-card @(selected ? "aw-choice-card--active" : "")">
+                                <input type="checkbox"
+                                       class="aw-choice-card__input"
+                                       checked="@selected"
+                                       @onchange="@(e => ToggleLoc(loc.IdLocalisation, (bool)(e.Value ?? false)))" />
+                                <span class="aw-choice-card__icon"><i class="bi bi-geo-alt" aria-hidden="true"></i></span>
+                                <span class="aw-choice-card__label">@loc.DescriptionLocalisation</span>
+                            </label>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-empty-hint">
+                        <i class="bi bi-inbox" aria-hidden="true"></i>
+                        <p>Aucune localisation disponible.</p>
+                    </div>
+                }
+            }
+            else if (_step == 2)
+            {
+                <p class="aw-field__hint aw-access-dialog__lead">
+                    Choisissez les onglets principaux visibles dans la navigation.
+                </p>
+                <div class="aw-choice-grid aw-choice-grid--tabs">
+                    @foreach (var tab in PermissionCatalog.Tabs)
+                    {
+                        var selected = IsCodeSelected(tab.Code);
+                        <label class="aw-choice-card aw-choice-card--tab @(selected ? "aw-choice-card--active" : "")">
+                            <input type="checkbox"
+                                   class="aw-choice-card__input"
+                                   checked="@selected"
+                                   @onchange="@(e => ToggleCode(tab.Code, (bool)(e.Value ?? false)))" />
+                            <span class="aw-choice-card__icon"><i class="bi @TabIcon(tab.Code)" aria-hidden="true"></i></span>
+                            <span class="aw-choice-card__label">@tab.Label</span>
+                        </label>
+                    }
+                </div>
+            }
+            else if (_step == 3)
+            {
+                <p class="aw-field__hint aw-access-dialog__lead">
+                    Pour chaque onglet, précisez les sous-sections accessibles.
+                </p>
+                @foreach (var tabCode in SelectedTabCodes())
+                {
+                    var tab = PermissionCatalog.Find(tabCode)!;
+                    var subTabs = PermissionCatalog.ChildrenOf(tabCode)
+                        .Where(n => n.Kind == PermissionCatalog.NodeKind.SubTab)
+                        .ToList();
+
+                    <section class="aw-access-group">
+                        <header class="aw-access-group__head">
+                            <i class="bi @TabIcon(tab.Code)" aria-hidden="true"></i>
+                            <h4 class="aw-access-group__title">@tab.Label</h4>
+                        </header>
+                        @if (subTabs.Any())
+                        {
+                            <div class="aw-choice-grid aw-choice-grid--compact">
+                                @foreach (var sub in subTabs)
+                                {
+                                    var selected = IsCodeSelected(sub.Code);
+                                    <label class="aw-choice-card aw-choice-card--compact @(selected ? "aw-choice-card--active" : "")">
+                                        <input type="checkbox"
+                                               class="aw-choice-card__input"
+                                               checked="@selected"
+                                               @onchange="@(e => ToggleCode(sub.Code, (bool)(e.Value ?? false)))" />
+                                        <span class="aw-choice-card__label">@sub.Label</span>
+                                    </label>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="aw-field__hint mb-0">Pas de sous-onglet — les actions seront à l'étape suivante.</p>
+                        }
+                    </section>
+                }
+            }
+            else if (_step == 4)
+            {
+                <p class="aw-field__hint aw-access-dialog__lead">
+                    Définissez les actions autorisées pour chaque sous-section.
+                </p>
+                @foreach (var tabCode in SelectedTabCodes())
+                {
+                    var tab = PermissionCatalog.Find(tabCode)!;
+                    var subTabs = PermissionCatalog.ChildrenOf(tabCode)
+                        .Where(n => n.Kind == PermissionCatalog.NodeKind.SubTab && IsCodeSelected(n.Code))
+                        .ToList();
+                    var directActions = PermissionCatalog.ChildrenOf(tabCode)
+                        .Where(n => n.Kind == PermissionCatalog.NodeKind.Action)
+                        .ToList();
+
+                    @if (subTabs.Any())
+                    {
+                        @foreach (var sub in subTabs)
+                        {
+                            var actions = PermissionCatalog.ChildrenOf(sub.Code)
+                                .Where(n => n.Kind == PermissionCatalog.NodeKind.Action)
+                                .ToList();
+                            if (!actions.Any()) continue;
+
+                            <section class="aw-access-group">
+                                <header class="aw-access-group__head">
+                                    <h4 class="aw-access-group__title">@tab.Label › @sub.Label</h4>
+                                </header>
+                                <div class="aw-choice-grid aw-choice-grid--actions">
+                                    @foreach (var act in actions)
+                                    {
+                                        var selected = IsCodeSelected(act.Code);
+                                        <label class="aw-choice-card aw-choice-card--compact @(selected ? "aw-choice-card--active" : "")">
+                                            <input type="checkbox"
+                                                   class="aw-choice-card__input"
+                                                   checked="@selected"
+                                                   @onchange="@(e => ToggleCode(act.Code, (bool)(e.Value ?? false)))" />
+                                            <span class="aw-choice-card__label">@act.Label</span>
+                                        </label>
+                                    }
+                                </div>
+                            </section>
+                        }
+                    }
+
+                    @if (directActions.Any())
+                    {
+                        <section class="aw-access-group">
+                            <header class="aw-access-group__head">
+                                <h4 class="aw-access-group__title">@tab.Label</h4>
+                            </header>
+                            <div class="aw-choice-grid aw-choice-grid--actions">
+                                @foreach (var act in directActions)
+                                {
+                                    var selected = IsCodeSelected(act.Code);
+                                    <label class="aw-choice-card aw-choice-card--compact @(selected ? "aw-choice-card--active" : "")">
+                                        <input type="checkbox"
+                                               class="aw-choice-card__input"
+                                               checked="@selected"
+                                               @onchange="@(e => ToggleCode(act.Code, (bool)(e.Value ?? false)))" />
+                                        <span class="aw-choice-card__label">@act.Label</span>
+                                    </label>
+                                }
+                            </div>
+                        </section>
+                    }
+                }
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="hub-dialog-actions aw-access-dialog__footer px-1 pb-1">
+            <div>
+                @if (_step > 1)
+                {
+                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="PrevStep">
+                        <i class="bi bi-arrow-left"></i> Précédent
+                    </button>
+                }
+            </div>
+            <div class="hub-dialog-actions-right">
+                <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="Cancel">
+                    <i class="bi bi-x-lg"></i> Annuler
+                </button>
+                @if (_step < 4)
+                {
+                    <button type="button" class="aw-btn aw-btn--primary aw-btn--sm" @onclick="NextStep">
+                        Suivant <i class="bi bi-arrow-right"></i>
+                    </button>
+                }
+                else
+                {
+                    <button type="button" class="aw-btn aw-btn--primary aw-btn--sm" @onclick="Submit">
+                        <i class="bi bi-check-lg"></i> Valider
+                    </button>
+                }
+            </div>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public List<Localisation> Localisations { get; set; } = new();
+    [Parameter] public HashSet<int> SelectedLocalisationIds { get; set; } = new();
+    [Parameter] public HashSet<string> SelectedPermissionCodes { get; set; } = new();
+
+    static readonly string[] StepLabels = ["Magasins", "Onglets", "Sous-onglets", "Actions"];
+
+    int _step = 1;
+    HashSet<int> _localisationIds = new();
+    HashSet<string> _codes = new(StringComparer.OrdinalIgnoreCase);
+
+    protected override void OnInitialized() => ReloadFromParameters();
+
+    protected override void OnParametersSet() => ReloadFromParameters();
+
+    void ReloadFromParameters()
+    {
+        _localisationIds = new HashSet<int>(SelectedLocalisationIds);
+        _codes = new HashSet<string>(
+            SelectedPermissionCodes.Select(PermissionCatalog.NormalizeCode),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    string SelectionSummary() =>
+        $"{_localisationIds.Count} magasin(s) · {SelectedTabCodes().Count()} onglet(s) · {_codes.Count} droit(s)";
+
+    static string TabIcon(string code) => PermissionCatalog.NormalizeCode(code) switch
+    {
+        "dashboard" => "bi-speedometer2",
+        "vente" => "bi-cart3",
+        "articles" => "bi-box-seam",
+        "commandes" => "bi-clipboard-check",
+        "services" => "bi-briefcase",
+        "grh" => "bi-people",
+        "rapports" => "bi-bar-chart-line",
+        "administration" => "bi-shield-lock",
+        "parametres" => "bi-gear",
+        _ => "bi-folder2"
+    };
+
+    bool IsCodeSelected(string code) =>
+        PermissionCatalog.IsNodeGranted(_codes, code);
+
+    void ToggleLoc(int id, bool selected)
+    {
+        if (selected) _localisationIds.Add(id);
+        else _localisationIds.Remove(id);
+    }
+
+    void ToggleCode(string code, bool selected)
+    {
+        var norm = PermissionCatalog.NormalizeCode(code);
+        if (selected)
+        {
+            _codes.Add(norm);
+            return;
+        }
+
+        _codes.Remove(norm);
+        var prefix = norm + ".";
+        foreach (var child in _codes.Where(c => c.StartsWith(prefix, StringComparison.Ordinal)).ToList())
+            _codes.Remove(child);
+    }
+
+    IEnumerable<string> SelectedTabCodes() =>
+        PermissionCatalog.Tabs
+            .Select(t => t.Code)
+            .Where(c => PermissionCatalog.IsNodeGranted(_codes, c));
+
+    void PrevStep() => _step = Math.Max(1, _step - 1);
+
+    void NextStep()
+    {
+        if (_step == 1 && !_localisationIds.Any())
+        {
+            Snackbar.Add("Sélectionnez au moins un magasin.", Severity.Warning);
+            return;
+        }
+        if (_step == 2 && !SelectedTabCodes().Any())
+        {
+            Snackbar.Add("Sélectionnez au moins un onglet.", Severity.Warning);
+            return;
+        }
+        _step = Math.Min(4, _step + 1);
+    }
+
+    void Cancel() => MudDialog.Cancel();
+
+    void Submit()
+    {
+        if (!_localisationIds.Any())
+        {
+            Snackbar.Add("Sélectionnez au moins un magasin.", Severity.Warning);
+            return;
+        }
+        if (!SelectedTabCodes().Any())
+        {
+            Snackbar.Add("Sélectionnez au moins un onglet.", Severity.Warning);
+            return;
+        }
+
+        EnsureImplicitReadGrants();
+        NormalizePartialTabGrants();
+
+        MudDialog.Close(DialogResult.Ok(new UserAccessDialogResult(
+            new HashSet<int>(_localisationIds),
+            new HashSet<string>(_codes, StringComparer.OrdinalIgnoreCase))));
+    }
+
+    void EnsureImplicitReadGrants()
+    {
+        foreach (var node in PermissionCatalog.All)
+        {
+            if (node.Kind != PermissionCatalog.NodeKind.SubTab) continue;
+            if (!PermissionCatalog.IsNodeGranted(_codes, node.Code)) continue;
+
+            foreach (var action in PermissionCatalog.ChildrenOf(node.Code)
+                         .Where(n => n.Kind == PermissionCatalog.NodeKind.Action && n.Code.EndsWith(".read", StringComparison.Ordinal)))
+            {
+                _codes.Add(PermissionCatalog.NormalizeCode(action.Code));
+            }
+        }
+
+        foreach (var tab in PermissionCatalog.Tabs)
+        {
+            if (!_codes.Contains(PermissionCatalog.NormalizeCode(tab.Code))) continue;
+            if (PermissionCatalog.ChildrenOf(tab.Code).Any(n => n.Kind == PermissionCatalog.NodeKind.SubTab
+                && PermissionCatalog.IsNodeGranted(_codes, n.Code)))
+                continue;
+
+            foreach (var action in PermissionCatalog.ChildrenOf(tab.Code)
+                         .Where(n => n.Kind == PermissionCatalog.NodeKind.Action && n.Code.EndsWith(".read", StringComparison.Ordinal)))
+            {
+                _codes.Add(PermissionCatalog.NormalizeCode(action.Code));
+            }
+        }
+    }
+
+    void NormalizePartialTabGrants()
+    {
+        foreach (var tab in PermissionCatalog.Tabs)
+        {
+            var tabNorm = PermissionCatalog.NormalizeCode(tab.Code);
+            if (!_codes.Contains(tabNorm)) continue;
+
+            var hasSelectedSubTab = PermissionCatalog.ChildrenOf(tab.Code)
+                .Where(n => n.Kind == PermissionCatalog.NodeKind.SubTab)
+                .Any(n => _codes.Contains(PermissionCatalog.NormalizeCode(n.Code)));
+
+            if (hasSelectedSubTab)
+                _codes.Remove(tabNorm);
+        }
+    }
+
+    public sealed record UserAccessDialogResult(
+        HashSet<int> LocalisationIds,
+        HashSet<string> PermissionCodes);
+}

@@ -1,0 +1,24 @@
+sch|tbl
+---|---
+dbo|T_Activities
+dbo|T_Appro_Details
+dbo|T_Appro_Expense
+dbo|T_AppSettings
+dbo|T_Caisse
+dbo|T_Customer_Type
+dbo|T_Expense_Source
+dbo|T_ModuleLicenses
+dbo|T_Mouvement_Stock
+dbo|T_Payments
+dbo|T_Permissions
+dbo|T_Profile
+dbo|T_Roles
+dbo|T_Stock
+dbo|T_Supplier
+dbo|T_Supplier_Service
+dbo|T_User_Activities
+dbo|T_Users_Caisse
+dbo|T_Versements
+dbo|T_YesNo
+
+(20 lignes affectées)

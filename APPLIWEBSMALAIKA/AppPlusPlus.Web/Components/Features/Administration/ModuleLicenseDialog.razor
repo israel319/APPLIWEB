@@ -1,0 +1,116 @@
+@using MudBlazor
+@inject IModuleLicenseService ModuleLicenseService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <div class="lov-form-header">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi @(_module.Icon ?? "bi-puzzle") text-primary"></i>
+                <h5 class="mb-0">@_module.ModuleName</h5>
+            </div>
+        </div>
+
+        <div class="lov-form-body">
+            @if (!_module.IsCore)
+            {
+                <div class="lov-field">
+                    <label class="form-label">Statut</label>
+                    <div class="form-check form-switch mt-1">
+                        <input class="form-check-input" type="checkbox"
+                               id="dlg-mod-active"
+                               @bind="_form.IsActive" />
+                        <label class="form-check-label" for="dlg-mod-active">
+                            @(_form.IsActive ? "Module actif" : "Module inactif")
+                        </label>
+                    </div>
+                </div>
+            }
+
+            <div class="lov-field">
+                <label class="form-label">Prix de référence (€)</label>
+                <input type="number" class="form-control" step="0.01" min="0"
+                       @bind="_form.Price"
+                       placeholder="Ex: 150.00"
+                       disabled="@_module.IsCore" />
+                @if (_module.IsCore)
+                {
+                    <small class="text-muted">Les modules core sont inclus sans frais supplémentaires.</small>
+                }
+            </div>
+
+            <div class="lov-field">
+                <AwDateField Label="Date d'expiration" @bind-Value="_form.ExpiresAt" Placeholder="Illimitée si vide" />
+                <small class="text-muted">Laisser vide pour une licence illimitée.</small>
+            </div>
+
+            <div class="lov-field">
+                <label class="form-label">Notes / Conditions</label>
+                <textarea class="form-control" rows="3"
+                          @bind="_form.LicenseNotes"
+                          placeholder="Ex: Licence annuelle, renouvellement prévu le…" maxlength="500"></textarea>
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="hub-dialog-actions px-1 pb-1">
+            <div></div>
+            <div class="hub-dialog-actions-right">
+                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="Cancel">
+                    <i class="bi bi-x-lg me-1"></i>Annuler
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" @onclick="Submit">
+                    <i class="bi bi-check-lg me-1"></i>Enregistrer
+                </button>
+            </div>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public ModuleLicense Module { get; set; } = default!;
+
+    private ModuleLicense _module = new();
+    private LicenseFormData _form = new();
+
+    protected override void OnInitialized()
+    {
+        _module = Module;
+        _form = new LicenseFormData
+        {
+            IsActive  = Module.IsActive,
+            Price     = Module.Price,
+            ExpiresAt = Module.ExpiresAt,
+            LicenseNotes = Module.LicenseNotes
+        };
+    }
+
+    private async Task Submit()
+    {
+        var updated = new ModuleLicense
+        {
+            Id           = _module.Id,
+            IsActive     = _form.IsActive,
+            Price        = _form.Price,
+            ExpiresAt    = _form.ExpiresAt,
+            LicenseNotes = _form.LicenseNotes
+        };
+
+        await ModuleLicenseService.UpdateLicenseAsync(updated);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    class LicenseFormData
+    {
+        public bool IsActive { get; set; }
+        public decimal? Price { get; set; }
+        public DateTime? ExpiresAt { get; set; }
+        public string? LicenseNotes { get; set; }
+    }
+}

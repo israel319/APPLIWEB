@@ -1,0 +1,375 @@
+@page "/admin/utilisateur/nouveau"
+@page "/admin/utilisateur/modifier/{UserLogin}"
+@rendermode InteractiveServer
+@using MudBlazor
+@using AppPlusPlus.Domain.Common
+@using AppPlusPlus.Application.Services.Administration
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+@inject IUserAdminService UserAdminService
+@inject ILocalisationService LocalisationService
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+@inject IDialogService DialogService
+@inject IJSRuntime JS
+@inject ILogger<UserFormPage> Logger
+
+<PageTitle>@AppSettings.AppName — @(_isEdit ? "Modifier l'utilisateur" : "Nouvel utilisateur")</PageTitle>
+
+<div class="aw-page">
+    <div class="aw-form">
+        <header class="aw-form__head">
+            <div>
+                <p class="aw-form__eyebrow">Administration</p>
+                <h1 class="aw-form__title">@(_isEdit ? "Modifier l'utilisateur" : "Nouvel utilisateur")</h1>
+            </div>
+            <div class="aw-form__actions">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="OnCancel">
+                    <i class="bi bi-arrow-left"></i> Annuler
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="OnSubmit">
+                    <i class="bi bi-check-lg"></i> Enregistrer
+                </button>
+            </div>
+        </header>
+        <div class="aw-form__body">
+            @if (!string.IsNullOrWhiteSpace(_formError))
+            {
+                <div class="aw-form-alert aw-form-alert--error" role="alert">
+                    <i class="bi bi-exclamation-circle-fill" aria-hidden="true"></i>
+                    <div>
+                        <p style="margin:0;">@_formError</p>
+                        @if (!string.IsNullOrWhiteSpace(_formErrorAction))
+                        {
+                            <a class="aw-form-alert__action" href="@_formErrorAction">Modifier l'utilisateur existant</a>
+                        }
+                    </div>
+                </div>
+            }
+            <div class="aw-form__grid">
+                <div class="aw-field">
+                    <label class="aw-field__label">Login *</label>
+                    <input type="text" class="aw-input" @bind="_user.Login" maxlength="50" readonly="@_isEdit"
+                           placeholder="Identifiant" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Mot de passe</label>
+                    <input type="password" class="aw-input" @bind="_user.Password" placeholder="********" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Nom complet</label>
+                    <input type="text" class="aw-input" @bind="_user.Name" maxlength="50" placeholder="Prénom et nom" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Email</label>
+                    <input type="text" class="aw-input" @bind="_user.Email" maxlength="50" placeholder="email@exemple.com" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Profil / nom du rôle *</label>
+                    <input type="text" class="aw-input" @bind="_profileName" maxlength="80"
+                           placeholder="Ex. Magasinier Dépôt, Caissier Magasin" />
+                    <p class="aw-field__hint">Ce libellé identifie le profil d'accès de l'utilisateur.</p>
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Actif</label>
+                    <label class="aw-switch-label" style="display:flex;align-items:center;gap:0.55rem;min-height:var(--aw-control-h);">
+                        <input class="aw-switch" type="checkbox" @bind="_activated" />
+                        <span class="aw-field__hint" style="margin:0;">@(_activated ? "Compte activé" : "Compte désactivé")</span>
+                    </label>
+                </div>
+            </div>
+
+            <fieldset class="lov-fieldset mt-4">
+                <legend>Accès utilisateur</legend>
+                <p class="aw-field__hint">
+                    Configurez les magasins, onglets, sous-onglets et actions via l'assistant.
+                </p>
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <button type="button" class="aw-btn aw-btn--primary aw-btn--sm" @onclick="OpenAccessDialog">
+                        <i class="bi bi-sliders"></i> Configurer les accès…
+                    </button>
+                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="ApplyAdministrateurPreset">
+                        <i class="bi bi-shield-check"></i> Profil Administrateur
+                    </button>
+                </div>
+
+                @if (_accessConfigured)
+                {
+                    <div class="user-access-summary mt-3">
+                        <p><strong>@_selectedLocalisations.Count</strong> magasin(s) ·
+                           <strong>@SelectedTabCount()</strong> onglet(s) ·
+                           <strong>@_permissionCodes.Count</strong> permission(s)</p>
+                        @if (_selectedLocalisations.Any())
+                        {
+                            <div class="d-flex flex-wrap gap-1 mt-1">
+                                @foreach (var loc in _localisations.Where(l => _selectedLocalisations.Contains(l.IdLocalisation)))
+                                {
+                                    <span class="aw-badge aw-badge--brand">@loc.DescriptionLocalisation</span>
+                                }
+                            </div>
+                        }
+                        @if (SelectedTabCodes().Any())
+                        {
+                            <div class="d-flex flex-wrap gap-1 mt-2">
+                                @foreach (var tab in PermissionCatalog.Tabs.Where(t => IsTabSelected(t.Code)))
+                                {
+                                    <span class="aw-badge aw-badge--primary">@tab.Label</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <p class="aw-field__hint mt-2" style="color:var(--aw-danger,#dc2626);">
+                        Les accès n'ont pas encore été configurés.
+                    </p>
+                }
+            </fieldset>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string? UserLogin { get; set; }
+
+    bool _isEdit;
+    bool _activated = true;
+    bool _accessConfigured;
+    string _profileName = string.Empty;
+    List<Localisation> _localisations = new();
+    HashSet<int> _selectedLocalisations = new();
+    HashSet<string> _permissionCodes = new(StringComparer.OrdinalIgnoreCase);
+    User _user = new() { Activated = true };
+    string? _formError;
+    string? _formErrorAction;
+
+    bool IsTabSelected(string code) =>
+        PermissionCatalog.IsNodeGranted(_permissionCodes, code);
+
+    IEnumerable<string> SelectedTabCodes() =>
+        PermissionCatalog.Tabs.Select(t => t.Code).Where(IsTabSelected);
+
+    int SelectedTabCount() => SelectedTabCodes().Count();
+
+    string _backRoute = "/administration";
+    PermissionSnapshot _perms = PermissionSnapshot.Empty;
+
+    void OnCancel() => Navigation.NavigateTo(_backRoute);
+
+    void ApplyAdministrateurPreset()
+    {
+        _profileName = "Administrateur";
+        _selectedLocalisations = _localisations.Select(l => l.IdLocalisation).ToHashSet();
+        _permissionCodes = PermissionCatalog.BuildFullAccessGrants();
+        _accessConfigured = _selectedLocalisations.Any() && _permissionCodes.Any();
+        _formError = null;
+        _formErrorAction = null;
+
+        if (!_selectedLocalisations.Any())
+            Snackbar.Add("Profil administrateur appliqué. Aucun magasin disponible — créez des localisations.", Severity.Warning);
+        else
+            Snackbar.Add("Profil Administrateur appliqué (tous les magasins et permissions).", Severity.Success);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var login = auth.User.FindFirst("login")?.Value
+                ?? auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (!string.IsNullOrEmpty(login))
+            {
+                _perms = await PermissionResolver.GetPermissionsAsync(login);
+                _backRoute = _perms.HasHierarchicalGrants
+                    ? PermissionCatalog.TabHubRoute("administration", _perms.Grants)
+                    : "/administration";
+            }
+
+            _localisations = await LocalisationService.GetAllLocalisationsAsync();
+
+            if (!string.IsNullOrEmpty(UserLogin))
+            {
+                _isEdit = true;
+                var existing = await UserAdminService.GetUserWithRoleAsync(UserLogin);
+                if (existing != null)
+                {
+                    _user = existing;
+                    _activated = _user.Activated ?? true;
+                    _profileName = existing.Role?.DescriptionRole ?? string.Empty;
+
+                    var userLocIds = await LocalisationService.GetUserLocalisationIdsAsync(UserLogin, false);
+                    _selectedLocalisations = userLocIds.ToHashSet();
+                    _permissionCodes = (await UserAdminService.GetUserPermissionCodesAsync(UserLogin))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    _accessConfigured = _selectedLocalisations.Any() && _permissionCodes.Any();
+                }
+                else
+                {
+                    _formError = $"Utilisateur « {UserLogin} » introuvable.";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "UserFormPage init failed for {UserLogin}", UserLogin);
+            _formError = UserAdminSaveErrors.Format(ex);
+            Snackbar.Add(_formError, Severity.Error);
+        }
+    }
+
+    async Task OpenAccessDialog()
+    {
+        try
+        {
+        if (_isEdit && !string.IsNullOrWhiteSpace(_user.Login))
+        {
+            _permissionCodes = (await UserAdminService.GetUserPermissionCodesAsync(_user.Login))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            _accessConfigured = _selectedLocalisations.Any() && _permissionCodes.Any();
+        }
+
+        var parameters = new DialogParameters<UserAccessDialog>
+        {
+            { x => x.Localisations, _localisations },
+            { x => x.SelectedLocalisationIds, _selectedLocalisations },
+            { x => x.SelectedPermissionCodes, _permissionCodes }
+        };
+
+        var options = new DialogOptions
+        {
+            FullWidth = true,
+            MaxWidth = MaxWidth.Large,
+            CloseOnEscapeKey = true,
+            NoHeader = true
+        };
+
+        var dialog = await DialogService.ShowAsync<UserAccessDialog>(
+            string.Empty, parameters, options);
+        var result = await dialog.Result;
+
+        if (result?.Canceled != false || result.Data is not UserAccessDialog.UserAccessDialogResult data)
+            return;
+
+        _selectedLocalisations = data.LocalisationIds;
+        _permissionCodes = data.PermissionCodes;
+        _accessConfigured = true;
+
+        // En édition : persister tout de suite en base (T_User_Activities), pas seulement en mémoire.
+        if (_isEdit && !string.IsNullOrWhiteSpace(_user.Login))
+        {
+            if (string.IsNullOrWhiteSpace(_profileName))
+            {
+                Snackbar.Add(
+                    "Accès mémorisés localement. Renseignez le profil puis cliquez Enregistrer pour les sauver en base.",
+                    Severity.Warning);
+                return;
+            }
+
+            try
+            {
+                await UserAdminService.SaveUserProfileAccessAsync(
+                    _user, _profileName, _selectedLocalisations, _permissionCodes);
+
+                _permissionCodes = (await UserAdminService.GetUserPermissionCodesAsync(_user.Login))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                _accessConfigured = _selectedLocalisations.Any() && _permissionCodes.Any();
+
+                Snackbar.Add(
+                    $"Accès enregistrés en base ({_permissionCodes.Count} permission(s)).",
+                    Severity.Success);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "SaveUserProfileAccessAsync from access dialog for {Login}", _user.Login);
+                _formError = UserAdminSaveErrors.Format(ex);
+                Snackbar.Add(_formError, Severity.Error);
+            }
+        }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "OpenAccessDialog failed for {Login}", _user.Login);
+            _formError = UserAdminSaveErrors.Format(ex);
+            Snackbar.Add(_formError, Severity.Error);
+        }
+    }
+
+    async Task OnSubmit()
+    {
+        _formError = null;
+        _formErrorAction = null;
+
+        if (string.IsNullOrWhiteSpace(_user.Login))
+        {
+            _formError = "Le login est obligatoire.";
+            Snackbar.Add(_formError, Severity.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_profileName))
+        {
+            _formError = "Le profil / nom du rôle est obligatoire.";
+            Snackbar.Add(_formError, Severity.Warning);
+            return;
+        }
+
+        if (!_accessConfigured || !_selectedLocalisations.Any() || !_permissionCodes.Any())
+        {
+            _formError = "Configurez les accès (magasins, onglets, sous-onglets, actions).";
+            Snackbar.Add(_formError, Severity.Warning);
+            return;
+        }
+
+        _user.Activated = _activated;
+        var login = _user.Login.Trim();
+
+        try
+        {
+            if (_isEdit)
+            {
+                await UserAdminService.UpdateUserAsync(_user, _selectedLocalisations);
+                await UserAdminService.SaveUserProfileAccessAsync(
+                    _user, _profileName, _selectedLocalisations, _permissionCodes);
+            }
+            else
+            {
+                var exists = await UserAdminService.UserExistsAsync(login);
+                if (exists)
+                {
+                    _formError = $"Le login « {login} » existe déjà.";
+                    _formErrorAction = $"/admin/utilisateur/modifier/{Uri.EscapeDataString(login)}";
+                    Snackbar.Add(_formError, Severity.Error);
+                    return;
+                }
+
+                await UserAdminService.CreateUserAsync(_user, _selectedLocalisations);
+                await UserAdminService.SaveUserProfileAccessAsync(
+                    _user, _profileName, _selectedLocalisations, _permissionCodes);
+            }
+
+            Snackbar.Add("Utilisateur enregistré.", Severity.Success);
+
+            if (_isEdit)
+            {
+                _permissionCodes = (await UserAdminService.GetUserPermissionCodesAsync(_user.Login))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                _accessConfigured = _selectedLocalisations.Any() && _permissionCodes.Any();
+            }
+
+            Navigation.NavigateTo(_backRoute);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "UserFormPage save failed for {Login}", _user.Login);
+            _formError = UserAdminSaveErrors.Format(ex);
+            if (_formError.Contains("existe déjà", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(_user.Login))
+            {
+                _formErrorAction = $"/admin/utilisateur/modifier/{Uri.EscapeDataString(_user.Login.Trim())}";
+            }
+            Snackbar.Add(_formError, Severity.Error);
+        }
+    }
+}

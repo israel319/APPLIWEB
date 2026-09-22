@@ -1,0 +1,79 @@
+@implements IDisposable
+@inject IUserCurrencyPreferenceService UserCurrency
+
+@if (Inline)
+{
+    @Text
+}
+else if (Element == "h3")
+{
+    <h3 class="@CssClass">@Text</h3>
+}
+else if (Element == "h5")
+{
+    <h5 class="@CssClass">@Text</h5>
+}
+else if (Element == "small")
+{
+    <small class="@CssClass">@Text</small>
+}
+else if (Element == "strong")
+{
+    <strong class="@CssClass">@Text</strong>
+}
+else
+{
+    <span class="@CssClass">@Text</span>
+}
+
+@code {
+    public enum DisplayMode
+    {
+        Business,
+        ApproNative,
+        FromFcStored,
+        Resolved,
+        Dashboard
+    }
+
+    [Parameter] public DisplayMode Mode { get; set; } = DisplayMode.Business;
+    [Parameter] public decimal Amount { get; set; }
+    [Parameter] public bool IsUsd { get; set; }
+    [Parameter] public decimal Taux { get; set; }
+    [Parameter] public string Format { get; set; } = "N2";
+    [Parameter] public bool IsUnitPrice { get; set; }
+    [Parameter] public bool Inline { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+    [Parameter] public string Element { get; set; } = "span";
+
+    string Text => Mode switch
+    {
+        DisplayMode.ApproNative when Taux > 0 => UserCurrency.FormatApproNative(Amount, IsUsd, Taux, Format),
+        DisplayMode.ApproNative => UserCurrency.FormatApproNative(Amount, IsUsd, Format),
+        DisplayMode.FromFcStored when Taux > 0 => UserCurrency.FormatFromFcStored(Amount, Taux, Format),
+        DisplayMode.FromFcStored => UserCurrency.FormatFromFcStored(Amount, Format),
+        DisplayMode.Resolved => UserCurrency.FormatResolvedAmount(Amount, IsUnitPrice),
+        DisplayMode.Dashboard when Taux > 0 => UserCurrency.FormatDashboard(Amount, Taux),
+        DisplayMode.Dashboard => UserCurrency.FormatDashboard(Amount),
+        DisplayMode.Business when Taux > 0 => UserCurrency.FormatBusiness(Amount, Taux, Format),
+        _ => UserCurrency.FormatBusiness(Amount, Format)
+    };
+
+    protected override void OnInitialized() => UserCurrency.OnChanged += Refresh;
+
+    void Refresh()
+    {
+        _ = InvokeAsync(() =>
+        {
+            try
+            {
+                StateHasChanged();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        });
+    }
+
+    public void Dispose() => UserCurrency.OnChanged -= Refresh;
+}

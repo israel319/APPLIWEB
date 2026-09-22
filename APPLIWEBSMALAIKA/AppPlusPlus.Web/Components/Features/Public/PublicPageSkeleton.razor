@@ -1,0 +1,47 @@
+@* Skeleton loader unifié pour la partie publique (catalogue, panier, compte). *@
+
+<div class="public-skeleton public-skeleton--@Variant" aria-busy="true" aria-live="polite">
+    <span class="visually-hidden">Chargement…</span>
+    @if (Variant == "catalog-categories")
+    {
+        <div class="landing-catalog-skeleton" aria-hidden="true">
+            @for (var s = 0; s < Count; s++)
+            {
+                <div class="landing-catalog-skeleton__card" style="--cat-i: @s"></div>
+            }
+        </div>
+    }
+    else if (Variant == "catalog-products")
+    {
+        <div class="landing-catalog-skeleton landing-catalog-skeleton--products" aria-hidden="true">
+            @for (var s = 0; s < Count; s++)
+            {
+                <div class="landing-catalog-skeleton__product" style="--cat-i: @s"></div>
+            }
+        </div>
+    }
+    else if (Variant == "panel")
+    {
+        <div class="public-skeleton__panel">
+            <div class="public-skeleton__line public-skeleton__line--title"></div>
+            <div class="public-skeleton__line"></div>
+            <div class="public-skeleton__line"></div>
+            <div class="public-skeleton__line public-skeleton__line--short"></div>
+        </div>
+    }
+    else
+    {
+        <div class="public-skeleton__rows">
+            @for (var s = 0; s < Count; s++)
+            {
+                <div class="public-skeleton__row" style="--cat-i: @s"></div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>catalog-categories | catalog-products | panel | rows</summary>
+    [Parameter] public string Variant { get; set; } = "rows";
+    [Parameter] public int Count { get; set; } = 6;
+}

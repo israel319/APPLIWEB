@@ -1,0 +1,313 @@
+@page "/grh/employees"
+@using AppPlusPlus.Application.Services.GRH
+@using AppPlusPlus.Application.DTOs.GRH.Employee
+@using AppPlusPlus.Domain.Entities.GRH.Employee
+@using MudBlazor
+@inject IEmployeeService EmployeeService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+<PageTitle>@AppSettings.AppName — Employés</PageTitle>
+
+<div class="aw-page aw-page--workspace">
+    <div class="aw-workspace">
+        <header class="aw-object-head">
+            <div class="aw-object-head__identity">
+                <p class="aw-object-head__eyebrow">Module GRH</p>
+                <h1 class="aw-object-head__title">Gestion des employés</h1>
+                <p class="aw-object-head__desc">Fiches, recherche et actions rapides</p>
+            </div>
+        </header>
+
+        <div class="aw-workspace__body">
+            <div class="aw-actionbar">
+                <div class="aw-actionbar__search">
+                    <i class="bi bi-search" aria-hidden="true"></i>
+                    <input type="search"
+                           placeholder="Rechercher par code, nom ou email…"
+                           aria-label="Rechercher un employé"
+                           @bind="searchTerm"
+                           @bind:event="oninput"
+                           @bind:after="ApplySearch" />
+                </div>
+                <div class="aw-actionbar__actions">
+                    <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="LoadEmployees">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="OpenCreateDialog">
+                        <i class="bi bi-plus-lg"></i> Nouvel employé
+                    </button>
+                </div>
+            </div>
+
+            @if (isLoading)
+            {
+                <div class="aw-table-region">
+                    <div class="aw-loading">
+                        <span class="aw-spinner" role="status" aria-hidden="true"></span>
+                        <span>Chargement des employés…</span>
+                    </div>
+                </div>
+            }
+            else if (employees == null || employees.Count == 0)
+            {
+                <div class="aw-table-region">
+                    <div class="aw-empty">
+                        <i class="bi bi-people"></i>
+                        <p>Aucun employé trouvé.</p>
+                    </div>
+                </div>
+            }
+            else if (!filteredEmployees.Any())
+            {
+                <div class="aw-table-region">
+                    <div class="aw-empty">
+                        <i class="bi bi-search"></i>
+                        <p>Aucun résultat pour cette recherche.</p>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="aw-table-region">
+                    <MudDataGrid Items="@filteredEmployees" Hover="true" Bordered="false" Dense="true"
+                                 Striped="true" Elevation="0">
+                        <Columns>
+                            <PropertyColumn Property="x => x.EmployeeCode" Title="Code">
+                                <CellTemplate>
+                                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                        <MudAvatar>@GetInitials(context.Item.FullName)</MudAvatar>
+                                        <MudText Typo="Typo.body2">@context.Item.EmployeeCode</MudText>
+                                    </MudStack>
+                                </CellTemplate>
+                            </PropertyColumn>
+                            <PropertyColumn Property="x => x.FullName" Title="Nom" />
+                            <PropertyColumn Property="x => x.Email" Title="Email" />
+                            <PropertyColumn Property="x => x.DepartmentName" Title="Département" />
+                            <PropertyColumn Property="x => x.JobPositionName" Title="Poste" />
+                            <PropertyColumn Property="x => x.Status" Title="Statut">
+                                <CellTemplate>
+                                    <MudChip Size="Size.Small" Label="true"
+                                             Color="@GetStatusColor(context.Item.Status)">
+                                        @context.Item.Status
+                                    </MudChip>
+                                </CellTemplate>
+                            </PropertyColumn>
+                            <TemplateColumn CellClass="d-flex gap-2" Title="Actions">
+                                <CellTemplate>
+                                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Edit"
+                                                  Color="Color.Info" OnClick="() => EditEmployee(context.Item.Id)" />
+                                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Delete"
+                                                  Color="Color.Error" OnClick="() => DeleteEmployee(context.Item.Id)" />
+                                </CellTemplate>
+                            </TemplateColumn>
+                        </Columns>
+                        <PagerContent>
+                            <MudDataGridPager T="EmployeeListDto" />
+                        </PagerContent>
+                    </MudDataGrid>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@if (showDialog && formModel != null)
+{
+    <div class="aw-page" style="max-width:480px;margin:0 auto 2rem;">
+        <div class="aw-form">
+            <header class="aw-form__head">
+                <div>
+                    <p class="aw-form__eyebrow">Employé</p>
+                    <h1 class="aw-form__title">
+                        @(editingEmployeeId.HasValue ? "Modifier employé" : "Nouvel employé")
+                    </h1>
+                </div>
+                <div class="aw-form__actions">
+                    <button type="button" class="aw-btn aw-btn--ghost" @onclick="CloseDialog">Annuler</button>
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="SaveEmployee">Enregistrer</button>
+                </div>
+            </header>
+            <div class="aw-form__body">
+                <div class="aw-form__grid">
+                    <div class="aw-field">
+                        <label class="aw-field__label">Prénom</label>
+                        <MudTextField @bind-Value="formModel.FirstName" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Nom</label>
+                        <MudTextField @bind-Value="formModel.LastName" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </div>
+                    <div class="aw-field aw-form__span-2">
+                        <label class="aw-field__label">Email</label>
+                        <MudTextField @bind-Value="formModel.Email" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Email" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Téléphone</label>
+                        <MudTextField @bind-Value="formModel.PhoneNumber" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </div>
+                    <div class="aw-field">
+                        <AwDateField Label="Date de naissance" @bind-Value="employeeDateOfBirth" />
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<EmployeeListDto> employees = new();
+    private List<EmployeeListDto> filteredEmployees = new();
+    private string searchTerm = string.Empty;
+    private bool isLoading = false;
+    private bool showDialog = false;
+    private int? editingEmployeeId;
+    private CreateEmployeeDto? formModel;
+    private DateTime? employeeDateOfBirth;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadEmployees();
+    }
+
+    private async Task LoadEmployees()
+    {
+        try
+        {
+            isLoading = true;
+            var activeEmployees = await EmployeeService.GetAllActiveEmployeesAsync();
+            employees = activeEmployees.Select(employee => new EmployeeListDto
+            {
+                Id = employee.Id,
+                EmployeeCode = employee.EmployeeCode,
+                FullName = $"{employee.FirstName} {employee.LastName}",
+                Email = employee.Email,
+                DepartmentName = employee.Department?.DepartmentName ?? string.Empty,
+                JobPositionName = employee.JobPosition?.PositionName ?? string.Empty,
+                Status = employee.Status.ToString()
+            }).ToList();
+            ApplySearch();
+            isLoading = false;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Erreur: {ex.Message}", Severity.Error);
+            isLoading = false;
+        }
+    }
+
+    private void OpenCreateDialog()
+    {
+        editingEmployeeId = null;
+        formModel = new CreateEmployeeDto();
+        employeeDateOfBirth = formModel.DateOfBirth == default ? null : formModel.DateOfBirth;
+        showDialog = true;
+    }
+
+    private void EditEmployee(int id)
+    {
+        editingEmployeeId = id;
+        formModel = new CreateEmployeeDto();
+        employeeDateOfBirth = null;
+        showDialog = true;
+    }
+
+    private async Task SaveEmployee()
+    {
+        if (formModel != null)
+        {
+            try
+            {
+                formModel.DateOfBirth = employeeDateOfBirth ?? DateTime.UtcNow;
+
+                if (editingEmployeeId.HasValue)
+                {
+                    var employee = await EmployeeService.GetEmployeeByIdAsync(editingEmployeeId.Value);
+                    employee.FirstName = formModel.FirstName;
+                    employee.LastName = formModel.LastName;
+                    employee.Email = formModel.Email;
+                    employee.PhoneNumber = formModel.PhoneNumber;
+                    employee.DateOfBirth = formModel.DateOfBirth;
+                    await EmployeeService.UpdateEmployeeAsync(employee);
+                }
+                else
+                {
+                    await EmployeeService.CreateEmployeeAsync(
+                        formModel.EmployeeCode,
+                        formModel.FirstName,
+                        formModel.LastName,
+                        formModel.Email,
+                        formModel.CompanyId,
+                        formModel.DepartmentId,
+                        formModel.ServiceId,
+                        formModel.JobPositionId);
+                }
+
+                Snackbar.Add("Employé enregistré avec succès", Severity.Success);
+                CloseDialog();
+                await LoadEmployees();
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Erreur: {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    private async Task DeleteEmployee(int id)
+    {
+        try
+        {
+            await EmployeeService.DeactivateEmployeeAsync(id);
+            Snackbar.Add("Employé désactivé avec succès", Severity.Success);
+            await LoadEmployees();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Erreur: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void CloseDialog()
+    {
+        showDialog = false;
+        formModel = null;
+        employeeDateOfBirth = null;
+        editingEmployeeId = null;
+    }
+
+    private string GetInitials(string fullName)
+    {
+        var parts = fullName.Split(' ');
+        return parts.Length >= 2
+            ? $"{parts[0][0]}{parts[1][0]}".ToUpper()
+            : fullName.Substring(0, 1).ToUpper();
+    }
+
+    private void ApplySearch()
+    {
+        if (string.IsNullOrWhiteSpace(searchTerm))
+        {
+            filteredEmployees = employees;
+            return;
+        }
+
+        filteredEmployees = employees
+            .Where(employee =>
+                employee.EmployeeCode.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                employee.FullName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                employee.Email.Contains(searchTerm, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private Color GetStatusColor(string status)
+    {
+        return status?.ToLower() switch
+        {
+            "active" => Color.Success,
+            "inactive" => Color.Warning,
+            "terminated" => Color.Error,
+            _ => Color.Default
+        };
+    }
+}

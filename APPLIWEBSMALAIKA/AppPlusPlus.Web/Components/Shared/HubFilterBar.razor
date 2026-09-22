@@ -1,0 +1,201 @@
+@using MudBlazor
+
+<div class="row g-2 mb-2 hub-filter-row">
+    <div class="col-12 @(HasSelects ? "col-lg-5 col-md-7" : "")">
+        <MudTextField T="string" @bind-Value="_localSearch"
+                      @bind-Value:after="NotifySearchChanged"
+                      Immediate="true"
+                      Placeholder="@SearchPlaceholder"
+                      Variant="Variant.Outlined"
+                      Margin="Margin.Dense"
+                      Class="hub-filter-search"
+                      Style="width:100%;"
+                      Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search"
+                      Clearable="true" />
+    </div>
+    @if (Select1Options?.Any() == true)
+    {
+        <div class="col-6 col-md-3 col-lg-2">
+            <MudAutocomplete T="string" @bind-Text="_select1Text"
+                             @bind-Text:after="NotifySelect1Changed"
+                             Value="@Select1Value"
+                             ValueChanged="OnSelect1ValueChanged"
+                             SearchFunc="@((v, ct) => SearchInOptions(v, Select1Options, ct))"
+                             Placeholder="@Select1Placeholder"
+                             Clearable="true"
+                             CoerceText="true"
+                             ResetValueOnEmptyText="true"
+                             Variant="Variant.Outlined"
+                             Margin="Margin.Dense"
+                             Dense="true"
+                             Class="hub-filter-autocomplete search-autocomplete"
+                             InputClass="@MudSearchDefaults.InputClass"
+                             PopoverClass="@MudSearchDefaults.PopoverClass"
+                             DropdownSettings="@MudSearchDefaults.Dropdown"
+                             AnchorOrigin="Origin.BottomLeft"
+                             TransformOrigin="Origin.TopLeft"
+                             RelativeWidth="DropdownWidth.Relative"
+                             MaxHeight="200"
+                             MinCharacters="1"
+                             OpenOnFocus="false"
+                             Style="width:100%;"
+                             MaxItems="20" />
+        </div>
+    }
+    @if (Select2Options?.Any() == true)
+    {
+        <div class="col-6 col-md-3 col-lg-2">
+            <MudAutocomplete T="string" @bind-Text="_select2Text"
+                             @bind-Text:after="NotifySelect2Changed"
+                             Value="@Select2Value"
+                             ValueChanged="OnSelect2ValueChanged"
+                             SearchFunc="@((v, ct) => SearchInOptions(v, Select2Options, ct))"
+                             Placeholder="@Select2Placeholder"
+                             Clearable="true"
+                             CoerceText="true"
+                             ResetValueOnEmptyText="true"
+                             Variant="Variant.Outlined"
+                             Margin="Margin.Dense"
+                             Dense="true"
+                             Class="hub-filter-autocomplete search-autocomplete"
+                             InputClass="@MudSearchDefaults.InputClass"
+                             PopoverClass="@MudSearchDefaults.PopoverClass"
+                             DropdownSettings="@MudSearchDefaults.Dropdown"
+                             AnchorOrigin="Origin.BottomLeft"
+                             TransformOrigin="Origin.TopLeft"
+                             RelativeWidth="DropdownWidth.Relative"
+                             MaxHeight="200"
+                             MinCharacters="1"
+                             OpenOnFocus="false"
+                             Style="width:100%;"
+                             MaxItems="20" />
+        </div>
+    }
+    @if (Select3Options?.Any() == true)
+    {
+        <div class="col-6 col-md-3 col-lg-3">
+            <MudAutocomplete T="string" @bind-Text="_select3Text"
+                             @bind-Text:after="NotifySelect3Changed"
+                             Value="@Select3Value"
+                             ValueChanged="OnSelect3ValueChanged"
+                             SearchFunc="@((v, ct) => SearchInOptions(v, Select3Options, ct))"
+                             Placeholder="@Select3Placeholder"
+                             Clearable="true"
+                             CoerceText="true"
+                             ResetValueOnEmptyText="true"
+                             Variant="Variant.Outlined"
+                             Margin="Margin.Dense"
+                             Dense="true"
+                             Class="hub-filter-autocomplete search-autocomplete"
+                             InputClass="@MudSearchDefaults.InputClass"
+                             PopoverClass="@MudSearchDefaults.PopoverClass"
+                             DropdownSettings="@MudSearchDefaults.Dropdown"
+                             AnchorOrigin="Origin.BottomLeft"
+                             TransformOrigin="Origin.TopLeft"
+                             RelativeWidth="DropdownWidth.Relative"
+                             MaxHeight="200"
+                             MinCharacters="1"
+                             OpenOnFocus="false"
+                             Style="width:100%;"
+                             MaxItems="20" />
+        </div>
+    }
+</div>
+@if (!string.IsNullOrEmpty(CountText))
+{
+    <small class="text-muted d-block mb-2">@CountText</small>
+}
+
+@code {
+    [Parameter] public string? SearchText { get; set; }
+    [Parameter] public EventCallback<string?> SearchTextChanged { get; set; }
+    [Parameter] public string SearchPlaceholder { get; set; } = "Rechercher…";
+
+    [Parameter] public List<string>? Select1Options { get; set; }
+    [Parameter] public string? Select1Value { get; set; }
+    [Parameter] public EventCallback<string?> Select1ValueChanged { get; set; }
+    [Parameter] public string Select1Placeholder { get; set; } = "Filtrer…";
+
+    [Parameter] public List<string>? Select2Options { get; set; }
+    [Parameter] public string? Select2Value { get; set; }
+    [Parameter] public EventCallback<string?> Select2ValueChanged { get; set; }
+    [Parameter] public string Select2Placeholder { get; set; } = "Filtrer…";
+
+    [Parameter] public List<string>? Select3Options { get; set; }
+    [Parameter] public string? Select3Value { get; set; }
+    [Parameter] public EventCallback<string?> Select3ValueChanged { get; set; }
+    [Parameter] public string Select3Placeholder { get; set; } = "Filtrer…";
+
+    [Parameter] public string? CountText { get; set; }
+
+    string _localSearch = "";
+    string? _select1Text;
+    string? _select2Text;
+    string? _select3Text;
+    string? _syncSelect1;
+    string? _syncSelect2;
+    string? _syncSelect3;
+
+    bool HasSelects =>
+        Select1Options?.Any() == true || Select2Options?.Any() == true || Select3Options?.Any() == true;
+
+    protected override void OnParametersSet()
+    {
+        _localSearch = SearchText ?? "";
+
+        if (!string.Equals(Select1Value, _syncSelect1, StringComparison.Ordinal))
+        {
+            _syncSelect1 = Select1Value;
+            _select1Text = Select1Value;
+        }
+        if (!string.Equals(Select2Value, _syncSelect2, StringComparison.Ordinal))
+        {
+            _syncSelect2 = Select2Value;
+            _select2Text = Select2Value;
+        }
+        if (!string.Equals(Select3Value, _syncSelect3, StringComparison.Ordinal))
+        {
+            _syncSelect3 = Select3Value;
+            _select3Text = Select3Value;
+        }
+    }
+
+    Task NotifySearchChanged() => SearchTextChanged.InvokeAsync(_localSearch);
+    Task NotifySelect1Changed() => Select1ValueChanged.InvokeAsync(_select1Text);
+    Task NotifySelect2Changed() => Select2ValueChanged.InvokeAsync(_select2Text);
+    Task NotifySelect3Changed() => Select3ValueChanged.InvokeAsync(_select3Text);
+
+    async Task OnSelect1ValueChanged(string? val)
+    {
+        _select1Text = val;
+        _syncSelect1 = val;
+        await Select1ValueChanged.InvokeAsync(val);
+    }
+
+    async Task OnSelect2ValueChanged(string? val)
+    {
+        _select2Text = val;
+        _syncSelect2 = val;
+        await Select2ValueChanged.InvokeAsync(val);
+    }
+
+    async Task OnSelect3ValueChanged(string? val)
+    {
+        _select3Text = val;
+        _syncSelect3 = val;
+        await Select3ValueChanged.InvokeAsync(val);
+    }
+
+    static Task<IEnumerable<string>> SearchInOptions(string? value, List<string>? options, CancellationToken _)
+    {
+        if (options == null || options.Count == 0)
+            return Task.FromResult(Enumerable.Empty<string>());
+
+        if (string.IsNullOrWhiteSpace(value))
+            return Task.FromResult(Enumerable.Empty<string>());
+
+        IEnumerable<string> q = options.Where(o => o.Contains(value, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(q.Take(20));
+    }
+}

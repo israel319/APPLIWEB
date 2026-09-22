@@ -1,0 +1,198 @@
+@page "/stock/transformation/nouveau"
+@page "/stock/transformation/modifier/{TransformationId:int}"
+@rendermode InteractiveServer
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using AppPlusPlus.Domain.Common
+@using AppPlusPlus.Application.Services.Administration
+@inject ITransformationService TransformationService
+@inject ICatalogueService CatalogueService
+@inject ILocalisationService LocalisationService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>@AppSettings.AppName — @(_isEdit ? "Modifier la transformation" : "Nouvelle transformation")</PageTitle>
+
+<div class="aw-page">
+    <div class="aw-form aw-form--xl">
+        <header class="aw-form__head">
+            <div>
+                <p class="aw-form__eyebrow">Stock</p>
+                <h1 class="aw-form__title">@(_isEdit ? "Modifier la transformation" : "Nouvelle transformation")</h1>
+            </div>
+            <div class="aw-form__actions">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="@OnCancel">
+                    <i class="bi bi-arrow-left"></i> Annuler
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="@OnSubmit">
+                    <i class="bi bi-check-lg"></i> Enregistrer
+                </button>
+            </div>
+        </header>
+        <div class="aw-form__body">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1.25rem;">
+                <div>
+                    <div class="aw-dialog__section"><i class="bi bi-box-arrow-right"></i> Source</div>
+                    <div class="aw-form__grid" style="grid-template-columns:1fr;">
+                        <div class="aw-field">
+                            <label class="aw-field__label">Article</label>
+                            <ArticleAutocomplete Articles="@_articles"
+                                                 Value="@_item.FromArticleId"
+                                                 ValueChanged="@(v => _item.FromArticleId = v ?? "")"
+                                                 Placeholder="Tapez le nom ou le code…" />
+                            @if (!string.IsNullOrWhiteSpace(_item.FromArticleId))
+                            {
+                                <p class="aw-field__hint">Sélectionné : <strong>@GetArticleLabel(_item.FromArticleId)</strong></p>
+                            }
+                        </div>
+                        <div class="aw-field">
+                            <label class="aw-field__label">Localisation</label>
+                            <MudSelect T="int?" @bind-Value="_item.FromLocalisationId" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Clearable="true"
+                                       Placeholder="Choisir">
+                                @foreach (var loc in _localisations)
+                                {
+                                    <MudSelectItem T="int?" Value="@((int?)loc.IdLocalisation)">@loc.DescriptionLocalisation</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </div>
+                        <div class="aw-field">
+                            <label class="aw-field__label">Quantité</label>
+                            <MudNumericField @bind-Value="_item.Qte" T="decimal" Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="0" />
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="aw-dialog__section"><i class="bi bi-box-arrow-in-left"></i> Destination</div>
+                    <div class="aw-form__grid" style="grid-template-columns:1fr;">
+                        <div class="aw-field">
+                            <label class="aw-field__label">Article</label>
+                            <ArticleAutocomplete Articles="@_articles"
+                                                 Value="@_item.ToArticleId"
+                                                 ValueChanged="@(v => _item.ToArticleId = v ?? "")"
+                                                 Placeholder="Tapez le nom ou le code…" />
+                            @if (!string.IsNullOrWhiteSpace(_item.ToArticleId))
+                            {
+                                <p class="aw-field__hint">Sélectionné : <strong>@GetArticleLabel(_item.ToArticleId)</strong></p>
+                            }
+                        </div>
+                        <div class="aw-field">
+                            <label class="aw-field__label">Localisation</label>
+                            <MudSelect T="int?" @bind-Value="_item.ToLocalisationId" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Clearable="true"
+                                       Placeholder="Choisir">
+                                @foreach (var loc in _localisations)
+                                {
+                                    <MudSelectItem T="int?" Value="@((int?)loc.IdLocalisation)">@loc.DescriptionLocalisation</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </div>
+                        <div class="aw-field">
+                            <label class="aw-field__label">Quantité</label>
+                            <MudNumericField @bind-Value="_item.ToQte" T="decimal?" Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="0" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="aw-form__grid" style="margin-top:1.15rem;">
+                <div class="aw-field">
+                    <AwDateField Label="Date" @bind-Value="_dateValue" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Commentaire</label>
+                    <textarea class="aw-input" @bind="_item.Comment" rows="2" placeholder="Optionnel"></textarea>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_errorMessage))
+            {
+                <MudAlert Severity="Severity.Error" Class="mt-3" ShowCloseIcon="true" CloseIconClicked="@(() => _errorMessage = null)">
+                    @_errorMessage
+                </MudAlert>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public int? TransformationId { get; set; }
+
+    bool _isEdit;
+    Transformation _item = new() { Date = DateTime.Now };
+    DateTime? _dateValue = DateTime.Now;
+    List<Article> _articles = new();
+    List<Localisation> _localisations = new();
+    string _currentLogin = "";
+    string _backRoute = "/stock";
+    PermissionSnapshot _perms = PermissionSnapshot.Empty;
+    string? _errorMessage;
+
+    string GetArticleLabel(string? id) =>
+        _articles.FirstOrDefault(a => a.IdArticle == id)?.Description ?? id ?? "";
+
+    void OnCancel() => Navigation.NavigateTo(_backRoute);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+            var isAdmin = AppFunctions.Normalize(authUser.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+            var perms = await PermissionResolver.GetPermissionsAsync(_currentLogin);
+            _perms = perms;
+            _backRoute = perms.HasHierarchicalGrants
+                ? PermissionCatalog.TabHubRoute("articles", perms.Grants)
+                : "/stock";
+            if (!PermissionGate.DoAction(perms, "articles.transformation.write",
+                    () => isAdmin || perms.CanWrite(AppFunctions.Approvisionnement)))
+            {
+                Navigation.NavigateTo(perms.HomeRoute());
+                return;
+            }
+        }
+
+        _articles = (await CatalogueService.GetArticlesAsync()).OrderBy(a => a.Description).ToList();
+        _localisations = (await LocalisationService.GetAllLocalisationsAsync()).OrderBy(l => l.DescriptionLocalisation).ToList();
+
+        if (TransformationId.HasValue)
+        {
+            _isEdit = true;
+            var existing = await TransformationService.GetByIdAsync(TransformationId.Value);
+            if (existing != null)
+            {
+                _item = existing;
+                _dateValue = _item.Date;
+            }
+        }
+    }
+
+    async Task OnSubmit()
+    {
+        _errorMessage = null;
+        _item.Date = _dateValue ?? DateTime.Now;
+        _item.UserLogin = _currentLogin;
+        _item.DateSys = DateTime.Now;
+        _item.Computer = Environment.MachineName;
+
+        Application.Common.ServiceResult result;
+        if (_isEdit)
+            result = await TransformationService.UpdateAsync(_item);
+        else
+            result = await TransformationService.AddAsync(_item);
+
+        if (!result.Success)
+        {
+            _errorMessage = result.Message;
+            return;
+        }
+
+        Navigation.NavigateTo(_backRoute);
+    }
+}

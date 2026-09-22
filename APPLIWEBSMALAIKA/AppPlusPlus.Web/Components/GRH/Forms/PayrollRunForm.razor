@@ -1,0 +1,105 @@
+@page "/grh/paie/bulletin/form"
+@rendermode InteractiveServer
+@inject IPayrollService  PayrollService
+@inject ISnackbar        Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>@AppSettings.AppName — Nouveau bulletin de paie</PageTitle>
+
+<div class="aw-page">
+    <div class="aw-form aw-form--wide">
+        <header class="aw-form__head">
+            <div>
+                <p class="aw-form__eyebrow">GRH · Paie</p>
+                <h1 class="aw-form__title">Nouveau bulletin de paie</h1>
+            </div>
+            <div class="aw-form__actions">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                    <i class="bi bi-arrow-left"></i> Annuler
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="SaveAsync" disabled="@_saving">
+                    <i class="bi bi-check-lg"></i> @(_saving ? "Enregistrement…" : "Enregistrer")
+                </button>
+            </div>
+        </header>
+        <div class="aw-form__body">
+            <div class="aw-form__grid">
+                <div class="aw-field">
+                    <AwDateField Label="Début de période" Value="_form.PeriodStart"
+                                 ValueChanged="@(v => { if (v.HasValue) _form.PeriodStart = v.Value; })" />
+                </div>
+                <div class="aw-field">
+                    <AwDateField Label="Fin de période" Value="_form.PeriodEnd"
+                                 ValueChanged="@(v => { if (v.HasValue) _form.PeriodEnd = v.Value; })" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Nombre d'employés</label>
+                    <input type="number" class="aw-input" @bind="_form.NumberOfEmployees" min="0" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Total brut (TND)</label>
+                    <input type="number" step="0.001" class="aw-input" @bind="_form.TotalGross" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Total retenues (TND)</label>
+                    <input type="number" step="0.001" class="aw-input" @bind="_form.TotalDeductions" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Total net (TND)</label>
+                    <input type="number" step="0.001" class="aw-input" @bind="_form.TotalNet" />
+                </div>
+                <div class="aw-field aw-form__span-2">
+                    <label class="aw-field__label">Notes</label>
+                    <textarea class="form-control" rows="3" style="height:auto;min-height:5rem;" @bind="_form.Notes" placeholder="Remarques…"></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    bool _saving;
+
+    PayrollRunFormData _form = new()
+    {
+        PeriodStart = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1),
+        PeriodEnd   = new DateTime(DateTime.Today.Year, DateTime.Today.Month,
+                          DateTime.DaysInMonth(DateTime.Today.Year, DateTime.Today.Month))
+    };
+
+    async Task SaveAsync()
+    {
+        if (_form.PeriodStart >= _form.PeriodEnd)
+        {
+            Snackbar.Add("La date de fin doit être postérieure à la date de début.", Severity.Warning);
+            return;
+        }
+        _saving = true;
+        try
+        {
+            var run = await PayrollService.CreatePayrollRunAsync(_form.PeriodStart, _form.PeriodEnd);
+            run.TotalGrossSalary  = _form.TotalGross;
+            run.TotalNetSalary    = _form.TotalNet;
+            run.TotalDeductions   = _form.TotalDeductions;
+            run.NumberOfEmployees = _form.NumberOfEmployees;
+            run.Notes             = _form.Notes;
+            Snackbar.Add("Bulletin créé.", Severity.Success);
+            Nav.NavigateTo("/grh?tab=3");
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    void Cancel() => Nav.NavigateTo("/grh?tab=3");
+
+    class PayrollRunFormData
+    {
+        public DateTime PeriodStart       { get; set; }
+        public DateTime PeriodEnd         { get; set; }
+        public decimal  TotalGross        { get; set; }
+        public decimal  TotalDeductions   { get; set; }
+        public decimal  TotalNet          { get; set; }
+        public int      NumberOfEmployees { get; set; }
+        public string?  Notes             { get; set; }
+    }
+}

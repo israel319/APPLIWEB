@@ -1,0 +1,414 @@
+@inherits LayoutComponentBase
+@using AppPlusPlus.Web.Services
+@using AppPlusPlus.Web.Components.Features.Public
+@using System.Security.Claims
+@inject NavigationManager Navigation
+@inject IClientCartService Cart
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="landing-shell @ShellClass">
+    @if (UseAlibabaChrome)
+    {
+        <AlibabaHomeHeader CartQty="_cartQty"
+                           IsClient="_isClient"
+                           ClientDisplayName="_clientDisplayName"
+                           MobileMenuOpen="_mobileMenuOpen"
+                           MobileMenuOpenChanged="OnAliMobileMenuChanged"
+                           IsHomePage="@(_currentSection == "accueil")"
+                           ActiveSection="_currentSection" />
+    }
+    else if (!IsAuthPage)
+    {
+    <header class="landing-header @(_mobileMenuOpen ? "landing-header--menu-open" : "")">
+        <div class="landing-header-inner">
+            @if (ShowMobileBack)
+            {
+                <a href="/catalogue" data-enhance-nav="false" class="landing-header-back d-lg-none" aria-label="Retour au catalogue">
+                    <i class="bi bi-arrow-left"></i>
+                </a>
+            }
+            <a href="/" data-enhance-nav="false" class="landing-brand">
+                <img src="appliweb-logo-v2.png" alt="@BrandDisplayName" class="landing-brand-logo" />
+                <span class="landing-brand-text">
+                    <span class="landing-brand-name">@BrandDisplayName</span>
+                    @if (_currentSection is "accueil" or "connexion" or "inscription")
+                    {
+                        <span class="landing-brand-by">@PublicBrand.Tagline</span>
+                    }
+                </span>
+            </a>
+            <nav class="landing-header-menu d-none d-lg-flex" aria-label="Navigation principale">
+                <a href="/"
+                   data-enhance-nav="false"
+                   data-nav-section="accueil"
+                   class="landing-header-link @HeaderLinkClass("accueil")"
+                   @onclick="CloseMobileMenu">Accueil</a>
+                @if (_currentSection == "accueil")
+                {
+                    <a href="#catalogue" data-nav-section="catalogue" class="landing-header-link" @onclick="CloseMobileMenu">Catalogue</a>
+                    <a href="#contact" data-nav-section="contact" class="landing-header-link" @onclick="CloseMobileMenu">Contact</a>
+                }
+                else
+                {
+                    <a href="/catalogue"
+                       data-enhance-nav="false"
+                       class="landing-header-link @HeaderLinkClass("catalogue")"
+                       @onclick="CloseMobileMenu">Catalogue</a>
+                }
+            </nav>
+            <div class="landing-header-actions">
+                <a href="/client/panier"
+                   class="landing-header-icon-btn @HeaderLinkClass("panier")"
+                   aria-label="Panier"
+                   title="Commander"
+                   @onclick="CloseMobileMenu">
+                    <i class="bi bi-cart3" aria-hidden="true"></i>
+                    @if (_cartQty > 0)
+                    {
+                        <span class="landing-cart-badge">@_cartQty</span>
+                    }
+                </a>
+                <div class="landing-header-actions__desktop d-none d-md-flex">
+                    @if (_isClient)
+                    {
+                        <a href="/client/compte" class="landing-header-btn landing-header-btn--ghost @HeaderLinkClass("compte")">
+                            <i class="bi bi-person-circle" aria-hidden="true"></i>
+                            <span class="landing-header-btn__label">@_clientDisplayName</span>
+                        </a>
+                        <a href="/auth/client/logout" class="landing-header-btn landing-header-btn--ghost landing-header-btn--muted">Déconnexion</a>
+                    }
+                    else
+                    {
+                        <a href="/auth/connexion" class="landing-header-btn landing-header-btn--ghost @HeaderLinkClass("connexion")">Connexion</a>
+                        <a href="/catalogue" data-enhance-nav="false" class="landing-header-btn landing-header-btn--ghost @HeaderLinkClass("catalogue")">Commander</a>
+                    }
+                </div>
+                <button type="button"
+                        class="landing-header-icon-btn landing-header-menu-toggle d-lg-none"
+                        aria-expanded="@_mobileMenuOpen"
+                        aria-controls="landing-header-drawer"
+                        aria-label="Menu"
+                        @onclick="ToggleMobileMenu">
+                    <i class="bi @(_mobileMenuOpen ? "bi-x-lg" : "bi-list")" aria-hidden="true"></i>
+                </button>
+            </div>
+        </div>
+
+        @if (_mobileMenuOpen)
+        {
+            <div class="landing-header-drawer-layer d-lg-none" @onclick="CloseMobileMenu"></div>
+            <div id="landing-header-drawer" class="landing-header-drawer d-lg-none" @onclick:stopPropagation="true">
+                <nav class="landing-header-drawer__nav" aria-label="Menu mobile">
+                    <a href="/" data-enhance-nav="false" data-nav-section="accueil" class="landing-header-drawer__link @HeaderLinkClass("accueil")" @onclick="CloseMobileMenu">Accueil</a>
+                    @if (_currentSection == "accueil")
+                    {
+                        <a href="#apropos" data-nav-section="apropos" class="landing-header-drawer__link" @onclick="CloseMobileMenu">À propos</a>
+                        <a href="#produits" data-nav-section="produits" class="landing-header-drawer__link" @onclick="CloseMobileMenu">Collections</a>
+                        <a href="#filles" data-nav-section="filles" class="landing-header-drawer__link" @onclick="CloseMobileMenu">Filles</a>
+                        <a href="#garcons" data-nav-section="garcons" class="landing-header-drawer__link" @onclick="CloseMobileMenu">Garçons</a>
+                        <a href="#contact" data-nav-section="contact" class="landing-header-drawer__link" @onclick="CloseMobileMenu">Contact</a>
+                    }
+                    <a href="/catalogue" data-enhance-nav="false" class="landing-header-drawer__link @HeaderLinkClass("catalogue")" @onclick="CloseMobileMenu">Catalogue</a>
+                    <a href="/client/panier" class="landing-header-drawer__link @HeaderLinkClass("panier")" @onclick="CloseMobileMenu">Panier / Commander</a>
+                </nav>
+                <div class="landing-header-drawer__actions">
+                    @if (_isClient)
+                    {
+                        <div class="landing-header-drawer__user">
+                            <i class="bi bi-person-circle" aria-hidden="true"></i>
+                            <div>
+                                <strong>@_clientDisplayName</strong>
+                                @if (!string.IsNullOrWhiteSpace(_clientContact))
+                                {
+                                    <span>@_clientContact</span>
+                                }
+                            </div>
+                        </div>
+                        <a href="/client/compte" class="landing-header-btn landing-header-btn--ghost landing-header-btn--block" @onclick="CloseMobileMenu">Mon compte</a>
+                        <a href="/auth/client/logout" class="landing-header-btn landing-header-btn--ghost landing-header-btn--block landing-header-btn--muted" @onclick="CloseMobileMenu">Déconnexion</a>
+                    }
+                    else
+                    {
+                        <a href="/auth/connexion" class="landing-header-btn landing-header-btn--primary landing-header-btn--block" @onclick="CloseMobileMenu">Connexion</a>
+                        <a href="/client/inscription" class="landing-header-btn landing-header-btn--ghost landing-header-btn--block" @onclick="CloseMobileMenu">S'inscrire</a>
+                        <a href="/catalogue" data-enhance-nav="false" class="landing-header-btn landing-header-btn--ghost landing-header-btn--block" @onclick="CloseMobileMenu">Commander</a>
+                    }
+                </div>
+            </div>
+        }
+    </header>
+    }
+
+    <main class="landing-main">
+        <ErrorBoundary>
+            <ChildContent>
+                @Body
+            </ChildContent>
+            <ErrorContent>
+                <section class="landing-catalog">
+                    <div class="landing-catalog-inner">
+                        <p class="landing-catalog-empty">
+                            Une erreur est survenue. Actualisez la page ou retournez au catalogue.
+                        </p>
+                        <p class="text-center mt-3">
+                            <a href="/catalogue" class="landing-btn landing-btn--solid">Retour au catalogue</a>
+                        </p>
+                    </div>
+                </section>
+            </ErrorContent>
+        </ErrorBoundary>
+    </main>
+
+    @if (ShowAlibabaFooter)
+    {
+        <footer class="ali-footer ali-footer--compact ali-footer--slim" id="contact">
+            <div class="ali-container">
+                <p class="ali-footer__contact-inline">
+                    <a href="tel:@PublicBrand.ContactPhoneTel">@PublicBrand.ContactPhone</a>
+                    <span class="ali-footer__dot" aria-hidden="true">·</span>
+                    <a href="mailto:@PublicBrand.ContactEmail">Email</a>
+                    <span class="ali-footer__dot" aria-hidden="true">·</span>
+                    <a href="/catalogue">Catalogue</a>
+                </p>
+                <p class="ali-footer__bottom">
+                    &copy; @DateTime.Today.Year @PublicBrand.ProductName
+                </p>
+            </div>
+        </footer>
+    }
+    else if (ShowLegacyFooter)
+    {
+        <footer class="landing-footer landing-footer--compact">
+            <nav class="landing-footer-compact__links" aria-label="Liens pied de page">
+                <a href="/" data-enhance-nav="false">Accueil</a>
+                <a href="/catalogue" data-enhance-nav="false">Catalogue</a>
+                <a href="/#contact">Contact</a>
+            </nav>
+            <p class="landing-footer-compact__copy">
+                &copy; @DateTime.Today.Year @PublicBrand.ProductName · @PublicBrand.Tagline
+            </p>
+        </footer>
+    }
+</div>
+
+@code {
+    string _currentSection = "";
+    int _cartQty;
+    bool _isClient;
+    bool _mobileMenuOpen;
+    string _clientDisplayName = "";
+    string _clientContact = "";
+    IJSObjectReference? _publicNav;
+    string _publicNavUri = "";
+
+    string ShellClass
+    {
+        get
+        {
+            var classes = new List<string>();
+            if (IsAuthPage)
+            {
+                classes.Add("landing-shell--auth");
+                classes.Add("landing-shell--alibaba-auth");
+                if (_currentSection == "connexion")
+                    classes.Add("landing-shell--login-mk");
+            }
+            else if (UseAlibabaChrome)
+            {
+                classes.Add("landing-shell--alibaba-home");
+                if (_currentSection == "accueil")
+                    classes.Add("landing-shell--home");
+            }
+            if (_mobileMenuOpen)
+                classes.Add("landing-shell--menu-open");
+            return string.Join(' ', classes);
+        }
+    }
+
+    bool IsAuthPage => _currentSection is "connexion" or "inscription" or "staff";
+
+    bool UseAlibabaChrome => _currentSection is "accueil" or "panier" or "compte" or "catalogue";
+
+    bool ShowAlibabaFooter => UseAlibabaChrome && _currentSection != "accueil" && !IsAuthPage;
+
+    bool ShowLegacyFooter => !IsAuthPage && _currentSection != "accueil" && !UseAlibabaChrome;
+
+    Task OnAliMobileMenuChanged(bool open)
+    {
+        _mobileMenuOpen = open;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    bool ShowMobileBack => GetPath() is "login"
+        || GetPath().StartsWith("client/");
+
+    protected override void OnInitialized()
+    {
+        Cart.Changed += OnCartChanged;
+        _currentSection = ResolveSection(Navigation.Uri);
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                await RefreshClientAuthAsync();
+                await Cart.InitializeAsync();
+                var qty = Cart.TotalQuantity;
+                if (qty != _cartQty)
+                {
+                    _cartQty = qty;
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            catch
+            {
+                // Panier ou auth indisponibles : continuer sans planter.
+            }
+        }
+
+        await EnsurePublicNavAsync();
+    }
+
+    async Task EnsurePublicNavAsync()
+    {
+        if (IsAuthPage)
+        {
+            await DisposePublicNavAsync();
+            return;
+        }
+
+        var uri = Navigation.Uri;
+        if (_publicNav is not null && _publicNavUri == uri)
+            return;
+
+        await DisposePublicNavAsync();
+
+        try
+        {
+            _publicNav = await JS.InvokeAsync<IJSObjectReference>("import", "./js/public-nav.js");
+            await _publicNav.InvokeVoidAsync("init");
+            _publicNavUri = uri;
+        }
+        catch
+        {
+            // Navigation publique non bloquante.
+        }
+    }
+
+    async Task DisposePublicNavAsync()
+    {
+        if (_publicNav is null)
+            return;
+
+        try
+        {
+            await _publicNav.InvokeVoidAsync("dispose");
+            await _publicNav.DisposeAsync();
+        }
+        catch
+        {
+        }
+
+        _publicNav = null;
+        _publicNavUri = "";
+    }
+
+    async Task RefreshClientAuthAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+        _isClient = AppFunctions.IsClientRole(user.FindFirst(ClaimTypes.Role)?.Value);
+        _clientDisplayName = user.FindFirst(ClaimTypes.Name)?.Value ?? "Mon compte";
+        _clientContact = user.FindFirst(ClientAuth.ContactClaim)?.Value ?? "";
+    }
+
+    void OnCartChanged()
+    {
+        _cartQty = Cart.TotalQuantity;
+        _ = SafeStateHasChangedAsync();
+    }
+
+    void OnLocationChanged(object? sender, LocationChangedEventArgs e) =>
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                _mobileMenuOpen = false;
+                _currentSection = ResolveSection(e.Location);
+                var path = GetPathFromUri(e.Location);
+                if (path is not ("" or "index" or "catalogue") && !path.StartsWith("catalogue/c/") && path is not "accueil")
+                    await RefreshClientAuthAsync();
+
+                StateHasChanged();
+            }
+            catch
+            {
+                // Navigation pendant déconnexion circuit.
+            }
+        });
+
+    async Task SafeStateHasChangedAsync()
+    {
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+        catch
+        {
+        }
+    }
+
+    static string GetPathFromUri(string uri)
+    {
+        var relative = new Uri(uri).AbsolutePath.Trim('/');
+        return relative.ToLowerInvariant();
+    }
+
+    string GetPath() => GetPathFromUri(Navigation.Uri);
+
+    static string ResolveSection(string uri)
+    {
+        var path = GetPathFromUri(uri);
+        if (path is "" or "index")
+            return "accueil";
+        if (path is "catalogue" || path.StartsWith("catalogue/c/"))
+            return "catalogue";
+        if (path.StartsWith("client/panier"))
+            return "panier";
+        if (path.StartsWith("client/compte"))
+            return "compte";
+        if (path is "auth/connexion" or "client/connexion")
+            return "connexion";
+        if (path.StartsWith("client/inscription"))
+            return "inscription";
+        if (path.StartsWith("login"))
+            return "staff";
+        return "";
+    }
+
+    string HeaderLinkClass(string section) =>
+        _currentSection == section ? "landing-header-link--active" : "";
+
+    string BrandDisplayName =>
+        _currentSection is "accueil" or "connexion" or "inscription"
+            ? PublicBrand.ProductName
+            : AppSettings.AppName;
+
+    void ToggleMobileMenu() => _mobileMenuOpen = !_mobileMenuOpen;
+
+    void CloseMobileMenu() => _mobileMenuOpen = false;
+
+    public async ValueTask DisposeAsync()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+        Cart.Changed -= OnCartChanged;
+        await DisposePublicNavAsync();
+    }
+}

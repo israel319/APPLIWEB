@@ -1,0 +1,233 @@
+@using System.Security.Claims
+@inject ICustomerService CustomerService
+@inject ICatalogueService CatalogueService
+@inject ICommandeService CommandeService
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+
+<MudDialog>
+    <DialogContent>
+        <div class="aw-dialog">
+            <header class="aw-dialog__head">
+                <div class="aw-dialog__title-wrap">
+                    <i class="bi bi-cart-check" aria-hidden="true"></i>
+                    <h2 class="aw-dialog__title">@(CommandeId.HasValue ? "Modifier la commande" : "Nouvelle commande")</h2>
+                </div>
+            </header>
+            <div class="aw-dialog__body" style="min-width:650px;">
+                <div class="aw-field" style="margin-bottom:0.75rem;">
+                    <label class="aw-field__label">Client</label>
+                    <MudAutocomplete T="int?" @bind-Value="_item.CustomerId" SearchFunc="@SearchCustomer"
+                                     ToStringFunc="@(v => _customers.Find(c => c.CustomerId == v)?.CustomerName ?? "")"
+                                     Placeholder="Sélectionner un client..." Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true"
+                                     CoerceText="true" CoerceValue="true" />
+                </div>
+
+                <div class="aw-field" style="margin-bottom:0.75rem;">
+                    <label class="aw-field__label">Description</label>
+                    <input type="text" class="aw-input" @bind="_item.CommandeDescription" />
+                </div>
+
+                <div class="d-flex justify-content-between align-items-center" style="margin:0.85rem 0 0.55rem;">
+                    <div class="aw-dialog__section" style="margin:0;">Articles</div>
+                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="@AddLine">
+                        <i class="bi bi-plus-lg"></i> Ajouter un article
+                    </button>
+                </div>
+
+                <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                    <div class="aw-table-wrap">
+                        <table class="aw-table">
+                            <thead>
+                                <tr>
+                                    <th>Article</th>
+                                    <th class="aw-table__num">Qté</th>
+                                    <th class="aw-table__num">P.U.</th>
+                                    <th class="aw-table__num">Sous-total</th>
+                                    <th style="width:3rem;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var line in _lines)
+                                {
+                                    <tr style="cursor:default;">
+                                        <td>
+                                            <MudAutocomplete T="string" Value="line.ArticleId"
+                                                             ValueChanged="@(v => { line.ArticleId = v; RecalcTotal(); })"
+                                                             SearchFunc="@SearchArticle"
+                                                             ToStringFunc="@(v => _articles.Find(a => a.IdArticle == v)?.Description ?? "")"
+                                                             Placeholder="Rechercher un article…" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                             CoerceText="true" CoerceValue="true" Immediate="true" Class="search-autocomplete" MaxItems="50" />
+                                        </td>
+                                        <td class="aw-table__num">
+                                            <MudNumericField T="decimal?" Value="line.Qte"
+                                                             ValueChanged="@(v => { line.Qte = v; RecalcTotal(); })"
+                                                             Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                        </td>
+                                        <td class="aw-table__num">
+                                            <MudNumericField T="decimal?" Value="line.Pu"
+                                                             ValueChanged="@(v => { line.Pu = v; RecalcTotal(); })"
+                                                             Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                        </td>
+                                        <td class="aw-table__num">
+                                            <span class="fw-medium">@UserCurrency.FormatBusiness((line.Qte ?? 0) * (line.Pu ?? 0))</span>
+                                        </td>
+                                        <td>
+                                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--icon aw-btn--sm"
+                                                    @onclick="@(() => { _lines.Remove(line); RecalcTotal(); })"
+                                                    title="Retirer" style="color:var(--aw-danger);">
+                                                <i class="bi bi-x-lg"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div style="display:flex;justify-content:flex-end;margin-top:0.65rem;">
+                    <span class="fw-bold">Total : @UserCurrency.FormatBusiness(_total)</span>
+                </div>
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;">
+            <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                <i class="bi bi-x-lg"></i> Annuler
+            </button>
+            <button type="button" class="aw-btn aw-btn--primary" @onclick="OnSave">
+                <i class="bi bi-check-lg"></i> Enregistrer
+            </button>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int? CommandeId { get; set; }
+
+    Commande _item = new();
+    List<Customer> _customers = new();
+    List<Article> _articles = new();
+    List<CmdeLine> _lines = new();
+    decimal _total;
+    string _currentLogin = "";
+
+    void Cancel() => MudDialog.Close();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+        }
+
+        _customers = await CustomerService.GetAllAsync();
+        _articles = await CatalogueService.GetArticlesAsync();
+
+        if (CommandeId.HasValue)
+        {
+            var existing = await CommandeService.GetCommandeWithDetailsAsync(CommandeId.Value);
+
+            if (existing != null)
+            {
+                _item = existing;
+                _lines = existing.Details.Select(d => new CmdeLine
+                {
+                    ExistingId = d.Id,
+                    ArticleId = d.ArticleId,
+                    Qte = d.Qte,
+                    Pu = d.Pu
+                }).ToList();
+            }
+        }
+
+        RecalcTotal();
+    }
+
+    void AddLine()
+    {
+        _lines.Add(new CmdeLine());
+    }
+
+    void RecalcTotal()
+    {
+        _total = _lines.Sum(l => (l.Qte ?? 0) * (l.Pu ?? 0));
+    }
+
+    private Task<IEnumerable<int?>> SearchCustomer(string value, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(value))
+            return Task.FromResult(_customers.Select(c => (int?)c.CustomerId));
+        return Task.FromResult(_customers
+            .Where(c => c.CustomerName != null && c.CustomerName.Contains(value, StringComparison.OrdinalIgnoreCase))
+            .Select(c => (int?)c.CustomerId));
+    }
+
+    private Task<IEnumerable<string>> SearchArticle(string value, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(value))
+            return Task.FromResult(_articles.Select(a => a.IdArticle));
+        return Task.FromResult(_articles
+            .Where(a => a.Description != null && a.Description.Contains(value, StringComparison.OrdinalIgnoreCase))
+            .Select(a => a.IdArticle));
+    }
+
+    async Task OnSave()
+    {
+        if (_item.CustomerId is null or 0)
+        {
+            Snackbar.Add("Le client est obligatoire", Severity.Warning);
+            return;
+        }
+
+        var validLines = _lines.Where(l => !string.IsNullOrEmpty(l.ArticleId) && (l.Qte ?? 0) > 0).ToList();
+
+        try
+        {
+            RecalcTotal();
+            _item.MontantTotal = _total;
+            _item.MontantRest = _total - _item.MontantPaye;
+            _item.UserLogin = _currentLogin;
+            _item.CreationDate ??= DateTime.Now;
+
+            if (!CommandeId.HasValue)
+            {
+                _item.Status = 0; // Nouvelle
+            }
+
+            var details = validLines.Select(line => new CommandeDetail
+            {
+                CommandeId = _item.CommandeId,
+                ArticleId = line.ArticleId,
+                Qte = line.Qte,
+                Pu = line.Pu,
+                QteRest = line.Qte, // tout reste à livrer
+                QtePrise = 0,
+                Status = 0
+            }).ToList();
+
+            await CommandeService.SaveCommandeAsync(_item, details);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(msg, Severity.Error);
+        }
+    }
+
+    class CmdeLine
+    {
+        public int? ExistingId { get; set; }
+        public string? ArticleId { get; set; }
+        public decimal? Qte { get; set; }
+        public decimal? Pu { get; set; }
+    }
+}

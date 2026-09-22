@@ -1,0 +1,471 @@
+@page "/commandes/nouveau"
+@page "/commandes/edit/{Id:int}"
+@rendermode InteractiveServer
+@using System.Security.Claims
+@using AppPlusPlus.Domain.Common
+@using AppPlusPlus.Application.Services.Administration
+@inject ICustomerService CustomerService
+@inject ICatalogueService CatalogueService
+@inject ICommandeService CommandeService
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+
+<PageTitle>@AppSettings.AppName — @(_isEdit ? "Modifier la commande" : "Nouvelle commande client")</PageTitle>
+
+<div class="aw-page">
+    <div class="aw-form aw-form--xl">
+        <header class="aw-form__head">
+            <div>
+                <p class="aw-form__eyebrow">Commande client</p>
+                <h1 class="aw-form__title">
+                    @(_isEdit ? $"Commande N° {Id}" : "Nouvelle commande client")
+                    @if (_isEdit)
+                    {
+                        <span class="aw-badge @_statusBadge" style="margin-left:0.45rem;vertical-align:middle;font-size:0.7rem;">@_statusLabel</span>
+                    }
+                </h1>
+            </div>
+            <div class="aw-form__actions">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="@GoBack">
+                    <i class="bi bi-arrow-left"></i> Annuler
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="@OnSave" disabled="@_saving">
+                    <i class="bi bi-check-lg"></i> Enregistrer
+                </button>
+            </div>
+        </header>
+
+        <div class="aw-form__body">
+            @* -- Client + Description -- *@
+            <div class="aw-form__grid">
+                <div class="aw-field">
+                    <label class="aw-field__label">Client</label>
+                    <MudAutocomplete T="Customer" Value="_selectedCustomer"
+                                     ValueChanged="@OnCustomerSelected"
+                                     SearchFunc="@SearchCustomers"
+                                     ToStringFunc="@(c => c?.CustomerName ?? "")"
+                                     Placeholder="Sélectionner un client..." Style="width:100%;"
+                                     CoerceText="true" CoerceValue="true" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Description</label>
+                    <input type="text" @bind="_item.CommandeDescription" class="aw-input aw-input--wide" style="width:100%;" />
+                </div>
+            </div>
+
+            <hr style="margin:1rem 0;border:0;border-top:1px solid var(--aw-line);" />
+
+            @* -- Catalogue visuel (articles avec photo uniquement) -- *@
+            <div class="cmd-article-catalog">
+                <div class="aw-actionbar" style="margin-bottom:0.65rem;">
+                    <div>
+                        <div class="aw-dialog__section" style="margin:0;">Catalogue photo — cliquer pour ajouter</div>
+                        <p class="aw-field__hint" style="margin-top:0.15rem;">@ArticlesWithImage().Count() article(s) avec image</p>
+                    </div>
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search" placeholder="Rechercher…" aria-label="Rechercher dans le catalogue"
+                               @bind="_catalogSearch" @bind:event="oninput" />
+                    </div>
+                </div>
+                @if (!FilteredCatalogArticles().Any())
+                {
+                    <div class="aw-empty aw-empty--compact">
+                        <i class="bi bi-image"></i>
+                        <p>Aucun article avec photo pour le moment.<br />
+                           Ajoutez une image sur la fiche article (Stock → modifier l'article), puis revenez ici.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="cmd-article-grid">
+                        @foreach (var art in FilteredCatalogArticles())
+                        {
+                            var inOrder = _lines.Any(l => l.ArticleId == art.IdArticle);
+                            <button type="button"
+                                    class="cmd-article-card @(inOrder ? "cmd-article-card--selected" : "")"
+                                    title="Ajouter @art.Description à la commande"
+                                    @onclick="@(() => SelectArticleFromCatalog(art))">
+                                <div class="cmd-article-card__img">
+                                    <img src="@art.ImageArticle" alt="@art.Description" loading="lazy" decoding="async" />
+                                </div>
+                                <div class="cmd-article-card__body">
+                                    <div class="cmd-article-card__name">@art.Description</div>
+                                    <small class="text-muted">@art.IdArticle</small>
+                                    <div class="cmd-article-card__price">@FormatArticlePrice(art)</div>
+                                </div>
+                            </button>
+                        }
+                    </div>
+                }
+                <p class="aw-field__hint" style="margin-top:0.55rem;">
+                    Les autres articles (sans photo) restent disponibles via « Ajouter un article » ou la recherche dans le tableau.
+                </p>
+            </div>
+
+            <hr style="margin:1rem 0;border:0;border-top:1px solid var(--aw-line);" />
+
+            @* -- Lignes de commande -- *@
+            <div class="d-flex align-items-center justify-content-between" style="margin-bottom:0.55rem;">
+                <div class="aw-dialog__section" style="margin:0;">Articles (@_lines.Count)</div>
+                <button type="button" class="aw-btn aw-btn--primary aw-btn--sm" @onclick="@AddLine">
+                    <i class="bi bi-plus-lg"></i> Ajouter un article
+                </button>
+            </div>
+
+            @if (!_lines.Any())
+            {
+                <div class="aw-empty aw-empty--compact">
+                    <i class="bi bi-cart3"></i>
+                    <p>Aucun article. Cliquez sur « Ajouter un article » ou choisissez une photo du catalogue.</p>
+                </div>
+            }
+            else
+            {
+                <div class="aw-table-region">
+                    <div class="aw-table-wrap">
+                        <table class="aw-table">
+                            <thead>
+                                <tr>
+                                    <th>Article</th>
+                                    <th class="aw-table__num">Quantité</th>
+                                    <th class="aw-table__num">Prix unitaire</th>
+                                    <th class="aw-table__num">Sous-total</th>
+                                    <th style="width:3rem;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var line in _lines)
+                                {
+                                    var art = GetArticle(line.ArticleId);
+                                    <tr style="cursor:default;">
+                                        <td>
+                                            <div class="d-flex align-items-center gap-2">
+                                                @if (!string.IsNullOrWhiteSpace(art?.ImageArticle))
+                                                {
+                                                    <img src="@art.ImageArticle" alt="" class="cmd-article-thumb" />
+                                                }
+                                                <MudAutocomplete T="string" Value="line.ArticleId"
+                                                                 ValueChanged="@(val => OnArticleSelected(line, val))"
+                                                                 SearchFunc="@SearchArticleIds"
+                                                                 ToStringFunc="@(id => _articles.FirstOrDefault(a => a.IdArticle == id)?.Description ?? id ?? "")"
+                                                                 Placeholder="Sélectionner..." Style="flex:1;min-width:0;"
+                                                                 CoerceText="true" CoerceValue="true" />
+                                            </div>
+                                        </td>
+                                        <td class="aw-table__num">
+                                            <MudNumericField Value="line.Qte" T="decimal?" Min="0" Style="width:100%;"
+                                                             ValueChanged="@(val => { line.Qte = val; RecalcTotal(); })" />
+                                        </td>
+                                        <td class="aw-table__num">
+                                            <MudNumericField Value="line.Pu" T="decimal?" Min="0" Style="width:100%;"
+                                                             ValueChanged="@(val => { line.Pu = val; RecalcTotal(); })" />
+                                        </td>
+                                        <td class="aw-table__num">
+                                            <strong>@FormatLineSubtotal(line)</strong>
+                                        </td>
+                                        <td>
+                                            <button type="button" class="aw-btn aw-btn--danger aw-btn--sm aw-btn--icon"
+                                                    @onclick="@(() => RemoveLine(line))" title="Retirer">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <footer class="aw-settings__bar">
+            <p class="aw-settings__bar-hint">
+                Total : <strong style="color:var(--aw-ink);font-size:0.95rem;">@CurrencyFormat.Cdf(_total, "N0")</strong>
+            </p>
+            <div class="aw-settings__bar-actions">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="@GoBack">
+                    <i class="bi bi-x-lg"></i> Annuler
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="@OnSave" disabled="@_saving">
+                    <i class="bi bi-check-lg"></i> Enregistrer
+                </button>
+            </div>
+        </footer>
+    </div>
+</div>
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    bool _isEdit => Id.HasValue;
+    bool _saving;
+    string _currentLogin = "";
+    string _backRoute = "/commandes";
+    PermissionSnapshot _perms = PermissionSnapshot.Empty;
+    Commande _item = new();
+    List<Customer> _customers = new();
+    List<Article> _articles = new();
+    List<CmdeLine> _lines = new();
+    decimal _total;
+
+    Customer? _selectedCustomer;
+    string _statusLabel = "";
+    string _statusBadge = "aw-badge--muted";
+    string _statusClass = "bg-secondary";
+    string _catalogSearch = "";
+
+    void OnCustomerSelected(Customer? customer)
+    {
+        _selectedCustomer = customer;
+        _item.CustomerId = customer?.CustomerId;
+    }
+
+    async Task<IEnumerable<Customer>> SearchCustomers(string filter, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+            return _customers;
+
+        return _customers
+            .Where(c => c.CustomerName?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    Task<IEnumerable<string>> SearchArticleIds(string filter, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+            return Task.FromResult(_articles.Select(a => a.IdArticle).AsEnumerable());
+
+        return Task.FromResult(_articles
+            .Where(a => (a.Description?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false)
+                     || (a.IdArticle?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false))
+            .Select(a => a.IdArticle)
+            .AsEnumerable());
+    }
+
+    IEnumerable<Article> ArticlesWithImage()
+        => _articles.Where(a => !string.IsNullOrWhiteSpace(a.ImageArticle));
+
+    IEnumerable<Article> FilteredCatalogArticles()
+    {
+        var q = ArticlesWithImage();
+        if (!string.IsNullOrWhiteSpace(_catalogSearch))
+        {
+            var s = _catalogSearch.Trim();
+            q = q.Where(a =>
+                (a.Description?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (a.IdArticle?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+        return q.OrderBy(a => a.Description);
+    }
+
+    Article? GetArticle(string? articleId)
+        => string.IsNullOrEmpty(articleId) ? null : _articles.FirstOrDefault(a => a.IdArticle == articleId);
+
+    string FormatArticlePrice(Article art) =>
+        CurrencyFormat.CatalogAsCdf((decimal)art.Price, CurrencyDefaults.IsUsdMoneyId(art.IdMonais), UserCurrency.CachedTaux, "N0");
+
+    string FormatLineSubtotal(CmdeLine line) =>
+        CurrencyFormat.Cdf(
+            CommandePricing.QuoteLine(line.Pu ?? 0, line.MoneyId, line.Qte ?? 0, UserCurrency.CachedTaux).LineFc,
+            "N0");
+
+    void SelectArticleFromCatalog(Article art)
+    {
+        var existing = _lines.FirstOrDefault(l => l.ArticleId == art.IdArticle);
+        if (existing != null)
+        {
+            existing.Qte = (existing.Qte ?? 0) + 1;
+            existing.Pu = (decimal)art.Price;
+            existing.MoneyId = art.IdMonais;
+            Snackbar.Add($"{art.Description} — quantité : {existing.Qte}", Severity.Info);
+        }
+        else
+        {
+            _lines.Add(new CmdeLine
+            {
+                ArticleId = art.IdArticle,
+                Qte = 1,
+                Pu = (decimal)art.Price,
+                MoneyId = art.IdMonais
+            });
+            Snackbar.Add($"« {art.Description} » ajouté à la commande", Severity.Success);
+        }
+        RecalcTotal();
+    }
+
+    void OnArticleSelected(CmdeLine line, string? articleId)
+    {
+        line.ArticleId = articleId;
+        var art = GetArticle(articleId);
+        if (art != null)
+        {
+            line.MoneyId = art.IdMonais;
+            if ((line.Pu ?? 0) == 0)
+                line.Pu = (decimal)art.Price;
+        }
+        RecalcTotal();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await UserCurrency.EnsureLoadedAsync();
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+            if (!string.IsNullOrEmpty(_currentLogin))
+            {
+                _perms = await PermissionResolver.GetPermissionsAsync(_currentLogin);
+                _backRoute = _perms.HasHierarchicalGrants
+                    ? PermissionCatalog.TabHubRoute("commandes", _perms.Grants)
+                    : "/commandes";
+            }
+        }
+
+        _customers = await CustomerService.GetAllAsync();
+        await LoadArticlesAsync();
+        await LoadCommandeIfEditAsync();
+        RecalcTotal();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_isEdit && Id != _lastEditId)
+        {
+            _lastEditId = Id;
+            await LoadCommandeIfEditAsync();
+        }
+    }
+
+    int? _lastEditId;
+
+    async Task LoadArticlesAsync()
+    {
+        _articles = await CatalogueService.GetArticlesAsync();
+    }
+
+    async Task LoadCommandeIfEditAsync()
+    {
+        if (!_isEdit) return;
+
+        var existing = await CommandeService.GetCommandeWithDetailsAsync(Id!.Value);
+
+        if (existing != null)
+        {
+            _item = existing;
+            _selectedCustomer = _customers.FirstOrDefault(c => c.CustomerId == existing.CustomerId);
+            _lines = existing.Details.Select(d => new CmdeLine
+            {
+                ExistingId = d.Id,
+                ArticleId = d.ArticleId,
+                Qte = d.Qte,
+                Pu = d.Pu,
+                MoneyId = d.MoneyId ?? CurrencyDefaults.MoneyIdCdf
+            }).ToList();
+
+            (_statusLabel, _statusClass, _statusBadge) = (_item.Status ?? 0) switch
+            {
+                0 => ("Nouvelle", "bg-secondary", "aw-badge--muted"),
+                1 => ("En cours", "bg-warning text-dark", "aw-badge--accent"),
+                2 => ("Livrée", "bg-info", "aw-badge--accent"),
+                3 => ("Facturée", "bg-success", "aw-badge--brand"),
+                _ => ("—", "bg-secondary", "aw-badge--muted")
+            };
+        }
+    }
+
+    void AddLine()
+    {
+        _lines.Add(new CmdeLine());
+    }
+
+    void RemoveLine(CmdeLine line)
+    {
+        _lines.Remove(line);
+        RecalcTotal();
+    }
+
+    void RecalcTotal()
+    {
+        _total = CommandePricing.OrderTotalFc(
+            _lines.Where(l => (l.Qte ?? 0) > 0).Select(l => (l.Pu ?? 0, l.MoneyId, l.Qte ?? 0)),
+            UserCurrency.CachedTaux);
+    }
+
+    void GoBack() => Nav.NavigateTo(_backRoute);
+
+    async Task OnSave()
+    {
+        if (_item.CustomerId is null or 0)
+        {
+            Snackbar.Add("Le client est obligatoire", Severity.Warning);
+            return;
+        }
+
+        var validLines = _lines.Where(l => !string.IsNullOrEmpty(l.ArticleId) && (l.Qte ?? 0) > 0).ToList();
+        if (!validLines.Any())
+        {
+            Snackbar.Add("Ajoutez au moins un article", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            RecalcTotal();
+            _item.MontantTotal = 0;
+            _item.MontantRest = 0;
+            _item.UserLogin = _currentLogin;
+            _item.CreationDate ??= DateTime.Now;
+
+            if (!_isEdit)
+            {
+                _item.Status = 0;
+            }
+
+            var details = validLines.Select(line =>
+            {
+                var art = GetArticle(line.ArticleId);
+                return new CommandeDetail
+                {
+                    CommandeId = _item.CommandeId,
+                    ArticleId = line.ArticleId,
+                    Qte = line.Qte,
+                    Pu = art != null ? (decimal)art.Price : (line.Pu ?? 0),
+                    MoneyId = art?.IdMonais ?? CurrencyDefaults.MoneyIdUsd,
+                    QteRest = line.Qte,
+                    QtePrise = 0,
+                    Status = 0
+                };
+            }).ToList();
+
+            await CommandeService.SaveCommandeAsync(_item, details);
+
+            Snackbar.Add(_isEdit ? $"Commande N° {_item.CommandeId} mise à jour" : "Nouvelle commande créée", Severity.Success);
+            Nav.NavigateTo(_backRoute);
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(msg, Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    class CmdeLine
+    {
+        public int? ExistingId { get; set; }
+        public string? ArticleId { get; set; }
+        public decimal? Qte { get; set; }
+        public decimal? Pu { get; set; }
+        public int MoneyId { get; set; } = CurrencyDefaults.MoneyIdUsd;
+    }
+}

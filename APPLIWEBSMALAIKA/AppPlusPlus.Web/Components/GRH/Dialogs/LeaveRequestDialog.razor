@@ -1,0 +1,94 @@
+@using AppPlusPlus.Domain.Entities.GRH.Employee
+@using AppPlusPlus.Domain.Entities.GRH.Leave
+@using MudBlazor
+
+<MudDialog>
+    <DialogContent>
+        <div class="lov-form-header">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-calendar-check text-primary"></i>
+                <h5>Nouvelle demande de congé</h5>
+            </div>
+        </div>
+        <div class="lov-form-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Employé <span class="text-danger">*</span></label>
+                    <select class="form-select" @bind="Form.EmployeeId">
+                        <option value="0">— Sélectionner —</option>
+                        @foreach (var e in Employees)
+                        {
+                            <option value="@e.Id">@e.LastName @e.FirstName</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Type de congé <span class="text-danger">*</span></label>
+                    <select class="form-select" @bind="Form.LeaveTypeId">
+                        <option value="0">— Sélectionner —</option>
+                        @foreach (var lt in LeaveTypes)
+                        {
+                            <option value="@lt.Id">@lt.LeaveTypeName</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <AwDateField Label="Date de début" Value="Form.StartDate"
+                                 ValueChanged="@(v => { if (v.HasValue) Form.StartDate = v.Value; })" />
+                </div>
+                <div class="col-md-6">
+                    <AwDateField Label="Date de fin" Value="Form.EndDate"
+                                 ValueChanged="@(v => { if (v.HasValue) Form.EndDate = v.Value; })" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label fw-semibold">Motif <span class="text-muted">(optionnel)</span></label>
+                    <textarea class="form-control" rows="2" @bind="Form.Reason"
+                              placeholder="Motif de la demande"></textarea>
+                </div>
+            </div>
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger mt-2 py-2 px-3 small mb-0">@_error</div>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="d-flex gap-2 px-1">
+            <button type="button" class="btn btn-outline-secondary" @onclick="Cancel">
+                <i class="bi bi-x-lg me-1"></i>Annuler
+            </button>
+            <button type="button" class="btn btn-primary" @onclick="Submit">
+                <i class="bi bi-check-lg me-1"></i>Enregistrer
+            </button>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter] public LeaveRequestFormData Form { get; set; } = new();
+    [Parameter] public List<Employee> Employees { get; set; } = new();
+    [Parameter] public List<LeaveType> LeaveTypes { get; set; } = new();
+
+    string _error = "";
+
+    void Cancel() => MudDialog.Cancel();
+
+    void Submit()
+    {
+        if (Form.EmployeeId == 0)  { _error = "Veuillez sélectionner un employé."; return; }
+        if (Form.LeaveTypeId == 0) { _error = "Veuillez sélectionner un type de congé."; return; }
+        if (Form.EndDate < Form.StartDate) { _error = "La date de fin doit être postérieure à la date de début."; return; }
+        MudDialog.Close(DialogResult.Ok(Form));
+    }
+
+    public class LeaveRequestFormData
+    {
+        public int      EmployeeId  { get; set; }
+        public int      LeaveTypeId { get; set; }
+        public DateTime StartDate   { get; set; } = DateTime.Today;
+        public DateTime EndDate     { get; set; } = DateTime.Today.AddDays(1);
+        public string?  Reason      { get; set; }
+    }
+}

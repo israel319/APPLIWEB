@@ -1,0 +1,198 @@
+@using System.Security.Claims
+@inject ICatalogueService CatalogueService
+@inject ILookupService LookupService
+@inject ILocalisationService LocalisationService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ICatalogRefreshService CatalogRefresh
+
+<MudDialog>
+    <DialogContent>
+        <div class="lov-form-header">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-box-seam text-primary"></i>
+                <h5 class="mb-0">@(_isEdit ? "Modifier article" : "Nouvel article")</h5>
+            </div>
+        </div>
+        <div class="lov-form-body">
+        <div class="d-flex flex-column gap-3">
+
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Code article</label>
+                    <input type="text" class="form-control" @bind="_article.IdArticle" maxlength="100" readonly="@_isEdit" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Description</label>
+                    <input type="text" class="form-control" @bind="_article.Description" maxlength="50" />
+                </div>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Catégorie</label>
+                    <MudSelect T="int" @bind-Value="_article.IdCategory" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Clearable="true">
+                        @foreach (var cat in _categories)
+                        {
+                            <MudSelectItem T="int" Value="@cat.IdCategory">@cat.DescriptionCategory</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Type</label>
+                    <MudSelect T="int" @bind-Value="_article.IdType" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Clearable="true">
+                        @foreach (var t in _types)
+                        {
+                            <MudSelectItem T="int" Value="@t.IdType">@t.DescriptionType</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Marque</label>
+                    <MudSelect T="int" @bind-Value="_article.IdMarque" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Clearable="true">
+                        @foreach (var m in _marques)
+                        {
+                            <MudSelectItem T="int" Value="@m.IdMarque">@m.DescriptionMarque</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Mesure</label>
+                    <MudSelect T="int" @bind-Value="_article.IdMesure" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Clearable="true">
+                        @foreach (var m in _mesures)
+                        {
+                            <MudSelectItem T="int" Value="@m.IdMesure">@m.DescriptionMesure</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Monnaie</label>
+                    <MudSelect T="int" @bind-Value="_article.IdMonais" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Clearable="true">
+                        @foreach (var m in _monnaies)
+                        {
+                            <MudSelectItem T="int" Value="@m.IdMonais">@m.DescriptionMonais</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Prix</label>
+                    <MudNumericField @bind-Value="_article.Price" T="double" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Stock total</label>
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="mt-1">
+                        Calculé depuis les localisations (T_Stock)
+                    </MudAlert>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Seuil alerte</label>
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="mt-1">Par localisation</MudAlert>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Transférable</label>
+                    <MudCheckBox @bind-Value="_article.IsTransferable" T="bool?" Dense="true" />
+                </div>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Description I</label>
+                    <input type="text" class="form-control" @bind="_article.DescriptionI" maxlength="50" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Description II</label>
+                    <input type="text" class="form-control" @bind="_article.DescriptionII" maxlength="50" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Description III</label>
+                    <input type="text" class="form-control" @bind="_article.DescriptionIII" maxlength="50" />
+                </div>
+            </div>
+        </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="hub-dialog-actions px-1 pb-1">
+            <div></div>
+            <div class="hub-dialog-actions-right">
+                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="Cancel">
+                    <i class="bi bi-x-lg me-1"></i>Annuler
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" @onclick="OnSubmit">
+                    <i class="bi bi-check-lg me-1"></i>Enregistrer
+                </button>
+            </div>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string? ArticleId { get; set; }
+
+    bool _isEdit;
+    Article _article = new();
+
+    List<ArticleCategory> _categories = new();
+    List<ArticleType> _types = new();
+    List<ArticleMarque> _marques = new();
+    List<Mesure> _mesures = new();
+    List<Money> _monnaies = new();
+    List<Localisation> _localisations = new();
+    string _currentLogin = "";
+
+    void Cancel() => MudDialog.Close();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+        }
+
+        _categories = await CatalogueService.GetArticleCategoriesAsync();
+        _types = await CatalogueService.GetArticleTypesAsync();
+        _marques = await CatalogueService.GetArticleMarquesAsync();
+        _mesures = await CatalogueService.GetMesuresAsync();
+        _monnaies = await LookupService.GetMoneysAsync();
+        _localisations = await LocalisationService.GetAllLocalisationsAsync();
+
+        if (!string.IsNullOrEmpty(ArticleId))
+        {
+            _isEdit = true;
+            var existing = await CatalogueService.GetArticleByIdAsync(ArticleId);
+            if (existing != null) _article = existing;
+        }
+        else
+        {
+            _article.IdMonais = CurrencyDefaults.MoneyIdUsd;
+        }
+    }
+
+    async Task OnSubmit()
+    {
+        _article.User = _currentLogin;
+        _article.DateSys = DateOnly.FromDateTime(DateTime.Today);
+        _article.Cumputer = Environment.MachineName;
+        if (_isEdit)
+        {
+            await CatalogueService.UpdateArticleAsync(_article);
+            CatalogRefresh.NotifyChanged();
+        }
+        else
+        {
+            await CatalogueService.AddArticleAsync(_article);
+            CatalogRefresh.NotifyChanged();
+        }
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+}

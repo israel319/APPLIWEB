@@ -1,0 +1,101 @@
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@inject IFinanceService FinanceService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<MudDialog>
+    <DialogContent>
+        <div class="lov-form-header">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-calendar-range text-primary"></i>
+                <h5 class="mb-0">@(PeriodeId.HasValue ? "Modifier la période" : "Nouvelle période")</h5>
+            </div>
+        </div>
+        <div class="lov-form-body">
+
+            <div class="lov-field">
+                <label class="form-label">Commentaire / Description</label>
+                <input type="text" class="form-control" @bind="_periode.Comment" maxlength="200" placeholder="Description de la période" />
+            </div>
+
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <AwDateField Label="Date début" @bind-Value="_fromDate" />
+                </div>
+                <div class="col-md-6">
+                    <AwDateField Label="Date fin" @bind-Value="_toDate" />
+                </div>
+            </div>
+
+            <div class="lov-field">
+                <label class="form-label">Activée</label>
+                <MudSwitch @bind-Value="_activated" T="bool" Color="Color.Primary" />
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="hub-dialog-actions px-1 pb-1">
+            <div></div>
+            <div class="hub-dialog-actions-right">
+                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="Cancel">
+                    <i class="bi bi-x-lg me-1"></i>Annuler
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" @onclick="OnSubmit">
+                    <i class="bi bi-check-lg me-1"></i>Enregistrer
+                </button>
+            </div>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int? PeriodeId { get; set; }
+
+    Periode _periode = new() { Activated = true };
+    bool _activated = true;
+    DateTime? _fromDate = DateTime.Today;
+    DateTime? _toDate = DateTime.Today.AddMonths(1);
+    string _currentLogin = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+        }
+
+        if (PeriodeId.HasValue)
+        {
+            var existing = await FinanceService.GetPeriodeByIdAsync(PeriodeId.Value);
+            if (existing != null)
+            {
+                _periode = existing;
+                _activated = _periode.Activated ?? true;
+                _fromDate = _periode.FromDate;
+                _toDate = _periode.ToDate;
+            }
+        }
+    }
+
+    void Cancel() => MudDialog.Close();
+
+    async Task OnSubmit()
+    {
+        _periode.Activated = _activated;
+        _periode.FromDate = _fromDate;
+        _periode.ToDate = _toDate;
+        _periode.UserLogin = _currentLogin;
+        _periode.DateSys = DateOnly.FromDateTime(DateTime.Now);
+        if (PeriodeId.HasValue)
+            await FinanceService.UpdatePeriodeAsync(_periode);
+        else
+            await FinanceService.AddPeriodeAsync(_periode);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+}

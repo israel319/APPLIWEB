@@ -1,0 +1,153 @@
+@page "/grh/paie/detail/form/{RunId:int}"
+@rendermode InteractiveServer
+@inject IPayrollService   PayrollService
+@inject IEmployeeService  EmployeeService
+@inject ISnackbar         Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>@AppSettings.AppName — Ajouter ligne de bulletin</PageTitle>
+
+@if (!_loaded)
+{
+    <div class="aw-page">
+        <div class="aw-loading" style="min-height:200px;">
+            <span class="aw-spinner" role="status" aria-hidden="true"></span>
+            <span>Chargement…</span>
+        </div>
+    </div>
+}
+else
+{
+    <div class="aw-page">
+        <div class="aw-form aw-form--wide">
+            <header class="aw-form__head">
+                <div>
+                    <p class="aw-form__eyebrow">GRH · Paie</p>
+                    <h1 class="aw-form__title">Ligne de bulletin — @(_run?.PayrollNumber ?? "")</h1>
+                </div>
+                <div class="aw-form__actions">
+                    <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                        <i class="bi bi-arrow-left"></i> Annuler
+                    </button>
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="SaveAsync" disabled="@_saving">
+                        <i class="bi bi-check-lg"></i> @(_saving ? "Enregistrement…" : "Enregistrer")
+                    </button>
+                </div>
+            </header>
+            <div class="aw-form__body">
+                @if (_run != null)
+                {
+                    <p class="aw-field__hint" style="margin-bottom:1rem;">
+                        Période : @_run.PayPeriodStart.ToString("dd/MM/yyyy") – @_run.PayPeriodEnd.ToString("dd/MM/yyyy")
+                    </p>
+                }
+                <div class="aw-form__grid">
+                    <div class="aw-field">
+                        <label class="aw-field__label">Employé <span class="text-danger">*</span></label>
+                        <select class="aw-input" @bind="_form.EmployeeId">
+                            <option value="0">— Sélectionner —</option>
+                            @foreach (var e in _employees)
+                            {
+                                <option value="@e.Id">@e.LastName @e.FirstName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Salaire de base (TND)</label>
+                        <input type="number" step="0.001" class="aw-input" @bind="_form.BaseSalary" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Salaire brut (TND)</label>
+                        <input type="number" step="0.001" class="aw-input" @bind="_form.GrossSalary" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">CNSS / Assurances (TND)</label>
+                        <input type="number" step="0.001" class="aw-input" @bind="_form.InsuranceAmount" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Impôts IRG (TND)</label>
+                        <input type="number" step="0.001" class="aw-input" @bind="_form.TaxAmount" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Autres retenues (TND)</label>
+                        <input type="number" step="0.001" class="aw-input" @bind="_form.OtherDeductions" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Salaire net (TND) <span class="text-danger">*</span></label>
+                        <input type="number" step="0.001" class="aw-input" @bind="_form.NetSalary" />
+                    </div>
+                    <div class="aw-field aw-form__span-2">
+                        <label class="aw-field__label">Notes</label>
+                        <input class="aw-input" @bind="_form.Notes" placeholder="Remarques…" />
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int RunId { get; set; }
+
+    bool _loaded;
+    bool _saving;
+
+    PayrollRun?     _run;
+    List<Employee>  _employees = new();
+    DetailFormData  _form      = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _run       = await PayrollService.GetPayrollRunAsync(RunId);
+            _employees = (await EmployeeService.GetAllActiveEmployeesAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Erreur : {ex.Message}", Severity.Error);
+            Nav.NavigateTo("/grh?tab=3");
+        }
+        _loaded = true;
+    }
+
+    async Task SaveAsync()
+    {
+        if (_form.EmployeeId == 0) { Snackbar.Add("Veuillez sélectionner un employé.", Severity.Warning); return; }
+
+        _saving = true;
+        try
+        {
+            await PayrollService.AddOrUpdatePayrollDetailAsync(new PayrollDetail
+            {
+                PayrollRunId    = RunId,
+                EmployeeId      = _form.EmployeeId,
+                BaseSalary      = _form.BaseSalary,
+                GrossSalary     = _form.GrossSalary,
+                TaxAmount       = _form.TaxAmount,
+                InsuranceAmount = _form.InsuranceAmount,
+                OtherDeductions = _form.OtherDeductions,
+                NetSalary       = _form.NetSalary,
+                Notes           = _form.Notes
+            });
+            Snackbar.Add("Ligne ajoutée.", Severity.Success);
+            Nav.NavigateTo("/grh?tab=3");
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    void Cancel() => Nav.NavigateTo("/grh?tab=3");
+
+    class DetailFormData
+    {
+        public int      EmployeeId      { get; set; }
+        public decimal  BaseSalary      { get; set; }
+        public decimal  GrossSalary     { get; set; }
+        public decimal  TaxAmount       { get; set; }
+        public decimal  InsuranceAmount { get; set; }
+        public decimal  OtherDeductions { get; set; }
+        public decimal  NetSalary       { get; set; }
+        public string?  Notes           { get; set; }
+    }
+}

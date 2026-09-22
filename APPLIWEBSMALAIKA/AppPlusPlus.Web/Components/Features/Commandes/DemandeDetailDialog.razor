@@ -1,0 +1,224 @@
+@using AppPlusPlus.Application.DTOs.Demandes
+@using AppPlusPlus.Application.Services.Demandes
+@using AppPlusPlus.Domain.Common
+@inject IDemandeService DemandeService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        @if (_loading)
+        {
+            <div class="aw-dialog">
+                <div class="aw-dialog__body">
+                    <AwSkeleton Variant="table" Rows="4" />
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="aw-dialog">
+                <header class="aw-dialog__head">
+                    <div class="aw-dialog__title-wrap">
+                        <i class="bi bi-arrow-left-right" aria-hidden="true"></i>
+                        <h2 class="aw-dialog__title">Demande N° @DemandeId</h2>
+                    </div>
+                </header>
+                <div class="aw-dialog__body">
+                    <div class="aw-dialog__meta">
+                        <div>
+                            <span class="aw-dialog__meta-label">Magasin demandeur</span>
+                            <span class="aw-dialog__meta-value">@(_row?.LocalisationDemandeur ?? "—")</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Dépôt source</span>
+                            <span class="aw-dialog__meta-value">@(_row?.LocalisationSource ?? "—")</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Statut</span>
+                            <span class="aw-badge aw-badge--primary">@(_row?.StatutLabel ?? "—")</span>
+                        </div>
+                    </div>
+
+                    @if (_canAdminAct)
+                    {
+                        <div class="aw-field" style="margin-bottom:0.9rem;">
+                            <label class="aw-field__label">Commentaire dépôt</label>
+                            <input type="text" class="aw-input" @bind="_commentAdmin"
+                                   placeholder="Motif ou note (optionnel)" />
+                        </div>
+                    }
+
+                    <div class="aw-table-region">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>Article</th>
+                                        <th class="aw-table__num">Demandée</th>
+                                        @if (_canAdminAct)
+                                        {
+                                            <th class="aw-table__num">Stock dépôt</th>
+                                            <th class="aw-table__num">Max approvable</th>
+                                            <th class="aw-table__num">Qté approuvée</th>
+                                        }
+                                        else if (_canAgentAct || _row?.Statut == DemandeStatut.Completee)
+                                        {
+                                            <th class="aw-table__num">Approuvée</th>
+                                        }
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var line in _lines)
+                                    {
+                                        <tr style="cursor:default;">
+                                            <td>
+                                                <span class="aw-table__title">@line.ArticleDescription</span>
+                                                <span class="aw-table__meta d-block">@line.ArticleId</span>
+                                            </td>
+                                            <td class="aw-table__num">@line.QteDemandee.ToString("N0")</td>
+                                            @if (_canAdminAct)
+                                            {
+                                                <td class="aw-table__num">
+                                                    <span class="@(line.DepotQte <= line.DepotSeuil ? "text-danger" : "")">
+                                                        @line.DepotQte.ToString("N0")
+                                                    </span>
+                                                    <span class="aw-table__meta d-block">seuil @line.DepotSeuil</span>
+                                                </td>
+                                                <td class="aw-table__num">@line.QteMaxApprovable.ToString("N0")</td>
+                                                <td class="aw-table__num">
+                                                    <MudNumericField @bind-Value="line.QteApprouvee" T="decimal?" Min="0"
+                                                                     Max="@line.QteDemandee" Variant="Variant.Outlined"
+                                                                     Margin="Margin.Dense" Style="width:100px;" />
+                                                </td>
+                                            }
+                                            else if (_canAgentAct || _row?.Statut == DemandeStatut.Completee)
+                                            {
+                                                <td class="aw-table__num">@(line.QteApprouvee?.ToString("N0") ?? "—")</td>
+                                            }
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    @if (_canAdminAct)
+                    {
+                        <p class="aw-field__hint" style="margin-top:0.65rem;">
+                            Validation depuis le <strong>stock dépôt</strong> (administrateur ou gérant).
+                        </p>
+                    }
+                </div>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (!_loading && _row != null)
+        {
+            <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="@(() => MudDialog.Close())">
+                    <i class="bi bi-x-lg"></i> Fermer
+                </button>
+                @if (_canAdminAct)
+                {
+                    <button type="button" class="aw-btn aw-btn--danger" @onclick="@OnRefuseAdmin" disabled="@_saving">
+                        <i class="bi bi-x-circle"></i> Refuser
+                    </button>
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="@OnApproveAdmin" disabled="@_saving">
+                        <i class="bi bi-check-lg"></i> Approuver (dépôt)
+                    </button>
+                }
+                @if (_canAgentAct)
+                {
+                    <button type="button" class="aw-btn aw-btn--danger" @onclick="@OnRefuseAgent" disabled="@_saving">
+                        <i class="bi bi-x-circle"></i> Refuser
+                    </button>
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="@OnApproveAgent" disabled="@_saving">
+                        <i class="bi bi-box-arrow-in-down"></i> Confirmer réception
+                    </button>
+                }
+            </div>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public int DemandeId { get; set; }
+    [Parameter] public DemandeRowDto? Row { get; set; }
+    [Parameter] public DemandeUserContext User { get; set; } = new();
+
+    DemandeRowDto? _row;
+    List<DemandeDetailLineDto> _lines = new();
+    string? _commentAdmin;
+    bool _loading = true;
+    bool _saving;
+
+    bool _canAdminAct => _row?.CanAdminApprove == true;
+    bool _canAgentAct => _row?.CanAgentApprove == true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _row = Row;
+        _lines = await DemandeService.GetDetailLinesAsync(DemandeId);
+        _loading = false;
+    }
+
+    async Task OnApproveAdmin()
+    {
+        _saving = true;
+        var qteMap = _lines.ToDictionary(l => l.DetailId, l => l.QteApprouvee ?? 0);
+        var result = await DemandeService.ApproveAdminAsync(User, DemandeId, qteMap, _commentAdmin);
+        _saving = false;
+        if (result.Success)
+        {
+            Snackbar.Add(result.Message, Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else
+            Snackbar.Add(result.Message, Severity.Error);
+    }
+
+    async Task OnRefuseAdmin()
+    {
+        _saving = true;
+        var result = await DemandeService.RefuseAdminAsync(User, DemandeId, _commentAdmin);
+        _saving = false;
+        if (result.Success)
+        {
+            Snackbar.Add(result.Message, Severity.Info);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else
+            Snackbar.Add(result.Message, Severity.Error);
+    }
+
+    async Task OnApproveAgent()
+    {
+        _saving = true;
+        var result = await DemandeService.ApproveAgentAsync(User, DemandeId);
+        _saving = false;
+        if (result.Success)
+        {
+            Snackbar.Add(result.Message, Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else
+            Snackbar.Add(result.Message, Severity.Error);
+    }
+
+    async Task OnRefuseAgent()
+    {
+        _saving = true;
+        var result = await DemandeService.RefuseAgentAsync(User, DemandeId, _commentAdmin);
+        _saving = false;
+        if (result.Success)
+        {
+            Snackbar.Add(result.Message, Severity.Info);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else
+            Snackbar.Add(result.Message, Severity.Error);
+    }
+}

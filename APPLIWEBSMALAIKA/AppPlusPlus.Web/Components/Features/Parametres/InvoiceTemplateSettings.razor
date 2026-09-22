@@ -1,0 +1,312 @@
+@using AppPlusPlus.Application.Services.Parametres
+@using AppPlusPlus.Domain.Common
+@using AppPlusPlus.Domain.Entities.Parametres
+@using MudBlazor
+@inject IInvoiceTemplateService InvoiceTemplates
+@inject ISnackbar Snackbar
+
+<section class="aw-settings__section" aria-labelledby="inv-tpl-title">
+    <div class="aw-settings__section-head">
+        <h2 id="inv-tpl-title" class="aw-settings__section-title">Modèles de facture</h2>
+        <p class="aw-settings__section-lead">
+            Chaque entreprise configure son format (ticket caisse 80&nbsp;mm ou A4), son en-tête, pied de page et filigrane logo.
+            Un seul modèle actif est utilisé à l'impression.
+        </p>
+    </div>
+
+    <div class="aw-inv-tpl">
+        <aside class="aw-inv-tpl__list" aria-label="Liste des modèles">
+            @foreach (var t in _templates)
+            {
+                <button type="button"
+                        class="aw-inv-tpl__item @(t.Id == _edit.Id ? "aw-inv-tpl__item--active" : null) @(t.IsActive ? "aw-inv-tpl__item--current" : null)"
+                        @onclick="@(() => SelectTemplate(t))">
+                    <span class="aw-inv-tpl__item-name">@t.Nom</span>
+                    <span class="aw-inv-tpl__item-meta">
+                        @(InvoicePrintFormat.IsA4(t.PrintFormat) ? "A4" : "Ticket 80 mm")
+                        @if (t.IsActive) { <span class="aw-inv-tpl__badge">Actif</span> }
+                    </span>
+                </button>
+            }
+            <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-inv-tpl__new" @onclick="NewTemplate">
+                <i class="bi bi-plus-lg"></i> Nouveau modèle
+            </button>
+        </aside>
+
+        <div class="aw-inv-tpl__form">
+            <div class="aw-settings__card">
+                <div class="aw-settings__row">
+                    <div class="aw-settings__meta">
+                        <p class="aw-settings__label">Nom du modèle</p>
+                    </div>
+                    <input type="text" class="aw-input aw-input--wide" maxlength="120" @bind="_edit.Nom" />
+                </div>
+                <div class="aw-settings__row">
+                    <div class="aw-settings__meta">
+                        <p class="aw-settings__label">Format d'impression</p>
+                        <p class="aw-settings__hint">Grand format A4 ou petit ticket caisse</p>
+                    </div>
+                    <AwSearchSelect AriaLabel="Format d'impression" Placeholder="Format" Searchable="false"
+                                    Value="@_edit.PrintFormat" ValueChanged="OnFormatChanged"
+                                    Options="@_formatOptions" />
+                </div>
+            </div>
+
+            @if (InvoicePrintFormat.IsA4(_edit.PrintFormat))
+            {
+                <section class="aw-settings__section aw-inv-tpl__block">
+                    <div class="aw-settings__section-head">
+                        <h3 class="aw-settings__section-title aw-inv-tpl__subtitle">En-tête &amp; mentions légales (A4)</h3>
+                    </div>
+                    <div class="aw-settings__card">
+                        <div class="aw-settings__row aw-settings__row--stack">
+                            <div class="aw-settings__meta">
+                                <p class="aw-settings__label">Logo en-tête</p>
+                                <p class="aw-settings__hint">PNG/JPG — ou laisser vide pour utiliser le logo Shop</p>
+                            </div>
+                            <div class="aw-settings__control-stack">
+                                @if (!string.IsNullOrWhiteSpace(_edit.Logo))
+                                {
+                                    <img src="@_edit.Logo" alt="Logo en-tête" class="aw-inv-tpl__preview" />
+                                }
+                                <InputFile OnChange="@(e => OnImageSelected(e, v => _edit.Logo = v))" accept="image/*" />
+                                <input type="text" class="aw-input aw-input--wide" placeholder="ou URL https://…" @bind="_edit.Logo" />
+                            </div>
+                        </div>
+                        <div class="aw-settings__row">
+                            <div class="aw-settings__meta"><p class="aw-settings__label">RCCM</p></div>
+                            <input type="text" class="aw-input aw-input--wide" maxlength="120" @bind="_edit.LegalRccm" />
+                        </div>
+                        <div class="aw-settings__row">
+                            <div class="aw-settings__meta"><p class="aw-settings__label">Id. Nat.</p></div>
+                            <input type="text" class="aw-input aw-input--wide" maxlength="120" @bind="_edit.LegalIdNat" />
+                        </div>
+                        <div class="aw-settings__row">
+                            <div class="aw-settings__meta"><p class="aw-settings__label">Adresse</p></div>
+                            <input type="text" class="aw-input aw-input--wide" maxlength="500" @bind="_edit.LegalAdresse" />
+                        </div>
+                        <div class="aw-settings__row">
+                            <div class="aw-settings__meta"><p class="aw-settings__label">Contact</p></div>
+                            <input type="text" class="aw-input aw-input--wide" maxlength="250" @bind="_edit.LegalContact" />
+                        </div>
+                        <div class="aw-settings__row">
+                            <div class="aw-settings__meta"><p class="aw-settings__label">E-mail</p></div>
+                            <input type="text" class="aw-input aw-input--wide" maxlength="250" @bind="_edit.LegalEmail" />
+                        </div>
+                        <div class="aw-settings__row">
+                            <div class="aw-settings__meta"><p class="aw-settings__label">Site web</p></div>
+                            <input type="text" class="aw-input aw-input--wide" maxlength="250" @bind="_edit.LegalWebsite" />
+                        </div>
+                    </div>
+                </section>
+
+                <section class="aw-settings__section aw-inv-tpl__block">
+                    <div class="aw-settings__section-head">
+                        <h3 class="aw-settings__section-title aw-inv-tpl__subtitle">Filigrane (arrière-plan)</h3>
+                    </div>
+                    <div class="aw-settings__card">
+                        <div class="aw-settings__row">
+                            <div class="aw-settings__meta">
+                                <p class="aw-settings__label">Afficher le logo en filigrane</p>
+                            </div>
+                            <input class="aw-switch" type="checkbox" role="switch" @bind="_edit.ShowLetterheadBackground" />
+                        </div>
+                        <div class="aw-settings__row aw-settings__row--stack">
+                            <div class="aw-settings__meta">
+                                <p class="aw-settings__label">Image filigrane</p>
+                                <p class="aw-settings__hint">Logo centré en transparence sur la page A4</p>
+                            </div>
+                            <div class="aw-settings__control-stack">
+                                @if (!string.IsNullOrWhiteSpace(_edit.LetterheadBackground))
+                                {
+                                    <img src="@_edit.LetterheadBackground" alt="Filigrane" class="aw-inv-tpl__preview" />
+                                }
+                                <InputFile OnChange="@(e => OnImageSelected(e, v => _edit.LetterheadBackground = v))" accept="image/*" />
+                                <input type="text" class="aw-input aw-input--wide" placeholder="ou URL https://…" @bind="_edit.LetterheadBackground" />
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            }
+
+            <section class="aw-settings__section aw-inv-tpl__block">
+                <div class="aw-settings__section-head">
+                    <h3 class="aw-settings__section-title aw-inv-tpl__subtitle">Pied de page</h3>
+                </div>
+                <div class="aw-settings__card">
+                    <div class="aw-settings__row">
+                        <div class="aw-settings__meta">
+                            <p class="aw-settings__label">Message de clôture</p>
+                        </div>
+                        <input type="text" class="aw-input aw-input--wide" maxlength="500" placeholder="Merci de votre visite"
+                               @bind="_edit.FooterText" />
+                    </div>
+                </div>
+            </section>
+
+            @if (!string.IsNullOrWhiteSpace(_uploadError))
+            {
+                <p class="aw-settings__error">@_uploadError</p>
+            }
+
+            <div class="aw-inv-tpl__actions">
+                <button type="button" class="aw-btn aw-btn--primary" disabled="@_saving" @onclick="SaveTemplate">
+                    <i class="bi bi-check-lg"></i> Enregistrer
+                </button>
+                @if (_edit.Id > 0 && !_edit.IsActive)
+                {
+                    <button type="button" class="aw-btn aw-btn--ghost" disabled="@_saving" @onclick="ActivateTemplate">
+                        <i class="bi bi-check-circle"></i> Définir comme actif
+                    </button>
+                    <button type="button" class="aw-btn aw-btn--ghost" disabled="@_saving" @onclick="DeleteTemplate">
+                        <i class="bi bi-trash"></i> Supprimer
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+</section>
+
+@code {
+    List<InvoiceTemplate> _templates = new();
+    InvoiceTemplate _edit = new();
+    bool _saving;
+    string? _uploadError;
+
+    readonly List<AwSearchSelect.Option> _formatOptions =
+    [
+        new(InvoicePrintFormat.Ticket80, "Ticket caisse (80 mm)"),
+        new(InvoicePrintFormat.A4Portrait, "Facture A4 portrait")
+    ];
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    async Task ReloadAsync()
+    {
+        _templates = await InvoiceTemplates.GetAllAsync();
+        if (_templates.Count == 0)
+        {
+            var created = await InvoiceTemplates.GetActiveAsync();
+            _templates = [created];
+        }
+        if (_edit.Id <= 0 || _templates.All(t => t.Id != _edit.Id))
+            await SelectTemplateAsync(_templates.FirstOrDefault(t => t.IsActive) ?? _templates[0]);
+    }
+
+    async Task SelectTemplate(InvoiceTemplate summary) => await SelectTemplateAsync(summary);
+
+    async Task SelectTemplateAsync(InvoiceTemplate summary)
+    {
+        var full = await InvoiceTemplates.GetByIdAsync(summary.Id);
+        _edit = Clone(full ?? summary);
+    }
+
+    void NewTemplate()
+    {
+        _edit = new InvoiceTemplate
+        {
+            Nom = "Nouveau modèle",
+            PrintFormat = InvoicePrintFormat.Ticket80,
+            FooterText = "Merci de votre visite"
+        };
+    }
+
+    void OnFormatChanged(string? value) => _edit.PrintFormat = value ?? InvoicePrintFormat.Ticket80;
+
+    async Task SaveTemplate()
+    {
+        _saving = true;
+        try
+        {
+            _edit = await InvoiceTemplates.SaveAsync(_edit);
+            _templates = await InvoiceTemplates.GetAllAsync();
+            var summary = _templates.FirstOrDefault(t => t.Id == _edit.Id);
+            if (summary is not null)
+            {
+                summary.IsActive = _edit.IsActive;
+                _edit = Clone(await InvoiceTemplates.GetByIdAsync(_edit.Id) ?? _edit);
+            }
+            Snackbar.Add("Modèle de facture enregistré.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally { _saving = false; }
+    }
+
+    async Task ActivateTemplate()
+    {
+        if (_edit.Id <= 0) return;
+        _saving = true;
+        try
+        {
+            await InvoiceTemplates.SetActiveAsync(_edit.Id);
+            await ReloadAsync();
+            _edit = Clone(_templates.First(t => t.Id == _edit.Id));
+            Snackbar.Add("Modèle activé pour l'impression.", Severity.Success);
+        }
+        finally { _saving = false; }
+    }
+
+    async Task DeleteTemplate()
+    {
+        if (_edit.Id <= 0) return;
+        _saving = true;
+        try
+        {
+            await InvoiceTemplates.DeleteAsync(_edit.Id);
+            _edit = new InvoiceTemplate();
+            await ReloadAsync();
+            Snackbar.Add("Modèle supprimé.", Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        finally { _saving = false; }
+    }
+
+    async Task OnImageSelected(InputFileChangeEventArgs e, Action<string?> setValue)
+    {
+        _uploadError = null;
+        var file = e.File;
+        if (file is null) return;
+        if (!file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            _uploadError = "Image uniquement.";
+            return;
+        }
+        try
+        {
+            using var stream = file.OpenReadStream(2 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            setValue($"data:{file.ContentType};base64,{Convert.ToBase64String(ms.ToArray())}");
+        }
+        catch (Exception ex)
+        {
+            _uploadError = ex.Message;
+        }
+    }
+
+    static InvoiceTemplate Clone(InvoiceTemplate t) => new()
+    {
+        Id = t.Id,
+        Nom = t.Nom,
+        IsActive = t.IsActive,
+        PrintFormat = t.PrintFormat,
+        Logo = t.Logo,
+        LetterheadBackground = t.LetterheadBackground,
+        ShowLetterheadBackground = t.ShowLetterheadBackground,
+        LegalRccm = t.LegalRccm,
+        LegalIdNat = t.LegalIdNat,
+        LegalAdresse = t.LegalAdresse,
+        LegalContact = t.LegalContact,
+        LegalEmail = t.LegalEmail,
+        LegalWebsite = t.LegalWebsite,
+        FooterText = t.FooterText,
+        ContentMarginTopMm = t.ContentMarginTopMm,
+        ContentMarginBottomMm = t.ContentMarginBottomMm
+    };
+}

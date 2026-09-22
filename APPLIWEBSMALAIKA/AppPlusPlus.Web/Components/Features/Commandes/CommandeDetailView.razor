@@ -1,0 +1,330 @@
+@using MudBlazor
+@inject ICommandeService CommandeService
+@inject MudBlazor.IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+
+<MudDialog>
+    <DialogContent>
+        @if (_loading)
+        {
+            <div class="aw-dialog">
+                <div class="aw-dialog__body">
+                    <AwSkeleton Variant="table" Rows="5" />
+                </div>
+            </div>
+        }
+        else if (_cmd is null)
+        {
+            <div class="aw-dialog">
+                <div class="aw-dialog__body">
+                    <div class="aw-empty aw-empty--compact">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <p><strong>Introuvable</strong><br />Cette commande n'existe pas.</p>
+                    </div>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="aw-dialog">
+                <header class="aw-dialog__head">
+                    <div class="aw-dialog__title-wrap">
+                        <i class="bi bi-bag-check" aria-hidden="true"></i>
+                        <h2 class="aw-dialog__title">Commande N° @CommandeId</h2>
+                    </div>
+                    <span class="aw-badge @StatusBadgeClass"><i class="bi @StatusIcon" aria-hidden="true"></i>@StatusLabel</span>
+                </header>
+                <div class="aw-dialog__body">
+                    <div class="aw-dialog__meta">
+                        <div>
+                            <span class="aw-dialog__meta-label">Client</span>
+                            <span class="aw-dialog__meta-value">@(_cmd.Customer?.CustomerName ?? "—")</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Date</span>
+                            <span class="aw-dialog__meta-value">@(_cmd.CreationDate?.ToString("dd/MM/yyyy HH:mm") ?? "—")</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Objet</span>
+                            <span class="aw-dialog__meta-value">@(string.IsNullOrWhiteSpace(_cmd.CommandeDescription) ? "—" : _cmd.CommandeDescription)</span>
+                        </div>
+                    </div>
+
+                    <div class="aw-dialog__totals" @key="@UserCurrency.DisplayRevision">
+                        <div class="aw-dialog__total">
+                            <span class="aw-dialog__total-label">Total</span>
+                            <strong class="aw-dialog__total-value">@UserCurrency.FormatFromFcStored(_displayTotalFc, _displayTaux)</strong>
+                        </div>
+                        <div class="aw-dialog__total">
+                            <span class="aw-dialog__total-label">Payé</span>
+                            <strong class="aw-dialog__total-value aw-dialog__total-value--ok">@UserCurrency.FormatFromFcStored(_displayPayeFc, _displayTaux)</strong>
+                        </div>
+                        <div class="aw-dialog__total">
+                            <span class="aw-dialog__total-label">Reste</span>
+                            <strong class="aw-dialog__total-value @(_displayRestFc > 0 ? "aw-dialog__total-value--warn" : "aw-dialog__total-value--ok")">
+                                @UserCurrency.FormatFromFcStored(_displayRestFc, _displayTaux)
+                            </strong>
+                        </div>
+                    </div>
+
+                    <div class="aw-dialog__section">Articles</div>
+                    <div class="aw-table-region">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>Article</th>
+                                        <th class="aw-table__num">Qté</th>
+                                        <th class="aw-table__num">P.U.</th>
+                                        <th class="aw-table__num">Montant</th>
+                                        <th class="aw-table__num">Livré</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in _rows)
+                                    {
+                                        <tr style="cursor:default;">
+                                            <td><span class="aw-table__title">@row.ArticleName</span></td>
+                                            <td class="aw-table__num">@row.Qte.ToString("N0")</td>
+                                            <td class="aw-table__num">@UserCurrency.FormatFromFcStored(row.Pu, _displayTaux)</td>
+                                            <td class="aw-table__num"><span class="aw-table__title">@UserCurrency.FormatFromFcStored(row.Montant, _displayTaux)</span></td>
+                                            <td class="aw-table__num">
+                                                <span class="@DeliveryCellClass(row)">
+                                                    @row.QteLivree.ToString("N0")/@row.Qte.ToString("N0")
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    @if (_livraisons.Any())
+                    {
+                        <div class="aw-dialog__section">Livraisons (@_livraisons.Count)</div>
+                        <div class="aw-table-region">
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>N°</th>
+                                            <th>Porteur</th>
+                                            <th class="aw-table__num">Montant</th>
+                                            <th>Date</th>
+                                            <th>Facture</th>
+                                            <th>Statut</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var liv in _livraisons)
+                                        {
+                                            <tr style="cursor:default;">
+                                                <td><span class="aw-table__title">@liv.Id</span></td>
+                                                <td>@(string.IsNullOrWhiteSpace(liv.Porteur) ? "—" : liv.Porteur)</td>
+                                                <td class="aw-table__num">@UserCurrency.FormatFromFcStored(liv.Montant, _displayTaux)</td>
+                                                <td>@(liv.Date?.ToString("dd/MM/yyyy") ?? "—")</td>
+                                                <td>
+                                                    @if (liv.FactureId.HasValue)
+                                                    {
+                                                        <span class="aw-badge aw-badge--muted">N° @liv.FactureId</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="aw-table__meta">—</span>
+                                                    }
+                                                </td>
+                                                <td><span class="aw-badge @MapLivBadge(liv.StatusStyle)">@liv.StatusLabel</span></td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (_cmd is not null)
+        {
+            <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;justify-content:space-between;">
+                <button type="button" class="aw-btn aw-btn--danger" @onclick="OnDelete">
+                    <i class="bi bi-trash"></i> Supprimer
+                </button>
+                <div style="display:inline-flex;gap:0.45rem;flex-wrap:wrap;">
+                    @if (_hasRemainingToDeliver)
+                    {
+                        <button type="button" class="aw-btn aw-btn--primary" @onclick="OnLivrer">
+                            <i class="bi bi-truck"></i> Livrer
+                        </button>
+                    }
+                    <button type="button" class="aw-btn aw-btn--ghost" @onclick="OnEdit">
+                        <i class="bi bi-pencil"></i> Modifier
+                    </button>
+                    <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                        <i class="bi bi-x-lg"></i> Fermer
+                    </button>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                    <i class="bi bi-x-lg"></i> Fermer
+                </button>
+            </div>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int CommandeId { get; set; }
+    [Parameter] public bool HasRemainingToDeliver { get; set; }
+
+    bool _loading = true;
+    bool _hasRemainingToDeliver;
+    decimal _displayTotalFc;
+    decimal _displayPayeFc;
+    decimal _displayRestFc;
+    decimal _displayTaux = MonetaryStandard.DefaultTauxFallback;
+    Commande? _cmd;
+    List<VenteArticleRow> _rows = new();
+    List<LivraisonRow> _livraisons = new();
+
+    string StatusLabel => (_cmd?.Status ?? 0) switch
+    {
+        0 => "Nouvelle",
+        1 => "En cours",
+        2 => "Livrée",
+        3 => "Facturée",
+        _ => "—"
+    };
+
+    string StatusBadgeClass => (_cmd?.Status ?? 0) switch
+    {
+        0 => "aw-badge--accent",
+        1 => "aw-badge--accent",
+        2 => "aw-badge--brand",
+        3 => "aw-badge--brand",
+        _ => "aw-badge--muted"
+    };
+
+    string StatusIcon => (_cmd?.Status ?? 0) switch
+    {
+        0 => "bi-stars",
+        1 => "bi-hourglass-split",
+        2 => "bi-truck",
+        3 => "bi-check-circle",
+        _ => "bi-question"
+    };
+
+    static string DeliveryCellClass(VenteArticleRow row) =>
+        row.QteLivree >= row.Qte && row.Qte > 0 ? "aw-dialog__qty--done"
+        : row.QteLivree > 0 ? "aw-dialog__qty--partial"
+        : "aw-table__meta";
+
+    static string MapLivBadge(string? style) =>
+        string.IsNullOrWhiteSpace(style) ? "aw-badge--muted"
+        : style.Contains("success", StringComparison.OrdinalIgnoreCase) ? "aw-badge--brand"
+        : style.Contains("warning", StringComparison.OrdinalIgnoreCase) || style.Contains("orange", StringComparison.OrdinalIgnoreCase) ? "aw-badge--accent"
+        : style.Contains("danger", StringComparison.OrdinalIgnoreCase) || style.Contains("error", StringComparison.OrdinalIgnoreCase) ? "aw-badge--danger"
+        : style.Contains("info", StringComparison.OrdinalIgnoreCase) || style.Contains("primary", StringComparison.OrdinalIgnoreCase) ? "aw-badge--brand"
+        : "aw-badge--muted";
+
+    void Cancel() => MudDialog.Close();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var dto = await CommandeService.GetCommandeDetailViewAsync(CommandeId);
+
+        if (dto != null)
+        {
+            _cmd = dto.Commande;
+            _displayTotalFc = dto.DisplayTotalFc;
+            _displayPayeFc = dto.DisplayMontantPayeFc;
+            _displayRestFc = dto.DisplayMontantRestFc;
+            _displayTaux = MonetaryStandard.ResolveTaux(_cmd.Taux);
+
+            _rows = dto.ArticleRows.Select(r => new VenteArticleRow
+            {
+                ArticleName = r.ArticleName,
+                Qte = r.Qte,
+                Pu = r.PU,
+                Montant = r.Montant,
+                QteLivree = r.QteLivree
+            }).ToList();
+
+            _livraisons = dto.LivraisonRows.Select(r => new LivraisonRow
+            {
+                Id = r.LivraisonId,
+                Porteur = r.Porteur,
+                Montant = r.Montant,
+                Date = r.Date.HasValue ? DateOnly.FromDateTime(r.Date.Value) : null,
+                FactureId = r.FactureId,
+                TotalPaye = r.TotalPaye,
+                StatusLabel = r.StatusLabel,
+                StatusStyle = r.StatusStyle
+            }).ToList();
+        }
+        _hasRemainingToDeliver = HasRemainingToDeliver;
+        _loading = false;
+    }
+
+    void OnEdit()
+    {
+        MudDialog.Close(DialogResult.Ok(true));
+        Navigation.NavigateTo($"/commandes/edit/{CommandeId}");
+    }
+
+    async Task OnLivrer()
+    {
+        var parameters = new DialogParameters<LivraisonChecklistForm> { { x => x.CommandeId, CommandeId } };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<LivraisonChecklistForm>(
+            $"Livraison — Commande N° {CommandeId}", parameters, options);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+            MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    async Task OnDelete()
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Confirmation",
+            $"Supprimer la commande N° {CommandeId} ?",
+            yesText: "Supprimer",
+            cancelText: "Annuler");
+        if (confirm == true)
+        {
+            await CommandeService.DeleteCommandeAsync(CommandeId);
+            Snackbar.Add("Commande supprimée", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+    }
+
+    class VenteArticleRow
+    {
+        public string ArticleName { get; set; } = "";
+        public decimal Qte { get; set; }
+        public decimal Pu { get; set; }
+        public decimal Montant { get; set; }
+        public decimal QteLivree { get; set; }
+    }
+
+    class LivraisonRow
+    {
+        public int Id { get; set; }
+        public string Porteur { get; set; } = "";
+        public decimal Montant { get; set; }
+        public DateOnly? Date { get; set; }
+        public int? FactureId { get; set; }
+        public decimal TotalPaye { get; set; }
+        public string StatusLabel { get; set; } = "";
+        public string StatusStyle { get; set; } = "";
+    }
+}

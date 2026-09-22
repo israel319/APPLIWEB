@@ -1,0 +1,73 @@
+@inject IModuleLicenseService ModuleLicenseService
+@inject NavigationManager Nav
+@using AppPlusPlus.Application.Services.Administration
+@using AppPlusPlus.Domain.Common
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+
+@if (!_checked)
+{
+    <div class="aw-page">
+        <AwSkeleton Variant="page" Rows="4" />
+    </div>
+}
+else if (!_active)
+{
+    <div class="aw-page">
+        <div class="aw-shell" style="max-width:480px;margin:2rem auto;">
+            <div class="aw-empty">
+                <i class="bi bi-puzzle"></i>
+                <p>
+                    <strong>Module non activé</strong><br />
+                    Le module <strong>@ModuleName</strong> n'est pas inclus dans votre licence actuelle.
+                </p>
+                <button type="button" class="aw-btn aw-btn--ghost" style="margin-top:0.75rem;"
+                        @onclick="@(() => Nav.NavigateTo(_homeRoute))">
+                    <i class="bi bi-house"></i> Retour
+                </button>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    @ChildContent
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public string ModuleCode { get; set; } = null!;
+
+    [Parameter, EditorRequired]
+    public string ModuleName { get; set; } = null!;
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    private bool _checked;
+    private bool _active;
+    private string _homeRoute = "/profile";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _active = await ModuleLicenseService.IsModuleActiveAsync(ModuleCode);
+        _checked = true;
+
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = auth.User;
+            if (user.Identity?.IsAuthenticated == true)
+            {
+                var login = user.FindFirst("login")?.Value
+                    ?? user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (!string.IsNullOrEmpty(login))
+                {
+                    var perms = await PermissionResolver.GetPermissionsAsync(login);
+                    _homeRoute = perms.HomeRoute();
+                }
+            }
+        }
+        catch { /* fail-open */ }
+    }
+}

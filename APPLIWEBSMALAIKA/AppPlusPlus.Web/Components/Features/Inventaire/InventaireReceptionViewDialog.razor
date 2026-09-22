@@ -1,0 +1,141 @@
+@using MudBlazor
+@using AppPlusPlus.Application.DTOs.Inventaire
+@using AppPlusPlus.Application.Services.Inventaire
+@using AppPlusPlus.Domain.Common
+@inject IInventaireService InventaireService
+@inject IJSRuntime JS
+
+<MudDialog Class="inventaire-reception-view-dialog">
+    <DialogContent>
+        @if (_loading)
+        {
+            <div class="aw-dialog"><div class="aw-dialog__body"><AwSkeleton Variant="table" Rows="6" /></div></div>
+        }
+        else if (_rec is null)
+        {
+            <div class="aw-empty aw-empty--compact"><p>Réception introuvable</p></div>
+        }
+        else
+        {
+            <div class="aw-dialog aw-dialog--inventaire-reception">
+                <header class="aw-dialog__head">
+                    <div class="aw-dialog__title-wrap">
+                        <i class="bi bi-file-earmark-text" aria-hidden="true"></i>
+                        <h2 class="aw-dialog__title">Réception du @_rec.DateJour.ToString("dd/MM/yyyy")</h2>
+                    </div>
+                    <span class="aw-badge @(_rec.Statut == InventaireReceptionStatut.Cloture ? "aw-badge--brand" : "aw-badge--accent")">@_rec.StatutLabel</span>
+                </header>
+                <div class="aw-dialog__body">
+                    <div class="aw-dialog__meta aw-inventaire-view-meta">
+                        @if (!string.IsNullOrWhiteSpace(_rec.SessionNom))
+                        {
+                            <div>
+                                <span class="aw-dialog__meta-label">Session</span>
+                                <span class="aw-dialog__meta-value">@_rec.SessionNom</span>
+                            </div>
+                        }
+                        <div>
+                            <span class="aw-dialog__meta-label">Référence</span>
+                            <span class="aw-dialog__meta-value">@(_rec.NumeroReception ?? $"REC-{_rec.IdReception}")</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Lignes</span>
+                            <span class="aw-dialog__meta-value">@_rec.NbLignes</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Total</span>
+                            <span class="aw-dialog__meta-value">@CurrencyFormat.Cdf(_rec.MontantTotal, "N0")</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Saisi par</span>
+                            <span class="aw-dialog__meta-value">@UserDisplayNames.Format(_rec.CreePar)</span>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(_rec.CloturePar))
+                        {
+                            <div>
+                                <span class="aw-dialog__meta-label">Clôturé par</span>
+                                <span class="aw-dialog__meta-value">@UserDisplayNames.Format(_rec.CloturePar)</span>
+                            </div>
+                        }
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(_rec.Observation))
+                    {
+                        <p class="aw-table__meta" style="margin-bottom:0.75rem;">@_rec.Observation</p>
+                    }
+
+                    <div class="aw-table-region">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>Heure</th>
+                                        <th>Article</th>
+                                        <th class="aw-table__num">Qté</th>
+                                        <th>Exp.</th>
+                                        <th class="aw-table__num">P.U. (FC)</th>
+                                        <th class="aw-table__num">Montant</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var line in _rec.Lines)
+                                    {
+                                        <tr>
+                                            <td>@line.DateLigne.ToString("HH:mm")</td>
+                                            <td>
+                                                <span class="aw-table__title">@line.ArticleName</span>
+                                                <span class="aw-table__meta">@line.IdArticle</span>
+                                            </td>
+                                            <td class="aw-table__num">@line.Quantite.ToString("N2")</td>
+                                            <td>@(line.DateExpiration?.ToString("dd/MM/yyyy") ?? "—")</td>
+                                            <td class="aw-table__num">@CurrencyFormat.Cdf(line.PrixUnitaire, "N0")</td>
+                                            <td class="aw-table__num"><strong>@CurrencyFormat.Cdf(line.MontantLigne, "N0")</strong></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                                <tfoot>
+                                    <tr>
+                                        <td colspan="5" class="aw-table__num"><strong>Total</strong></td>
+                                        <td class="aw-table__num"><strong>@CurrencyFormat.Cdf(_rec.MontantTotal, "N0")</strong></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (!_loading && _rec is not null)
+        {
+            <div class="aw-dialog__footer aw-inventaire-reception-dialog__footer">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="@(() => MudDialog.Close())">
+                    <i class="bi bi-x-lg"></i> Fermer
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="PrintAsync">
+                    <i class="bi bi-printer"></i> Imprimer
+                </button>
+            </div>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int ReceptionId { get; set; }
+
+    InventaireReceptionDto? _rec;
+    bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _rec = await InventaireService.GetReceptionAsync(ReceptionId);
+        _loading = false;
+    }
+
+    async Task PrintAsync()
+    {
+        await JS.InvokeVoidAsync("open", $"/stock/inventaire/reception/print/{ReceptionId}/true", "_blank");
+    }
+}

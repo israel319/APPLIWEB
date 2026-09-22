@@ -1,0 +1,916 @@
+@page "/stock/inventaire"
+@rendermode InteractiveServer
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using AppPlusPlus.Application.DTOs.Inventaire
+@using AppPlusPlus.Application.Services.Inventaire
+@using AppPlusPlus.Domain.Common
+@using System.Globalization
+@inject IInventaireService InventaireService
+@inject ILocalisationService LocalisationService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+@inject IDialogService DialogService
+
+<ModuleGuard ModuleCode="stock" ModuleName="Inventaire magasin">
+
+<PageTitle>@AppSettings.AppName — Inventaire magasin</PageTitle>
+
+@if (!_loaded)
+{
+    <div class="aw-page"><AwSkeleton Variant="page" Rows="8" /></div>
+}
+else if (!_canRead)
+{
+    <div class="aw-page">
+        <div class="aw-empty"><i class="bi bi-lock"></i><p><strong>Accès refusé</strong></p></div>
+    </div>
+}
+else
+{
+    <div class="aw-page aw-page--workspace">
+        <div class="aw-workspace">
+            <header class="aw-object-head aw-inventaire-head">
+                <div class="aw-object-head__identity">
+                    <p class="aw-object-head__eyebrow">Stock</p>
+                    <h1 class="aw-object-head__title">Inventaire magasin</h1>
+                    <p class="aw-object-head__desc">
+                        @if (_selectedLocId.HasValue)
+                        {
+                            <span>@SelectedMagasinName</span>
+                            <span class="aw-inventaire-head__sep">·</span>
+                            <span>Suivi journalier de la valeur</span>
+                        }
+                        else
+                        {
+                            <span>Départ + réceptions − ventes = valeur restante</span>
+                        }
+                    </p>
+                </div>
+                <div class="aw-object-head__actions">
+                    @if (_selectedLocId.HasValue && !_viewHistorique)
+                    {
+                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="ShowHistorique">
+                            <i class="bi bi-clock-history"></i> Historique
+                        </button>
+                    }
+                    @if (_selectedLocId.HasValue)
+                    {
+                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="ClearMagasin">
+                            <i class="bi bi-grid-3x3-gap"></i> Tous les magasins
+                        </button>
+                    }
+                    @if (_showStockBack)
+                    {
+                        <button type="button" class="aw-btn aw-btn--ghost" @onclick="GoStock">
+                            <i class="bi bi-arrow-left"></i> Articles
+                        </button>
+                    }
+                </div>
+            </header>
+
+            @if (_showArticlesSubNav)
+            {
+                <nav class="aw-railnav" aria-label="Sous-modules articles" role="tablist">
+                    <button type="button" role="tab" title="Catalogue"
+                            class="aw-railnav__item"
+                            @onclick="@(() => Navigation.NavigateTo("/stock"))">
+                        <i class="bi bi-grid-3x3-gap" aria-hidden="true"></i>
+                        Catalogue
+                    </button>
+                    <button type="button" role="tab" aria-selected="true" title="Inventaire magasin"
+                            class="aw-railnav__item aw-railnav__item--active">
+                        <i class="bi bi-clipboard-data" aria-hidden="true"></i>
+                        Inventaire
+                    </button>
+                </nav>
+            }
+
+            <div class="aw-workspace__body aw-inventaire-hub">
+                @if (_selectedLocId is null)
+                {
+                    <div class="aw-inventaire-view aw-inventaire-view--picker" @key="@("picker")">
+                        @RenderMagasinPicker()
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-inventaire-magasin" @key="@($"mag-{_selectedLocId}")">
+                    <div class="aw-inventaire-context aw-inventaire-view aw-inventaire-view--context">
+                        <div class="aw-inventaire-context__magasin">
+                            <span class="aw-inventaire-context__icon" aria-hidden="true">
+                                <i class="bi @(SelectedMagasinIsDepot ? "bi-building" : "bi-shop")"></i>
+                            </span>
+                            <div class="aw-inventaire-context__info">
+                                <span class="aw-inventaire-context__label">Magasin actif</span>
+                                <strong class="aw-inventaire-context__name">@SelectedMagasinName</strong>
+                            </div>
+                        </div>
+                        @if (_session is not null)
+                        {
+                            <div class="aw-inventaire-session-badges">
+                                <span class="aw-badge aw-badge--brand">@_session.Nom</span>
+                                <span class="aw-badge aw-badge--accent">@_session.StatutLabel</span>
+                                <span class="aw-table__meta">Par @_session.ResponsableLabel</span>
+                            </div>
+                        }
+                    </div>
+
+                    <div class="aw-inventaire-view aw-inventaire-view--@ContentViewKind" @key="ContentViewKey">
+                    @if (_viewHistorique)
+                    {
+                        @RenderHistoriqueView()
+                    }
+                    else if (_session is null)
+                {
+                    <div class="aw-inventaire-start">
+                        <h2 class="aw-inventaire-start__title">Démarrer @SelectedMagasinName</h2>
+                        @if (_isFirstSession)
+                        {
+                            <p class="aw-inventaire-start__lead">Première journée pour ce magasin — indiquez la valeur des marchandises déjà présentes.</p>
+                        }
+                        else
+                        {
+                            <p class="aw-inventaire-start__lead">La valeur de départ est reportée automatiquement depuis la dernière journée clôturée.</p>
+                        }
+                        @if (_canWrite)
+                        {
+                            <div class="aw-form__grid @(_isFirstSession ? "aw-form__grid--3" : "aw-form__grid--2")">
+                                <div class="aw-field">
+                                    <label class="aw-field__label">Session</label>
+                                    <input class="aw-input" @bind="_newNom" />
+                                </div>
+                                @if (_isFirstSession)
+                                {
+                                    <div class="aw-field">
+                                        <label class="aw-field__label">Valeur de départ (FC)</label>
+                                        <input type="number" class="aw-input" @bind="_newMontantInitial" min="1" step="1000" />
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="aw-field aw-inventaire-carryover">
+                                        <label class="aw-field__label">Valeur reportée (FC)</label>
+                                        <div class="aw-inventaire-carryover__value">@FmtFc(_suggestedMontant)</div>
+                                        <span class="aw-table__meta">Solde de la dernière journée clôturée</span>
+                                    </div>
+                                }
+                                <div class="aw-field">
+                                    <label class="aw-field__label">Période</label>
+                                    <MudSelect T="int" @bind-Value="_newTypePeriode" Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined">
+                                        <MudSelectItem T="int" Value="0">Journée</MudSelectItem>
+                                        <MudSelectItem T="int" Value="1">Mois</MudSelectItem>
+                                        <MudSelectItem T="int" Value="2">Exercice</MudSelectItem>
+                                    </MudSelect>
+                                </div>
+                            </div>
+                            <div class="aw-inventaire-actions aw-inventaire-actions--start">
+                                <button type="button" class="aw-btn aw-btn--primary" @onclick="CreateSession">
+                                    <i class="bi bi-play-circle"></i> Ouvrir la journée
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    @if (_session.MontantInitial <= 0 && _canWrite)
+                    {
+                        <div class="aw-inventaire-budget-fix">
+                            <i class="bi bi-pencil-square"></i>
+                            <span class="aw-inventaire-budget-fix__label">Valeur de départ</span>
+                            <input type="number" class="aw-input" @bind="_editMontantInitial" min="1" step="1000" />
+                            <button type="button" class="aw-btn aw-btn--primary aw-btn--sm" @onclick="SaveBudgetInitial">Valider</button>
+                        </div>
+                    }
+
+                    <div class="aw-inventaire-balance" aria-label="Situation du jour">
+                        <div class="aw-inventaire-balance__main">
+                            <span class="aw-inventaire-balance__label">Il restera</span>
+                            <strong class="aw-inventaire-balance__value">@FmtFc(TheoriqueAffiche)</strong>
+                        </div>
+                        <div class="aw-inventaire-balance__parts">
+                            <span>Départ @FmtFc(_session.MontantInitial)</span>
+                            <span class="aw-inventaire-balance__plus">+ @FmtFc(ReceptionsAffiche)</span>
+                            <span class="aw-inventaire-balance__minus">− @FmtFc(_session.MontantVentes)</span>
+                        </div>
+                    </div>
+
+                    <div class="aw-inventaire-day" @key="@($"day-{_session.IdInventaire}-{_dayView}")">
+                    @if (_dayView == DayViewMode.Close && _session.Statut != InventaireStatut.Cloture)
+                    {
+                        var closeVente = _ventes.FirstOrDefault(v => v.DateVente == CloseDayDate);
+                        <div class="aw-inventaire-view aw-inventaire-view--close">
+                        <InventaireCloseDayPanel Session="_session"
+                                                 Reception="_dayReceptionDetail ?? DayReception"
+                                                 DateJour="CloseDayDate"
+                                                 VentesAutresJours="VentesAutresJoursClose"
+                                                 InitialVentes="closeVente?.MontantVentes ?? 0"
+                                                 InitialDepenses="closeVente?.MontantDepenses ?? 0"
+                                                 InitialObservation="@(closeVente?.MontantDepenses > 0 ? closeVente.Observation : null)"
+                                                 UserLogin="@_login"
+                                                 OnCancel="ShowReceptionView"
+                                                 OnBackToReception="ShowReceptionView"
+                                                 OnClosed="OnCloseDayCompleted" />
+                        </div>
+                    }
+                    else
+                    {
+                        var workspaceDate = CloseDayDate;
+                        var workspaceRec = _dayReceptionDetail ?? DayReception;
+                        var canClose = workspaceRec is not null && workspaceRec.NbLignes > 0
+                                       && workspaceRec.Statut == InventaireReceptionStatut.Ouvert
+                                       && _session.Statut != InventaireStatut.Cloture;
+
+                        <section class="aw-inventaire-panel aw-inventaire-panel--workspace aw-inventaire-view aw-inventaire-view--reception" aria-label="Réception du jour">
+                            <div class="aw-inventaire-panel__head">
+                                <div>
+                                    <h3 class="aw-inventaire-panel__title">
+                                        <i class="bi bi-box-arrow-in-down"></i>
+                                        Réception · @workspaceDate.ToString("dddd dd MMMM", CultureInfo.GetCultureInfo("fr-FR"))
+                                    </h3>
+                                    @if (workspaceRec is not null && workspaceRec.NbLignes > 0)
+                                    {
+                                        <p class="aw-inventaire-panel__subtitle">
+                                            @workspaceRec.NbLignes ligne(s) · + @FmtFc(workspaceRec.MontantTotal) · @workspaceRec.ResponsableLabel
+                                        </p>
+                                    }
+                                    else
+                                    {
+                                        <p class="aw-inventaire-panel__subtitle">Enregistrez les marchandises reçues aujourd'hui.</p>
+                                    }
+                                </div>
+                                @if (_canWrite && _session.Statut != InventaireStatut.Cloture)
+                                {
+                                    <div class="aw-inventaire-panel__actions">
+                                        <button type="button" class="aw-btn aw-btn--primary aw-btn--sm" @onclick="() => OpenReceptionDialog(workspaceRec?.IdReception ?? 0, workspaceDate)">
+                                            <i class="bi bi-plus-lg"></i> Ajouter une ligne
+                                        </button>
+                                        @if (canClose)
+                                        {
+                                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="ShowCloseView">
+                                                <i class="bi bi-lock"></i> Clôturer la journée
+                                            </button>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                            <div class="aw-inventaire-panel__body">
+                                @if (workspaceRec is null || workspaceRec.Lines.Count == 0)
+                                {
+                                    <div class="aw-inventaire-empty-lines">
+                                        <i class="bi bi-inbox"></i>
+                                        <p>Aucune ligne pour ce jour.</p>
+                                        @if (_canWrite)
+                                        {
+                                            <span class="aw-table__meta">Utilisez « Ajouter une ligne » pour commencer.</span>
+                                        }
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="aw-table-region">
+                                        <div class="aw-table-wrap">
+                                            <table class="aw-table aw-table--compact">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Heure</th>
+                                                        <th>Article</th>
+                                                        <th class="aw-table__num">Qté</th>
+                                                        <th>Exp.</th>
+                                                        <th class="aw-table__num">P.U.</th>
+                                                        <th class="aw-table__num">Montant</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @foreach (var line in workspaceRec.Lines.OrderBy(l => l.DateLigne))
+                                                    {
+                                                        <tr class="@(_canWrite && workspaceRec.Statut == InventaireReceptionStatut.Ouvert ? "aw-table__row--clickable" : "")"
+                                                            @onclick="@(() => OnWorkspaceLineClick(workspaceRec, workspaceDate))">
+                                                            <td>@line.DateLigne.ToString("HH:mm")</td>
+                                                            <td>
+                                                                <span class="aw-table__title">@line.ArticleName</span>
+                                                                <span class="aw-table__meta">@line.IdArticle</span>
+                                                            </td>
+                                                            <td class="aw-table__num">@line.Quantite.ToString("N2")</td>
+                                                            <td>@FormatExpiration(line.DateExpiration)</td>
+                                                            <td class="aw-table__num">@FmtFc(line.PrixUnitaire)</td>
+                                                            <td class="aw-table__num aw-table__num--plus">+ @FmtFc(line.MontantLigne)</td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                                <tfoot>
+                                                    <tr>
+                                                        <td colspan="5"><strong>Total</strong></td>
+                                                        <td class="aw-table__num"><strong>+ @FmtFc(workspaceRec.MontantTotal)</strong></td>
+                                                    </tr>
+                                                </tfoot>
+                                            </table>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </section>
+                    }
+                    </div>
+                }
+                    </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+</ModuleGuard>
+
+@code {
+    bool _loaded;
+    bool _canRead;
+    bool _canWrite;
+    string _stockBackRoute = "/stock/inventaire";
+    bool _showStockBack;
+    bool _showArticlesSubNav;
+    bool _canCatalogue;
+    string _login = "";
+    int? _selectedLocId;
+    List<Localisation> _localisations = new();
+    InventaireSessionDto? _session;
+    List<InventaireSessionDto> _sessionHistory = new();
+    List<InventaireReceptionDto> _receptions = new();
+    List<InventaireVenteDto> _ventes = new();
+    InventaireReceptionDto? _dayReceptionDetail;
+    Dictionary<int, InventaireSessionDto> _openByLoc = new();
+    bool _viewHistorique;
+    DayViewMode _dayView = DayViewMode.Reception;
+    bool _isFirstSession;
+    decimal _suggestedMontant;
+
+    string _newNom = "";
+    decimal _newMontantInitial;
+    decimal _editMontantInitial;
+    int _newTypePeriode;
+
+    DateOnly CloseDayDate =>
+        DayReception?.DateJour
+        ?? DateOnly.FromDateTime(DateTime.Today);
+
+    InventaireReceptionDto? DayReception =>
+        _receptions.FirstOrDefault(r => r.Statut == InventaireReceptionStatut.Ouvert)
+        ?? _receptions.FirstOrDefault(r => r.DateJour == DateOnly.FromDateTime(DateTime.Today))
+        ?? _receptions.OrderByDescending(r => r.DateJour).FirstOrDefault();
+
+    decimal ReceptionOuverteAjout =>
+        _receptions.FirstOrDefault(r => r.Statut == InventaireReceptionStatut.Ouvert)?.MontantTotal ?? 0;
+
+    decimal ReceptionsAffiche =>
+        (_session?.MontantReceptions ?? 0) + ReceptionOuverteAjout;
+
+    decimal TheoriqueAffiche =>
+        (_session?.MontantInitial ?? 0) + ReceptionsAffiche - (_session?.MontantVentes ?? 0);
+
+    decimal VentesAutresJoursClose =>
+        _ventes.Where(v => v.DateVente != CloseDayDate).Sum(v => v.Montant);
+
+    string SelectedMagasinName =>
+        _localisations.FirstOrDefault(l => l.IdLocalisation == _selectedLocId)?.DescriptionLocalisation ?? "—";
+
+    bool SelectedMagasinIsDepot =>
+        _localisations.FirstOrDefault(l => l.IdLocalisation == _selectedLocId)?.IsDepot == true;
+
+    string ContentViewKey =>
+        _viewHistorique ? $"hist-{_selectedLocId}"
+        : _session is null ? $"start-{_selectedLocId}"
+        : $"session-{_session.IdInventaire}-{_dayView}";
+
+    string ContentViewKind =>
+        _viewHistorique ? "historique"
+        : _session is null ? "start"
+        : "session";
+
+    enum DayViewMode { Reception, Close }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = auth.User;
+            _login = user.FindFirst("login")?.Value
+                ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? user.Identity?.Name
+                ?? "";
+            var isAdmin = AppFunctions.Normalize(user.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+            var perms = await PermissionResolver.GetPermissionsAsync(_login);
+
+            _canRead = PermissionGate.ViewSubTab(perms, "articles.inventaire",
+                () => PermissionGate.LegacyRead(perms, AppFunctions.Stock, isAdmin));
+            _canWrite = PermissionGate.DoAction(perms, "articles.inventaire.write",
+                () => PermissionGate.LegacyWrite(perms, AppFunctions.Stock, isAdmin));
+
+            if (perms.HasHierarchicalGrants)
+            {
+                _canCatalogue = PermissionGate.ViewSubTab(perms, "articles.catalogue", () => false);
+                _showArticlesSubNav = _canCatalogue && _canRead;
+                _stockBackRoute = PermissionCatalog.FirstAccessibleArticlesRoute(perms.Grants) ?? "/stock/inventaire";
+                _showStockBack = !_showArticlesSubNav
+                    && !string.Equals(
+                        PermissionCatalog.NormalizeRoutePath(_stockBackRoute),
+                        "/stock/inventaire",
+                        StringComparison.Ordinal);
+            }
+            else
+            {
+                _stockBackRoute = "/stock";
+                _showStockBack = true;
+            }
+
+            if (_canRead)
+            {
+                var locIds = await LocalisationService.GetUserLocalisationIdsAsync(_login, isAdmin);
+                _localisations = await LocalisationService.GetFilteredLocalisationsAsync(locIds, isAdmin);
+                await RefreshOpenSessionsAsync(isAdmin);
+                if (_localisations.Count == 1)
+                    _selectedLocId = _localisations[0].IdLocalisation;
+            }
+        }
+        finally
+        {
+            _loaded = true;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && _selectedLocId.HasValue)
+            await LoadMagasinDataAsync();
+    }
+
+    async Task OnMagasinChanged(int? locId)
+    {
+        _selectedLocId = locId;
+        await LoadMagasinDataAsync();
+    }
+
+    async Task SelectMagasin(int locId) => await OnMagasinChanged(locId);
+
+    async Task ClearMagasin()
+    {
+        _selectedLocId = null;
+        _session = null;
+        _receptions.Clear();
+        _ventes.Clear();
+        _dayReceptionDetail = null;
+        _dayView = DayViewMode.Reception;
+        _sessionHistory.Clear();
+        _viewHistorique = false;
+        _suggestedMontant = 0;
+        _isFirstSession = true;
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var isAdmin = AppFunctions.Normalize(auth.User.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+        await RefreshOpenSessionsAsync(isAdmin);
+    }
+
+    async Task RefreshOpenSessionsAsync(bool isAdmin)
+    {
+        var locIds = await LocalisationService.GetUserLocalisationIdsAsync(_login, isAdmin);
+        var all = await InventaireService.GetSessionsAsync(locIds, isAdmin);
+        _openByLoc = all
+            .Where(s => s.Statut != InventaireStatut.Cloture)
+            .GroupBy(s => s.IdLocalisation)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.DateCreation).First());
+    }
+
+    async Task LoadMagasinDataAsync()
+    {
+        if (!_selectedLocId.HasValue) return;
+
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var isAdmin = AppFunctions.Normalize(auth.User.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+        var locIds = await LocalisationService.GetUserLocalisationIdsAsync(_login, isAdmin);
+
+        _session = await InventaireService.GetOpenSessionForLocalisationAsync(_selectedLocId.Value);
+        _sessionHistory = await InventaireService.GetSessionHistoryForLocalisationAsync(_selectedLocId.Value);
+        _suggestedMontant = await InventaireService.GetSuggestedMontantInitialAsync(_selectedLocId.Value);
+        _isFirstSession = _suggestedMontant <= 0;
+
+        if (_session != null)
+        {
+            _receptions = await InventaireService.GetReceptionsAsync(_session.IdInventaire);
+            _ventes = await InventaireService.GetVentesAsync(_session.IdInventaire);
+            _editMontantInitial = _session.MontantInitial > 0 ? _session.MontantInitial : 1_000_000;
+            await RefreshDayReceptionDetailAsync(force: true);
+        }
+        else
+        {
+            _receptions.Clear();
+            _ventes.Clear();
+            _dayReceptionDetail = null;
+            _dayView = DayViewMode.Reception;
+            _newMontantInitial = _isFirstSession && _newMontantInitial <= 0 ? 0 : _suggestedMontant;
+        }
+
+        if (string.IsNullOrWhiteSpace(_newNom))
+            _newNom = $"Inventaire {DateTime.Today:dd/MM/yyyy}";
+
+        await RefreshOpenSessionsAsync(isAdmin);
+        StateHasChanged();
+    }
+
+    async Task CreateSession()
+    {
+        if (!_selectedLocId.HasValue)
+            return;
+
+        if (_isFirstSession && _newMontantInitial <= 0)
+        {
+            Snackbar.Add("Saisissez la valeur de départ pour la première journée.", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            await InventaireService.CreateSessionAsync(new InventaireSessionCreateRequest
+            {
+                IdLocalisation = _selectedLocId.Value,
+                Nom = _newNom,
+                TypePeriode = _newTypePeriode,
+                DateDebut = DateOnly.FromDateTime(DateTime.Today),
+                MontantInitial = _isFirstSession ? _newMontantInitial : 0,
+                UserLogin = _login
+            });
+            Snackbar.Add("Journée ouverte", Severity.Success);
+            await LoadMagasinDataAsync();
+            _dayView = DayViewMode.Reception;
+            if (_canWrite)
+                await OpenReceptionDialog(0, CloseDayDate);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    async Task SaveBudgetInitial()
+    {
+        if (_session is null || _editMontantInitial <= 0) return;
+        try
+        {
+            await InventaireService.UpdateMontantInitialAsync(_session.IdInventaire, _editMontantInitial);
+            Snackbar.Add("Valeur enregistrée", Severity.Success);
+            await LoadMagasinDataAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    async Task ShowCloseView()
+    {
+        if (_session is null) return;
+        _dayView = DayViewMode.Close;
+        await RefreshDayReceptionDetailAsync(force: true);
+    }
+
+    void ShowReceptionView() => _dayView = DayViewMode.Reception;
+
+    async Task OnCloseDayCompleted()
+    {
+        if (_session is null) return;
+        var closedSessionId = _session.IdInventaire;
+        Snackbar.Add(_session.TypePeriode == InventaireTypePeriode.Jour
+            ? "Journée clôturée — détail affiché ci-dessous."
+            : "Journée enregistrée — détail affiché ci-dessous.", Severity.Success);
+        _dayView = DayViewMode.Reception;
+        await LoadMagasinDataAsync();
+        await OpenSessionViewDialog(closedSessionId);
+    }
+
+    async Task RefreshDayReceptionDetailAsync(bool force = false)
+    {
+        if (_session is null)
+        {
+            _dayReceptionDetail = null;
+            return;
+        }
+
+        _dayReceptionDetail = await InventaireService.GetReceptionForDayAsync(_session.IdInventaire, CloseDayDate);
+    }
+
+    async Task ShowHistorique()
+    {
+        if (!_selectedLocId.HasValue) return;
+        _sessionHistory = await InventaireService.GetSessionHistoryForLocalisationAsync(_selectedLocId.Value);
+        _viewHistorique = true;
+    }
+
+    void BackFromHistorique() => _viewHistorique = false;
+
+    async Task OnWorkspaceLineClick(InventaireReceptionDto rec, DateOnly date)
+    {
+        if (_canWrite && rec.Statut == InventaireReceptionStatut.Ouvert && _session?.Statut != InventaireStatut.Cloture)
+            await OpenReceptionDialog(rec.IdReception, date);
+    }
+
+    async Task OnReceptionRowClick(InventaireReceptionDto r)
+    {
+        if (_canWrite && r.Statut == InventaireReceptionStatut.Ouvert && !_viewHistorique && _session?.Statut != InventaireStatut.Cloture)
+            await OpenReceptionDialog(r.IdReception, r.DateJour);
+        else
+            await OpenReceptionViewDialog(r.IdReception);
+    }
+
+    async Task OpenSessionViewDialog(int sessionId)
+    {
+        var parameters = new DialogParameters<InventaireSessionViewDialog>
+        {
+            { x => x.SessionId, sessionId }
+        };
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            NoHeader = true,
+            CloseOnEscapeKey = true
+        };
+        await DialogService.ShowAsync<InventaireSessionViewDialog>("", parameters, options);
+    }
+
+    async Task OnSessionHistoryClick(InventaireSessionDto s) => await OpenSessionViewDialog(s.IdInventaire);
+
+    async Task OpenReceptionViewDialog(int receptionId)
+    {
+        var parameters = new DialogParameters<InventaireReceptionViewDialog>
+        {
+            { x => x.ReceptionId, receptionId }
+        };
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            NoHeader = true,
+            CloseOnEscapeKey = true
+        };
+        await DialogService.ShowAsync<InventaireReceptionViewDialog>("", parameters, options);
+    }
+
+    async Task OpenReceptionDialog(int receptionId = 0, DateOnly? dateJour = null)
+    {
+        if (_session is null) return;
+
+        var parameters = new DialogParameters<InventaireReceptionDialog>
+        {
+            { x => x.InventaireId, _session.IdInventaire },
+            { x => x.ReceptionId, receptionId },
+            { x => x.DateJour, dateJour ?? DateOnly.FromDateTime(DateTime.Today) }
+        };
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            NoHeader = true,
+            CloseOnEscapeKey = true
+        };
+        var dialog = await DialogService.ShowAsync<InventaireReceptionDialog>("", parameters, options);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+            await LoadMagasinDataAsync();
+    }
+
+    void GoStock() => Navigation.NavigateTo(_stockBackRoute);
+
+    static string FmtFc(decimal amount) => CurrencyFormat.Cdf(amount, "N0");
+
+    static string FormatExpiration(DateOnly? date)
+    {
+        if (date is null) return "—";
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        if (date.Value < today) return $"{date:dd/MM/yyyy}";
+        return date.Value.ToString("dd/MM/yyyy");
+    }
+
+    IEnumerable<ReceptionGroupVm> ReceptionGroups =>
+        GroupReceptions(_receptions);
+
+    IEnumerable<SessionGroupVm> SessionHistoryGroups =>
+        _sessionHistory
+            .GroupBy(SessionGroupLabel)
+            .OrderByDescending(g => g.Max(x => x.DateDebut))
+            .Select(g => new SessionGroupVm
+            {
+                Label = g.Key,
+                Items = g.OrderByDescending(s => s.DateDebut).ToList()
+            });
+
+    IEnumerable<ReceptionGroupVm> GroupReceptions(IEnumerable<InventaireReceptionDto> items) =>
+        items
+            .GroupBy(r => ReceptionGroupLabel(r))
+            .OrderByDescending(g => g.Max(x => x.DateJour))
+            .Select(g => new ReceptionGroupVm
+            {
+                Label = g.Key,
+                Items = g.OrderByDescending(r => r.DateJour).ToList()
+            });
+
+    string SessionGroupLabel(InventaireSessionDto s)
+    {
+        var culture = CultureInfo.GetCultureInfo("fr-FR");
+        var d = s.DateDebut;
+        return d.ToString("MMMM yyyy", culture);
+    }
+
+    string ReceptionGroupLabel(InventaireReceptionDto r)
+    {
+        var culture = CultureInfo.GetCultureInfo("fr-FR");
+        var d = r.DateJour;
+
+        if (_session?.TypePeriode == InventaireTypePeriode.Exercice)
+            return d.ToString("MMMM yyyy", culture);
+
+        if (_session?.TypePeriode == InventaireTypePeriode.Mois)
+            return $"Semaine {ISOWeek.GetWeekOfYear(d.ToDateTime(TimeOnly.MinValue))} · {d.ToString("MMMM yyyy", culture)}";
+
+        var start = StartOfWeek(d);
+        var end = start.AddDays(6);
+        return $"Semaine du {start:dd/MM} au {end:dd/MM yyyy}";
+    }
+
+    static DateOnly StartOfWeek(DateOnly d)
+    {
+        var dt = d.ToDateTime(TimeOnly.MinValue);
+        var diff = (7 + (dt.DayOfWeek - DayOfWeek.Monday)) % 7;
+        return DateOnly.FromDateTime(dt.AddDays(-diff));
+    }
+
+    RenderFragment RenderHistoriqueView() => __builder =>
+    {
+        <section class="aw-inventaire-historique">
+            <div class="aw-inventaire-historique__head">
+                <div>
+                    <h2 class="aw-inventaire-historique__title">Historique des journées</h2>
+                    <p class="aw-inventaire-historique__lead">@SelectedMagasinName — départ, réceptions, ventes/dépenses et solde restant. Cliquez une ligne pour le détail.</p>
+                </div>
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="BackFromHistorique">
+                    <i class="bi bi-arrow-left"></i> Retour
+                </button>
+            </div>
+
+            @if (_sessionHistory.Any())
+            {
+                @foreach (var group in SessionHistoryGroups)
+                {
+                    <div class="aw-inventaire-rec-group">
+                        <div class="aw-inventaire-rec-group__title">@group.Label</div>
+                        <div class="aw-table-region">
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Session</th>
+                                            <th>Statut</th>
+                                            <th>Par</th>
+                                            <th class="aw-table__num">Départ</th>
+                                            <th class="aw-table__num">Réceptions</th>
+                                            <th class="aw-table__num">Ventes / dépenses</th>
+                                            <th class="aw-table__num">Dépenses</th>
+                                            <th>Commentaire dépense</th>
+                                            <th class="aw-table__num">Reste</th>
+                                            <th>Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var s in group.Items)
+                                        {
+                                            <tr class="aw-table__row--clickable" @onclick="() => OnSessionHistoryClick(s)">
+                                                <td><span class="aw-table__title">@s.Nom</span></td>
+                                                <td><span class="aw-badge aw-badge--brand">@s.StatutLabel</span></td>
+                                                <td><span class="aw-table__meta">@s.ResponsableLabel</span></td>
+                                                <td class="aw-table__num">@FmtFc(s.MontantInitial)</td>
+                                                <td class="aw-table__num aw-table__num--plus">+ @FmtFc(s.MontantReceptions)</td>
+                                                <td class="aw-table__num aw-table__num--minus">− @FmtFc(s.MontantVentes)</td>
+                                                <td class="aw-table__num">
+                                                    @if (s.TotalDepenses > 0)
+                                                    {
+                                                        <span class="aw-inventaire-historique__depense-amount">@FmtFc(s.TotalDepenses)</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="aw-table__meta">—</span>
+                                                    }
+                                                </td>
+                                                <td class="aw-inventaire-historique__comment-cell">
+                                                    @if (s.DepensesAvecCommentaire.Count > 0)
+                                                    {
+                                                        @foreach (var depense in s.DepensesAvecCommentaire)
+                                                        {
+                                                            @if (!string.IsNullOrWhiteSpace(depense.Observation))
+                                                            {
+                                                                <span class="aw-inventaire-historique__depense-comment">@depense.Observation</span>
+                                                            }
+                                                            else
+                                                            {
+                                                                <span class="aw-inventaire-historique__depense-missing">Sans commentaire</span>
+                                                            }
+                                                        }
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="aw-table__meta">—</span>
+                                                    }
+                                                </td>
+                                                <td class="aw-table__num"><strong>@FmtFc(s.MontantTheorique)</strong></td>
+                                                <td><span class="aw-table__meta">@s.DateDebut.ToString("dd/MM/yyyy")</span></td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="aw-empty aw-empty--compact">
+                    <i class="bi bi-inbox"></i>
+                    <p><strong>Aucune journée clôturée</strong></p>
+                </div>
+            }
+        </section>
+    };
+
+    RenderFragment RenderMagasinPicker() => __builder =>
+    {
+        <section class="aw-inventaire-launch" aria-label="Choisir un magasin">
+            <div class="aw-inventaire-launch__hero">
+                <div class="aw-inventaire-launch__icon" aria-hidden="true">
+                    <i class="bi bi-clipboard2-data"></i>
+                </div>
+                <div>
+                    <h2 class="aw-inventaire-launch__title">Où travaillez-vous aujourd'hui ?</h2>
+                    <p class="aw-inventaire-launch__lead">Sélectionnez un magasin pour ouvrir ou reprendre l'inventaire.</p>
+                </div>
+            </div>
+
+            @if (_localisations.Count == 0)
+            {
+                <div class="aw-empty aw-empty--compact">
+                    <i class="bi bi-geo-alt"></i>
+                    <p><strong>Aucun magasin accessible</strong></p>
+                </div>
+            }
+            else
+            {
+                <div class="aw-inventaire-loc-grid">
+                    @for (var idx = 0; idx < _localisations.Count; idx++)
+                    {
+                        var loc = _localisations[idx];
+                        var open = _openByLoc.GetValueOrDefault(loc.IdLocalisation);
+                        var isOpen = open is not null;
+                        <button type="button"
+                                class="aw-inventaire-loc-card @(isOpen ? "aw-inventaire-loc-card--active" : "") @(loc.IsDepot ? "aw-inventaire-loc-card--depot" : "aw-inventaire-loc-card--shop")"
+                                style="@($"--loc-delay: {idx * 55}ms")"
+                                @onclick="() => SelectMagasin(loc.IdLocalisation)">
+                            <span class="aw-inventaire-loc-card__accent" aria-hidden="true"></span>
+                            <div class="aw-inventaire-loc-card__header">
+                                <span class="aw-inventaire-loc-card__icon" aria-hidden="true">
+                                    <i class="bi @(loc.IsDepot ? "bi-building" : "bi-shop")"></i>
+                                </span>
+                                <span class="aw-inventaire-loc-card__type">@(loc.IsDepot ? "Dépôt" : "Magasin")</span>
+                                @if (isOpen)
+                                {
+                                    <span class="aw-inventaire-loc-card__live">En cours</span>
+                                }
+                            </div>
+                            <h3 class="aw-inventaire-loc-card__name">@(loc.DescriptionLocalisation ?? "Magasin")</h3>
+                            <p class="aw-inventaire-loc-card__meta">
+                                @(isOpen ? "Reprenez la journée ouverte" : "Prêt à ouvrir une nouvelle journée")
+                            </p>
+                            @if (isOpen)
+                            {
+                                <div class="aw-inventaire-loc-card__balance">
+                                    <span class="aw-inventaire-loc-card__balance-label">Solde actuel</span>
+                                    <strong class="aw-inventaire-loc-card__balance-value">@FmtFc(open!.MontantTheorique)</strong>
+                                </div>
+                            }
+                            <div class="aw-inventaire-loc-card__footer">
+                                <span class="aw-inventaire-loc-card__cta">@(isOpen ? "Reprendre" : "Ouvrir")</span>
+                                <i class="bi bi-arrow-right aw-inventaire-loc-card__arrow" aria-hidden="true"></i>
+                            </div>
+                        </button>
+                    }
+                </div>
+            }
+        </section>
+    };
+
+    class SessionGroupVm
+    {
+        public string Label { get; set; } = "";
+        public List<InventaireSessionDto> Items { get; set; } = new();
+    }
+
+    class ReceptionGroupVm
+    {
+        public string Label { get; set; } = "";
+        public List<InventaireReceptionDto> Items { get; set; } = new();
+    }
+}

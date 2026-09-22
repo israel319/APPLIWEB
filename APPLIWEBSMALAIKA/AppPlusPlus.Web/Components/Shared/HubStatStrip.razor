@@ -1,0 +1,12 @@
+@if (ChildContent != null)
+{
+    <div class="hub-stat-strip @CssClass" role="@(HasClickable ? "toolbar" : null)">
+        @ChildContent
+    </div>
+}
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+    [Parameter] public bool HasClickable { get; set; }
+}

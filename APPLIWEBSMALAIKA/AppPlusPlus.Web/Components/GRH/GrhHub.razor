@@ -1,0 +1,2654 @@
+@page "/grh"
+@page "/grh/organization"
+@rendermode InteractiveServer
+@inject ICompanyService                CompanyService
+@inject IDepartmentService             DepartmentService
+@inject IServiceService                ServiceService
+@inject IJobPositionService            JobPositionService
+@inject IEmployeeService               EmployeeService
+@inject ILeaveService                  LeaveService
+@inject IAbsenceService                AbsenceService
+@inject ILeaveTypeService              LeaveTypeService
+@inject IAbsenceTypeService            AbsenceTypeService
+@inject IEmployeeCategoryService       EmployeeCategoryService
+@inject IEmployeeClassificationService EmployeeClassificationService
+@inject IPayrollService          PayrollService
+@inject ISalaryComponentService  SalaryComponentService
+@inject IRecruitmentService  RecruitmentService
+@inject ITrainingService     TrainingService
+@inject IEvaluationService   EvaluationService
+@inject IDocumentService     DocumentService
+@inject ISnackbar            Snackbar
+@inject IDialogService       DialogService
+@inject NavigationManager    Nav
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver  PermissionResolver
+@inject IJSRuntime           JS
+
+<ModuleGuard ModuleCode="grh" ModuleName="GRH – Ressources Humaines">
+
+<PageTitle>@AppSettings.AppName — GRH</PageTitle>
+
+@if (!_loaded)
+{
+    <div class="aw-page">
+        <AwSkeleton Variant="page" Rows="7" />
+    </div>
+}
+else
+{
+    @if (!_canGrhRead)
+    {
+        <div class="aw-page">
+            <div class="aw-shell" style="max-width:720px;margin:1.5rem auto;">
+                <div class="aw-empty">
+                    <i class="bi bi-lock"></i>
+                    <p><strong>Accès refusé</strong><br />Votre rôle ne possède pas les droits d'accès au module GRH.</p>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+    <div class="aw-page aw-page--workspace">
+        <div class="aw-workspace">
+            <header class="aw-object-head">
+                <div class="aw-object-head__identity">
+                    <p class="aw-object-head__eyebrow">Module GRH</p>
+                    <h1 class="aw-object-head__title">GRH — Ressources Humaines</h1>
+                    <p class="aw-object-head__desc">Organisation · Employés · Congés &amp; Absences · Paie</p>
+                </div>
+            </header>
+
+            <nav class="aw-railnav" aria-label="Sections GRH" role="tablist">
+                <button type="button" role="tab" aria-selected="@(_tab == 0)"
+                        class="aw-railnav__item @(_tab == 0 ? "aw-railnav__item--active" : "")"
+                        title="Organisation"
+                        @onclick="@(async () => await OnTabChange(0))">
+                    <i class="bi bi-diagram-3" aria-hidden="true"></i>
+                    Organisation
+                </button>
+                <button type="button" role="tab" aria-selected="@(_tab == 1)"
+                        class="aw-railnav__item @(_tab == 1 ? "aw-railnav__item--active" : "")"
+                        title="Employés"
+                        @onclick="@(async () => await OnTabChange(1))">
+                    <i class="bi bi-person-badge" aria-hidden="true"></i>
+                    Employés
+                </button>
+                <button type="button" role="tab" aria-selected="@(_tab == 2)"
+                        class="aw-railnav__item @(_tab == 2 ? "aw-railnav__item--active" : "")"
+                        title="Congés &amp; Absences"
+                        @onclick="@(async () => await OnTabChange(2))">
+                    <i class="bi bi-calendar-check" aria-hidden="true"></i>
+                    Congés &amp; Absences
+                </button>
+                <button type="button" role="tab" aria-selected="@(_tab == 3)"
+                        class="aw-railnav__item @(_tab == 3 ? "aw-railnav__item--active" : "")"
+                        title="Paie"
+                        @onclick="@(async () => await OnTabChange(3))">
+                    <i class="bi bi-cash-coin" aria-hidden="true"></i>
+                    Paie
+                </button>
+            </nav>
+
+            <div class="aw-workspace__body">
+
+                @* ════════════════════════════════════════════════════════════
+                   ONGLET 0 — ORGANISATION
+                   ════════════════════════════════════════════════════════════ *@
+                @if (_tab == 0)
+                {
+                    <nav class="aw-modnav" aria-label="Sous-sections organisation" role="tablist">
+                        <button type="button" role="tab" aria-selected="@(_orgTab == 0)"
+                                class="aw-modnav__item @(_orgTab == 0 ? "aw-modnav__item--active" : "")"
+                                @onclick="@(() => _orgTab = 0)">
+                            <i class="bi bi-building" aria-hidden="true"></i>
+                            <span>Sociétés</span>
+                        </button>
+                        <button type="button" role="tab" aria-selected="@(_orgTab == 1)"
+                                class="aw-modnav__item @(_orgTab == 1 ? "aw-modnav__item--active" : "")"
+                                @onclick="@(() => _orgTab = 1)">
+                            <i class="bi bi-diagram-3" aria-hidden="true"></i>
+                            <span>Départements</span>
+                        </button>
+                        <button type="button" role="tab" aria-selected="@(_orgTab == 2)"
+                                class="aw-modnav__item @(_orgTab == 2 ? "aw-modnav__item--active" : "")"
+                                @onclick="@(() => _orgTab = 2)">
+                            <i class="bi bi-briefcase" aria-hidden="true"></i>
+                            <span>Postes</span>
+                        </button>
+                    </nav>
+
+                    @* ── SOCIÉTÉS ── *@
+                    @if (_orgTab == 0)
+                    {
+                        <div class="aw-actionbar">
+                            <div class="aw-actionbar__search">
+                                <i class="bi bi-search" aria-hidden="true"></i>
+                                <input type="search" placeholder="Rechercher une société…"
+                                       aria-label="Rechercher une société"
+                                       @bind="_companySearch" @bind:event="oninput"
+                                       @bind:after="ApplyCompanySearch" />
+                            </div>
+                            <div class="aw-actionbar__actions">
+                                @if (_canGrhWrite)
+                                {
+                                    <button type="button" class="aw-btn aw-btn--primary" @onclick="OpenCreateCompany">
+                                        <i class="bi bi-plus-lg"></i> Nouvelle société
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        @if (_companiesLoading)
+                        {
+                            <div class="aw-table-region">
+                                <AwSkeleton Variant="table" Rows="5" />
+                            </div>
+                        }
+                        else if (!_companiesFiltered.Any())
+                        {
+                            <div class="aw-table-region">
+                                <div class="aw-empty">
+                                    <i class="bi bi-building"></i>
+                                    <p>Aucune société pour ces filtres.</p>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="aw-table-region">
+                                <MudDataGrid T="Company" Items="@_companiesFiltered"
+                                             Dense="true" Hover="true" Bordered="true"
+                                             Elevation="0" Filterable="false" RowsPerPage="10">
+                                    <Columns>
+                                        <PropertyColumn Property="@(x => x.CompanyCode)" Title="Code" />
+                                        <PropertyColumn Property="@(x => x.CompanyName)" Title="Raison sociale" />
+                                        <PropertyColumn Property="@(x => x.City)" Title="Ville" />
+                                        <PropertyColumn Property="@(x => x.Phone)" Title="Téléphone" />
+                                        <PropertyColumn Property="@(x => x.Email)" Title="Email" />
+                                        <TemplateColumn Title="Statut" CellStyle="width:90px;">
+                                            <CellTemplate>
+                                                @if (context.Item.IsActive)
+                                                {
+                                                    <span class="hub-badge hub-badge--success"><i class="bi bi-check-circle me-1"></i>Actif</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="hub-badge hub-badge--neutral"><i class="bi bi-dash-circle me-1"></i>Inactif</span>
+                                                }
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                        @if (_canGrhWrite)
+                                        {
+                                            <TemplateColumn Title="Actions" CellStyle="width:90px;text-align:center;">
+                                                <CellTemplate>
+                                                    <div class="hub-grid-actions">
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Modifier" @onclick="@(() => OpenEditCompany(context.Item))"><i class="bi bi-pencil"></i></button>
+                                                        @if (_canGrhDelete)
+                                                        {
+                                                            <button type="button" class="aw-btn aw-btn--danger aw-btn--sm aw-btn--icon" title="Supprimer" @onclick="@(() => DeleteCompanyAsync(context.Item))"><i class="bi bi-trash"></i></button>
+                                                        }
+                                                    </div>
+                                                </CellTemplate>
+                                            </TemplateColumn>
+                                        }
+                                    </Columns>
+                                    <PagerContent>
+                                        <MudDataGridPager T="Company" />
+                                    </PagerContent>
+                                </MudDataGrid>
+                            </div>
+                        }
+                    }
+
+                    @* ── DÉPARTEMENTS ── *@
+                    @if (_orgTab == 1)
+                    {
+                        <div class="aw-actionbar">
+                            <div class="aw-actionbar__search">
+                                <i class="bi bi-search" aria-hidden="true"></i>
+                                <input type="search" placeholder="Rechercher un département…"
+                                       aria-label="Rechercher un département"
+                                       @bind="_departmentSearch" @bind:event="oninput"
+                                       @bind:after="ApplyDepartmentSearch" />
+                            </div>
+                            <div class="aw-actionbar__actions">
+                                @if (_canGrhWrite)
+                                {
+                                    <button type="button" class="aw-btn aw-btn--primary" @onclick="OpenCreateDepartment"
+                                            disabled="@(_companies.Count == 0)">
+                                        <i class="bi bi-plus-lg"></i> Nouveau département
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        @if (_departmentsLoading)
+                        {
+                            <div class="aw-table-region">
+                                <AwSkeleton Variant="table" Rows="5" />
+                            </div>
+                        }
+                        else if (!_departmentsFiltered.Any())
+                        {
+                            <div class="aw-table-region">
+                                <div class="aw-empty">
+                                    <i class="bi bi-diagram-3"></i>
+                                    <p>Aucun département pour ces filtres.</p>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="aw-table-region">
+                                <MudDataGrid T="DepartmentReadDto" Items="@_departmentsFiltered"
+                                             Dense="true" Hover="true" Bordered="true"
+                                             Elevation="0" Filterable="false" RowsPerPage="10">
+                                    <Columns>
+                                        <PropertyColumn Property="@(x => x.DepartmentCode)" Title="Code" />
+                                        <PropertyColumn Property="@(x => x.DepartmentName)" Title="Nom" />
+                                        <PropertyColumn Property="@(x => x.CompanyName)" Title="Société" />
+                                        <PropertyColumn Property="@(x => x.EmployeeCount)" Title="Employés"
+                                                        CellStyle="text-align:center" />
+                                        <TemplateColumn Title="Budget" CellStyle="width:130px;text-align:right;">
+                                            <CellTemplate>
+                                                @if (context.Item.BudgetAmount.HasValue)
+                                                {
+                                                    <span>@context.Item.BudgetAmount.Value.ToString("N0")</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">—</span>
+                                                }
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                        @if (_canGrhWrite)
+                                        {
+                                            <TemplateColumn Title="Actions" CellStyle="width:90px;text-align:center;">
+                                                <CellTemplate>
+                                                    <div class="hub-grid-actions">
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Modifier" @onclick="@(() => OpenEditDepartment(context.Item))"><i class="bi bi-pencil"></i></button>
+                                                        @if (_canGrhDelete)
+                                                        {
+                                                            <button type="button" class="aw-btn aw-btn--danger aw-btn--sm aw-btn--icon" title="Supprimer" @onclick="@(() => DeleteDepartmentAsync(context.Item))"><i class="bi bi-trash"></i></button>
+                                                        }
+                                                    </div>
+                                                </CellTemplate>
+                                            </TemplateColumn>
+                                        }
+                                    </Columns>
+                                    <PagerContent>
+                                        <MudDataGridPager T="DepartmentReadDto" />
+                                    </PagerContent>
+                                </MudDataGrid>
+                            </div>
+                        }
+                    }
+
+                    @* ── POSTES ── *@
+                    @if (_orgTab == 2)
+                    {
+                        <div class="aw-actionbar">
+                            <div class="aw-actionbar__search">
+                                <i class="bi bi-search" aria-hidden="true"></i>
+                                <input type="search" placeholder="Rechercher un poste…"
+                                       aria-label="Rechercher un poste"
+                                       @bind="_positionSearch" @bind:event="oninput"
+                                       @bind:after="ApplyPositionSearch" />
+                            </div>
+                            <div class="aw-actionbar__actions">
+                                @if (_canGrhWrite)
+                                {
+                                    <button type="button" class="aw-btn aw-btn--primary" @onclick="OpenCreatePosition"
+                                            disabled="@(_departments.Count == 0)">
+                                        <i class="bi bi-plus-lg"></i> Nouveau poste
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        @if (_positionsLoading)
+                        {
+                            <div class="aw-table-region">
+                                <AwSkeleton Variant="table" Rows="5" />
+                            </div>
+                        }
+                        else if (!_positionsFiltered.Any())
+                        {
+                            <div class="aw-table-region">
+                                <div class="aw-empty">
+                                    <i class="bi bi-briefcase"></i>
+                                    <p>Aucun poste pour ces filtres.</p>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="aw-table-region">
+                                <MudDataGrid T="JobPositionReadDto" Items="@_positionsFiltered"
+                                             Dense="true" Hover="true" Bordered="true"
+                                             Elevation="0" Filterable="false" RowsPerPage="10">
+                                    <Columns>
+                                        <PropertyColumn Property="@(x => x.PositionCode)" Title="Code" />
+                                        <PropertyColumn Property="@(x => x.PositionName)" Title="Intitulé" />
+                                        <PropertyColumn Property="@(x => x.DepartmentName)" Title="Département" />
+                                        <PropertyColumn Property="@(x => x.EducationLevel)" Title="Formation" />
+                                        <TemplateColumn Title="Fourchette salariale" CellStyle="text-align:right;">
+                                            <CellTemplate>
+                                                @{
+                                                    var pMin = context.Item.MinSalary;
+                                                    var pMax = context.Item.MaxSalary;
+                                                }
+                                                @if (pMin.HasValue || pMax.HasValue)
+                                                {
+                                                    <span>@(pMin?.ToString("N0") ?? "—") – @(pMax?.ToString("N0") ?? "—")</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">—</span>
+                                                }
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                        <PropertyColumn Property="@(x => x.EmployeeCount)" Title="Employés"
+                                                        CellStyle="text-align:center" />
+                                        @if (_canGrhWrite)
+                                        {
+                                            <TemplateColumn Title="Actions" CellStyle="width:90px;text-align:center;">
+                                                <CellTemplate>
+                                                    <div class="hub-grid-actions">
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Modifier" @onclick="@(() => OpenEditPosition(context.Item))"><i class="bi bi-pencil"></i></button>
+                                                        @if (_canGrhDelete)
+                                                        {
+                                                            <button type="button" class="aw-btn aw-btn--danger aw-btn--sm aw-btn--icon" title="Supprimer" @onclick="@(() => DeletePositionAsync(context.Item))"><i class="bi bi-trash"></i></button>
+                                                        }
+                                                    </div>
+                                                </CellTemplate>
+                                            </TemplateColumn>
+                                        }
+                                    </Columns>
+                                    <PagerContent>
+                                        <MudDataGridPager T="JobPositionReadDto" />
+                                    </PagerContent>
+                                </MudDataGrid>
+                            </div>
+                        }
+                    }
+                }
+
+                @* ════════════════════════════════════════════════════════════
+                   ONGLET 1 — EMPLOYÉS
+                   ════════════════════════════════════════════════════════════ *@
+                @if (_tab == 1)
+                {
+                    <nav class="aw-modnav" aria-label="Sous-sections employés" role="tablist">
+                        <button type="button" role="tab" aria-selected="@(_empTab == 0)"
+                                class="aw-modnav__item @(_empTab == 0 ? "aw-modnav__item--active" : "")"
+                                @onclick="@(() => _empTab = 0)">
+                            <i class="bi bi-person-vcard" aria-hidden="true"></i>
+                            <span>Fiches</span>
+                        </button>
+                        <button type="button" role="tab" aria-selected="@(_empTab == 1)"
+                                class="aw-modnav__item @(_empTab == 1 ? "aw-modnav__item--active" : "")"
+                                @onclick="@(async () => { _empTab = 1; await LoadContractsAsync(); })">
+                            <i class="bi bi-file-earmark-text" aria-hidden="true"></i>
+                            <span>Contrats</span>
+                        </button>
+                    </nav>
+
+                    @* ── FICHES EMPLOYÉS ── *@
+                    @if (_empTab == 0)
+                    {
+                        <div class="aw-actionbar">
+                            <div class="aw-actionbar__search">
+                                <i class="bi bi-search" aria-hidden="true"></i>
+                                <input type="search" placeholder="Rechercher un employé…"
+                                       aria-label="Rechercher un employé"
+                                       @bind="_employeeSearch" @bind:event="oninput"
+                                       @bind:after="ApplyEmployeeSearch" />
+                            </div>
+                            <div class="aw-actionbar__filters">
+                                <select class="aw-select" aria-label="Département"
+                                        @bind="_empDeptFilter" @bind:after="ApplyEmployeeSearch">
+                                    <option value="0">Tous les départements</option>
+                                    @foreach (var d in _departments)
+                                    {
+                                        <option value="@d.Id">@d.DepartmentName</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="aw-actionbar__actions">
+                                @if (_canGrhWrite)
+                                {
+                                    <button type="button" class="aw-btn aw-btn--primary" @onclick="OpenCreateEmployee">
+                                        <i class="bi bi-plus-lg"></i> Nouvel employé
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        @if (_empLoading)
+                        {
+                            <div class="aw-table-region">
+                                <AwSkeleton Variant="table" Rows="5" />
+                            </div>
+                        }
+                        else if (!_employeesFiltered.Any())
+                        {
+                            <div class="aw-table-region">
+                                <div class="aw-empty">
+                                    <i class="bi bi-people"></i>
+                                    <p>Aucun employé pour ces filtres.</p>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="aw-table-region">
+                                <MudDataGrid T="Employee" Items="@_employeesFiltered"
+                                             Dense="true" Hover="true" Bordered="true"
+                                             Elevation="0" Filterable="false" RowsPerPage="15">
+                                    <Columns>
+                                        <PropertyColumn Property="@(x => x.EmployeeCode)" Title="Code" />
+                                        <TemplateColumn Title="Nom complet">
+                                            <CellTemplate>
+                                                <span class="fw-semibold">@context.Item.LastName @context.Item.FirstName</span>
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                        <PropertyColumn Property="@(x => x.Email)" Title="Email" />
+                                        <TemplateColumn Title="Département">
+                                            <CellTemplate><span>@GetDepartmentName(context.Item.DepartmentId)</span></CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Poste">
+                                            <CellTemplate><span>@GetPositionName(context.Item.JobPositionId)</span></CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Contrat" CellStyle="width:80px;">
+                                            <CellTemplate><span class="hub-badge hub-badge--info">@context.Item.ContractType</span></CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Statut" CellStyle="width:85px;">
+                                            <CellTemplate>
+                                                @if (context.Item.Status == EmployeeStatusEnum.Active)
+                                                {
+                                                    <span class="hub-badge hub-badge--success"><i class="bi bi-check-circle me-1"></i>Actif</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="hub-badge hub-badge--neutral"><i class="bi bi-dash-circle me-1"></i>Inactif</span>
+                                                }
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Embauche" CellStyle="width:110px;">
+                                            <CellTemplate><span>@context.Item.HireDate.ToString("dd/MM/yyyy")</span></CellTemplate>
+                                        </TemplateColumn>
+                                        @if (_canGrhWrite)
+                                        {
+                                            <TemplateColumn Title="Actions" CellStyle="width:100px;text-align:center;">
+                                                <CellTemplate>
+                                                    <div class="hub-grid-actions">
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Modifier" @onclick="@(() => OpenEditEmployee(context.Item))"><i class="bi bi-pencil"></i></button>
+                                                        @if (_canGrhDelete && context.Item.Status == EmployeeStatusEnum.Active)
+                                                        {
+                                                            <button type="button" class="aw-btn aw-btn--danger aw-btn--sm aw-btn--icon" title="Désactiver" @onclick="@(() => DeactivateEmployeeActionAsync(context.Item))"><i class="bi bi-person-x"></i></button>
+                                                        }
+                                                    </div>
+                                                </CellTemplate>
+                                            </TemplateColumn>
+                                        }
+                                    </Columns>
+                                    <PagerContent>
+                                        <MudDataGridPager T="Employee" />
+                                    </PagerContent>
+                                </MudDataGrid>
+                            </div>
+                        }
+                    }
+
+                    @* ── CONTRATS ── *@
+                    @if (_empTab == 1)
+                    {
+                        <div class="aw-actionbar">
+                            <div class="aw-actionbar__filters">
+                                <select class="aw-select" aria-label="Employé"
+                                        @bind="_selectedEmpIdForContracts"
+                                        @bind:after="LoadContractsAsync">
+                                    <option value="0">— Sélectionner un employé —</option>
+                                    @foreach (var e in _employees)
+                                    {
+                                        <option value="@e.Id">@e.LastName @e.FirstName (@e.EmployeeCode)</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="aw-actionbar__actions">
+                                @if (_canGrhWrite)
+                                {
+                                    <button type="button" class="aw-btn aw-btn--primary" @onclick="OpenCreateContract"
+                                            disabled="@(_selectedEmpIdForContracts == 0)">
+                                        <i class="bi bi-plus-lg"></i> Nouveau contrat
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        @if (_contractsLoading)
+                        {
+                            <div class="aw-table-region">
+                                <AwSkeleton Variant="table" Rows="5" />
+                            </div>
+                        }
+                        else if (_selectedEmpIdForContracts == 0)
+                        {
+                            <div class="aw-table-region">
+                                <div class="aw-empty">
+                                    <i class="bi bi-person-check"></i>
+                                    <p>Sélectionnez un employé pour consulter ses contrats.</p>
+                                </div>
+                            </div>
+                        }
+                        else if (!_contracts.Any())
+                        {
+                            <div class="aw-table-region">
+                                <div class="aw-empty">
+                                    <i class="bi bi-file-earmark-text"></i>
+                                    <p>Aucun contrat pour cet employé.</p>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="aw-table-region">
+                                <MudDataGrid T="EmployeeContract" Items="@_contracts"
+                                             Dense="true" Hover="true" Bordered="true"
+                                             Elevation="0" Filterable="false" RowsPerPage="10">
+                                    <Columns>
+                                        <PropertyColumn Property="@(x => x.ContractNumber)" Title="N° Contrat" />
+                                        <PropertyColumn Property="@(x => x.ContractType)" Title="Type" />
+                                        <TemplateColumn Title="Début" CellStyle="width:120px;">
+                                            <CellTemplate><span>@context.Item.StartDate.ToString("dd/MM/yyyy")</span></CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Fin" CellStyle="width:120px;">
+                                            <CellTemplate>
+                                                @if (context.Item.EndDate.HasValue)
+                                                {
+                                                    <span>@context.Item.EndDate.Value.ToString("dd/MM/yyyy")</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">Indéterminé</span>
+                                                }
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Statut" CellStyle="width:90px;">
+                                            <CellTemplate>
+                                                <span class="hub-badge @(context.Item.IsActive ? "hub-badge--success" : "hub-badge--neutral")">
+                                                    @(context.Item.IsActive ? "Actif" : "Terminé")
+                                                </span>
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                    </Columns>
+                                    <PagerContent>
+                                        <MudDataGridPager T="EmployeeContract" />
+                                    </PagerContent>
+                                </MudDataGrid>
+                            </div>
+                        }
+                    }
+                }
+
+                @* ════════════════════════════════════════════════════════════
+                   ONGLET 2 — CONGÉS & ABSENCES
+                   ════════════════════════════════════════════════════════════ *@
+                @if (_tab == 2)
+                {
+                    <nav class="aw-modnav" aria-label="Sous-sections congés" role="tablist">
+                        <button type="button" role="tab" aria-selected="@(_leaveTab == 0)"
+                                class="aw-modnav__item @(_leaveTab == 0 ? "aw-modnav__item--active" : "")"
+                                @onclick="@(() => _leaveTab = 0)">
+                            <i class="bi bi-calendar-check" aria-hidden="true"></i>
+                            <span>Congés</span>
+                        </button>
+                        <button type="button" role="tab" aria-selected="@(_leaveTab == 1)"
+                                class="aw-modnav__item @(_leaveTab == 1 ? "aw-modnav__item--active" : "")"
+                                @onclick="@(async () => { _leaveTab = 1; await LoadAbsencesAsync(); })">
+                            <i class="bi bi-calendar-x" aria-hidden="true"></i>
+                            <span>Absences</span>
+                        </button>
+                    </nav>
+
+                    @* ── CONGÉS ── *@
+                    @if (_leaveTab == 0)
+                    {
+                        <div class="aw-actionbar">
+                            <div class="aw-actionbar__filters">
+                                <select class="aw-select" aria-label="Statut"
+                                        @bind="_leaveStatusFilter" @bind:after="StateHasChanged">
+                                    <option value="All">Tous les statuts</option>
+                                    <option value="Pending">En attente</option>
+                                    <option value="Approved">Approuvé</option>
+                                    <option value="Rejected">Refusé</option>
+                                </select>
+                            </div>
+                            <div class="aw-actionbar__actions">
+                                @if (_canGrhWrite)
+                                {
+                                    <button type="button" class="aw-btn aw-btn--ghost"
+                                            @onclick="@(async () => await ResetAnnualLeavesActionAsync())"
+                                            disabled="@_resettingLeaves"
+                                            title="Reporte les soldes de l'année précédente — sp_GenerateAnnualLeaveReset">
+                                        @if (_resettingLeaves)
+                                        {
+                                            <span class="aw-spinner" role="status" aria-hidden="true"></span>
+                                        }
+                                        else
+                                        {
+                                            <i class="bi bi-arrow-counterclockwise"></i>
+                                        }
+                                        Réinit. annuelle (@DateTime.Now.Year)
+                                    </button>
+                                    <button type="button" class="aw-btn aw-btn--primary" @onclick="OpenCreateLeaveRequest">
+                                        <i class="bi bi-plus-lg"></i> Nouvelle demande
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        @if (_leaveLoading)
+                        {
+                            <div class="aw-table-region">
+                                <AwSkeleton Variant="table" Rows="5" />
+                            </div>
+                        }
+                        else
+                        {
+                            var filteredLeaves = _leaveStatusFilter == "All"
+                                ? _allLeaveRequests
+                                : _allLeaveRequests.Where(r => r.Status.ToString() == _leaveStatusFilter).ToList();
+                            @if (!filteredLeaves.Any())
+                            {
+                                <div class="aw-table-region">
+                                    <div class="aw-empty">
+                                        <i class="bi bi-calendar-check"></i>
+                                        <p>Aucune demande de congé pour ces filtres.</p>
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="aw-table-region">
+                                    <MudDataGrid T="LeaveRequest" Items="@filteredLeaves"
+                                                 Dense="true" Hover="true" Bordered="true"
+                                                 Elevation="0" Filterable="false" RowsPerPage="15">
+                                        <Columns>
+                                            <TemplateColumn Title="Employé">
+                                                <CellTemplate><span>@GetEmployeeName(context.Item.EmployeeId)</span></CellTemplate>
+                                            </TemplateColumn>
+                                            <TemplateColumn Title="Type congé">
+                                                <CellTemplate><span>@GetLeaveTypeName(context.Item.LeaveTypeId)</span></CellTemplate>
+                                            </TemplateColumn>
+                                            <TemplateColumn Title="Début" CellStyle="width:110px;">
+                                                <CellTemplate><span>@context.Item.StartDate.ToString("dd/MM/yyyy")</span></CellTemplate>
+                                            </TemplateColumn>
+                                            <TemplateColumn Title="Fin" CellStyle="width:110px;">
+                                                <CellTemplate><span>@context.Item.EndDate.ToString("dd/MM/yyyy")</span></CellTemplate>
+                                            </TemplateColumn>
+                                            <PropertyColumn Property="@(x => x.NumberOfDays)" Title="Jours" />
+                                            <TemplateColumn Title="Statut" CellStyle="width:110px;">
+                                                <CellTemplate>
+                                                    @{
+                                                        var (lBadge, lLbl, lIcon) = context.Item.Status.ToString() switch
+                                                        {
+                                                            "Pending"  => ("hub-badge--warning", "En attente", "bi-hourglass-split"),
+                                                            "Approved" => ("hub-badge--success", "Approuvé", "bi-check-circle"),
+                                                            "Rejected" => ("hub-badge--danger", "Refusé", "bi-x-circle"),
+                                                            _          => ("hub-badge--neutral", context.Item.Status.ToString(), "bi-question-circle")
+                                                        };
+                                                    }
+                                                    <span class="hub-badge @lBadge"><i class="bi @lIcon me-1"></i>@lLbl</span>
+                                                </CellTemplate>
+                                            </TemplateColumn>
+                                            <PropertyColumn Property="@(x => x.Reason)" Title="Motif" />
+                                            @if (_canGrhWrite)
+                                            {
+                                                <TemplateColumn Title="Actions" CellStyle="width:110px;text-align:center;">
+                                                    <CellTemplate>
+                                                        @if (context.Item.Status == LeaveStatusEnum.Pending)
+                                                        {
+                                                            <div class="hub-grid-actions">
+                                                                <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Approuver" @onclick="@(() => ApproveLeaveAsync(context.Item.Id))"><i class="bi bi-check-lg"></i></button>
+                                                                <button type="button" class="aw-btn aw-btn--danger aw-btn--sm aw-btn--icon" title="Refuser" @onclick="@(() => RejectLeaveAsync(context.Item.Id))"><i class="bi bi-x-lg"></i></button>
+                                                            </div>
+                                                        }
+                                                    </CellTemplate>
+                                                </TemplateColumn>
+                                            }
+                                        </Columns>
+                                        <PagerContent>
+                                            <MudDataGridPager T="LeaveRequest" />
+                                        </PagerContent>
+                                    </MudDataGrid>
+                                </div>
+                            }
+                        }
+                    }
+
+                    @* ── ABSENCES ── *@
+                    @if (_leaveTab == 1)
+                    {
+                        <div class="aw-actionbar">
+                            <div class="aw-actionbar__actions">
+                                @if (_canGrhWrite)
+                                {
+                                    <button type="button" class="aw-btn aw-btn--primary" @onclick="OpenCreateAbsence">
+                                        <i class="bi bi-plus-lg"></i> Nouvelle absence
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        @if (_absenceLoading)
+                        {
+                            <div class="aw-table-region">
+                                <AwSkeleton Variant="table" Rows="5" />
+                            </div>
+                        }
+                        else if (!_absences.Any())
+                        {
+                            <div class="aw-table-region">
+                                <div class="aw-empty">
+                                    <i class="bi bi-calendar-x"></i>
+                                    <p>Aucune absence enregistrée.</p>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="aw-table-region">
+                                <MudDataGrid T="Absence" Items="@_absences"
+                                             Dense="true" Hover="true" Bordered="true"
+                                             Elevation="0" Filterable="false" RowsPerPage="15">
+                                    <Columns>
+                                        <TemplateColumn Title="Employé">
+                                            <CellTemplate><span>@GetEmployeeName(context.Item.EmployeeId)</span></CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Type">
+                                            <CellTemplate><span>@GetAbsenceTypeName(context.Item.AbsenceTypeId)</span></CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Date" CellStyle="width:110px;">
+                                            <CellTemplate><span>@context.Item.AbsenceDate.ToString("dd/MM/yyyy")</span></CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Durée (h)" CellStyle="width:100px;">
+                                            <CellTemplate><span>@context.Item.Duration h</span></CellTemplate>
+                                        </TemplateColumn>
+                                        <PropertyColumn Property="@(x => x.Reason)" Title="Motif" />
+                                        <TemplateColumn Title="Statut" CellStyle="width:110px;">
+                                            <CellTemplate>
+                                                @{
+                                                    var (aBadge, aLbl, aIcon) = (context.Item.Status ?? "") switch
+                                                    {
+                                                        "Pending"  => ("hub-badge--warning", "En attente", "bi-hourglass-split"),
+                                                        "Approved" => ("hub-badge--success", "Approuvé", "bi-check-circle"),
+                                                        "Rejected" => ("hub-badge--danger", "Refusé", "bi-x-circle"),
+                                                        _          => ("hub-badge--neutral", context.Item.Status ?? "—", "bi-question-circle")
+                                                    };
+                                                }
+                                                <span class="hub-badge @aBadge"><i class="bi @aIcon me-1"></i>@aLbl</span>
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                        @if (_canGrhWrite)
+                                        {
+                                            <TemplateColumn Title="Actions" CellStyle="width:110px;text-align:center;">
+                                                <CellTemplate>
+                                                    @if ((context.Item.Status ?? "Pending") == "Pending")
+                                                    {
+                                                        <div class="hub-grid-actions">
+                                                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Approuver" @onclick="@(() => ApproveAbsenceActionAsync(context.Item.Id))"><i class="bi bi-check-lg"></i></button>
+                                                            <button type="button" class="aw-btn aw-btn--danger aw-btn--sm aw-btn--icon" title="Refuser" @onclick="@(() => RejectAbsenceActionAsync(context.Item.Id))"><i class="bi bi-x-lg"></i></button>
+                                                        </div>
+                                                    }
+                                                </CellTemplate>
+                                            </TemplateColumn>
+                                        }
+                                    </Columns>
+                                    <PagerContent>
+                                        <MudDataGridPager T="Absence" />
+                                    </PagerContent>
+                                </MudDataGrid>
+                            </div>
+                        }
+                    }
+                }
+
+                @* ════════════════════════════════════════════════════════════
+                   ONGLET 3 — PAIE
+                   ════════════════════════════════════════════════════════════ *@
+                @if (_tab == 3)
+                {
+                    <nav class="aw-modnav" aria-label="Sous-sections paie" role="tablist">
+                        <button type="button" role="tab" aria-selected="@(_paieTab == 0)"
+                                class="aw-modnav__item @(_paieTab == 0 ? "aw-modnav__item--active" : "")"
+                                @onclick="@(async () => { _paieTab = 0; await LoadPayrollAsync(); })">
+                            <i class="bi bi-file-earmark-text" aria-hidden="true"></i>
+                            <span>Bulletins</span>
+                        </button>
+                        <button type="button" role="tab" aria-selected="@(_paieTab == 1)"
+                                class="aw-modnav__item @(_paieTab == 1 ? "aw-modnav__item--active" : "")"
+                                @onclick="@(async () => { _paieTab = 1; await LoadSalaryComponentsAsync(); })">
+                            <i class="bi bi-sliders" aria-hidden="true"></i>
+                            <span>Composantes</span>
+                        </button>
+                        @if (_selectedPayrollRun != null)
+                        {
+                            <button type="button" role="tab" aria-selected="@(_paieTab == 2)"
+                                    class="aw-modnav__item @(_paieTab == 2 ? "aw-modnav__item--active" : "")"
+                                    @onclick="@(async () => { _paieTab = 2; await LoadPayrollDetailsAsync(); })">
+                                <i class="bi bi-people" aria-hidden="true"></i>
+                                <span>Détails — @_selectedPayrollRun.PayrollNumber</span>
+                            </button>
+                        }
+                    </nav>
+
+                    @* ── Sous-onglet 0 : Bulletins ── *@
+                    @if (_paieTab == 0)
+                    {
+                        <div class="aw-actionbar">
+                            <div class="aw-actionbar__filters">
+                                <select class="aw-select" aria-label="Mois"
+                                        @bind="_payrollMonth" @bind:after="LoadPayrollAsync">
+                                    @for (int m = 1; m <= 12; m++)
+                                    {
+                                        var mo = m;
+                                        <option value="@mo">
+                                            @(new DateTime(2000, mo, 1).ToString("MMMM", new System.Globalization.CultureInfo("fr-FR")))
+                                        </option>
+                                    }
+                                </select>
+                                <input type="number" class="aw-input" style="width:5.5rem;"
+                                       aria-label="Année"
+                                       @bind="_payrollYear" @bind:after="LoadPayrollAsync"
+                                       min="2000" max="2100" />
+                            </div>
+                            <div class="aw-actionbar__actions">
+                                @if (_canGrhWrite)
+                                {
+                                    <button type="button" class="aw-btn aw-btn--primary" @onclick="OpenCreatePayroll">
+                                        <i class="bi bi-plus-lg"></i> Nouveau bulletin
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        @if (_payrollLoading)
+                        {
+                            <div class="aw-table-region">
+                                <AwSkeleton Variant="table" Rows="5" />
+                            </div>
+                        }
+                        else if (!_payrollRuns.Any())
+                        {
+                            <div class="aw-table-region">
+                                <div class="aw-empty">
+                                    <i class="bi bi-file-earmark-text"></i>
+                                    <p>Aucun bulletin pour cette période.</p>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="aw-table-region">
+                                <MudDataGrid T="PayrollRun" Items="@_payrollRuns"
+                                             Dense="true" Hover="true" Bordered="true"
+                                             Elevation="0" Filterable="false" RowsPerPage="15">
+                                    <Columns>
+                                        <PropertyColumn Property="@(x => x.PayrollNumber)" Title="N° Bulletin" />
+                                        <TemplateColumn Title="Période">
+                                            <CellTemplate>
+                                                @context.Item.PayPeriodStart.ToString("dd/MM/yyyy")
+                                                – @context.Item.PayPeriodEnd.ToString("dd/MM/yyyy")
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                        <PropertyColumn Property="@(x => x.NumberOfEmployees)" Title="Employés" />
+                                        <TemplateColumn Title="Brut total (TND)" CellStyle="text-align:right;">
+                                            <CellTemplate>
+                                                <span class="text-end">@context.Item.TotalGrossSalary.ToString("N3")</span>
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Retenues (TND)" CellStyle="text-align:right;">
+                                            <CellTemplate>
+                                                <span class="text-danger">@context.Item.TotalDeductions.ToString("N3")</span>
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Net total (TND)" CellStyle="text-align:right;">
+                                            <CellTemplate>
+                                                <span class="fw-semibold text-success">@context.Item.TotalNetSalary.ToString("N3")</span>
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Statut" CellStyle="width:110px;">
+                                            <CellTemplate>
+                                                @{
+                                                    var (pBadge, pLbl, pIcon) = context.Item.Status switch
+                                                    {
+                                                        PayrollStatusEnum.Draft      => ("hub-badge--neutral", "Brouillon", "bi-pencil"),
+                                                        PayrollStatusEnum.Prepared   => ("hub-badge--info", "Préparé", "bi-gear"),
+                                                        PayrollStatusEnum.Approved   => ("hub-badge--success", "Approuvé", "bi-check-circle"),
+                                                        PayrollStatusEnum.Paid       => ("hub-badge--primary", "Payé", "bi-cash-coin"),
+                                                        PayrollStatusEnum.Cancelled  => ("hub-badge--danger", "Annulé", "bi-x-circle"),
+                                                        _                            => ("hub-badge--neutral", context.Item.Status.ToString(), "bi-question-circle")
+                                                    };
+                                                }
+                                                <span class="hub-badge @pBadge"><i class="bi @pIcon me-1"></i>@pLbl</span>
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Actions" CellStyle="width:200px;">
+                                            <CellTemplate>
+                                                <div class="hub-grid-actions">
+                                                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon"
+                                                            title="Voir détails"
+                                                            @onclick="@(() => OpenPayrollDetails(context.Item))">
+                                                        <i class="bi bi-eye"></i>
+                                                    </button>
+                                                    @if (_canGrhWrite)
+                                                    {
+                                                        @if (context.Item.Status == PayrollStatusEnum.Draft)
+                                                        {
+                                                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon"
+                                                                    title="Passer en Préparé"
+                                                                    @onclick="@(async () => await ProcessPayrollActionAsync(context.Item.Id))">
+                                                                <i class="bi bi-gear"></i>
+                                                            </button>
+                                                        }
+                                                        @if (context.Item.Status == PayrollStatusEnum.Prepared)
+                                                        {
+                                                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon"
+                                                                    title="Approuver"
+                                                                    @onclick="@(async () => await ApprovePayrollActionAsync(context.Item.Id))">
+                                                                <i class="bi bi-check-circle"></i>
+                                                            </button>
+                                                        }
+                                                        @if (context.Item.Status == PayrollStatusEnum.Approved)
+                                                        {
+                                                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon"
+                                                                    title="Marquer Payé"
+                                                                    @onclick="@(async () => await MarkPaidActionAsync(context.Item.Id))">
+                                                                <i class="bi bi-currency-dollar"></i>
+                                                            </button>
+                                                        }
+                                                    }
+                                                    @if (_canGrhDelete && context.Item.Status == PayrollStatusEnum.Draft)
+                                                    {
+                                                        <button type="button" class="aw-btn aw-btn--danger aw-btn--sm aw-btn--icon"
+                                                                title="Supprimer"
+                                                                @onclick="@(async () => await DeletePayrollActionAsync(context.Item.Id))">
+                                                            <i class="bi bi-trash"></i>
+                                                        </button>
+                                                    }
+                                                </div>
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                    </Columns>
+                                    <PagerContent>
+                                        <MudDataGridPager T="PayrollRun" />
+                                    </PagerContent>
+                                </MudDataGrid>
+                            </div>
+                        }
+                    }
+
+                    @* ── Sous-onglet 1 : Composantes salariales ── *@
+                    @if (_paieTab == 1)
+                    {
+                        <div class="aw-actionbar">
+                            <div class="aw-actionbar__actions">
+                                @if (_canGrhWrite)
+                                {
+                                    <button type="button" class="aw-btn aw-btn--primary" @onclick="OpenCreateSalaryComp">
+                                        <i class="bi bi-plus-lg"></i> Nouvelle composante
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        @if (_salaryCompLoading)
+                        {
+                            <div class="aw-table-region">
+                                <AwSkeleton Variant="table" Rows="5" />
+                            </div>
+                        }
+                        else if (!_salaryComponents.Any())
+                        {
+                            <div class="aw-table-region">
+                                <div class="aw-empty">
+                                    <i class="bi bi-cash-stack"></i>
+                                    <p>Aucune composante salariale.</p>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="aw-table-region">
+                                <MudDataGrid T="SalaryComponent" Items="@_salaryComponents"
+                                             Dense="true" Hover="true" Bordered="true"
+                                             Elevation="0" Filterable="false" RowsPerPage="15">
+                                    <Columns>
+                                        <PropertyColumn Property="@(x => x.ComponentCode)" Title="Code" />
+                                        <PropertyColumn Property="@(x => x.ComponentName)" Title="Libellé" />
+                                        <TemplateColumn Title="Type" CellStyle="width:130px;">
+                                            <CellTemplate>
+                                                @{
+                                                    var (tcls, tlbl) = context.Item.ComponentType switch
+                                                    {
+                                                        "Base"       => ("hub-badge--primary",  "Salaire de base"),
+                                                        "Allowance"  => ("hub-badge--success",  "Prime"),
+                                                        "Deduction"  => ("hub-badge--danger",   "Retenue"),
+                                                        "Bonus"      => ("hub-badge--warning",  "Bonus"),
+                                                        _            => ("hub-badge--neutral",  context.Item.ComponentType)
+                                                    };
+                                                }
+                                                <span class="hub-badge @tcls">@tlbl</span>
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Méthode">
+                                            <CellTemplate>
+                                                @(context.Item.CalculationMethod == "Percentage"
+                                                    ? $"{context.Item.Percentage:N2} %"
+                                                    : $"{context.Item.DefaultAmount:N3} TND")
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                        <PropertyColumn Property="@(x => x.Description)" Title="Description" />
+                                        @if (_canGrhWrite || _canGrhDelete)
+                                        {
+                                            <TemplateColumn Title="Actions" CellStyle="width:100px;">
+                                                <CellTemplate>
+                                                    <div class="hub-grid-actions">
+                                                        @if (_canGrhWrite)
+                                                        {
+                                                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon"
+                                                                    title="Modifier"
+                                                                    @onclick="@(() => OpenEditSalaryComp(context.Item))">
+                                                                <i class="bi bi-pencil"></i>
+                                                            </button>
+                                                        }
+                                                        @if (_canGrhDelete)
+                                                        {
+                                                            <button type="button" class="aw-btn aw-btn--danger aw-btn--sm aw-btn--icon"
+                                                                    title="Supprimer"
+                                                                    @onclick="@(async () => await DeleteSalaryCompAsync(context.Item.Id))">
+                                                                <i class="bi bi-trash"></i>
+                                                            </button>
+                                                        }
+                                                    </div>
+                                                </CellTemplate>
+                                            </TemplateColumn>
+                                        }
+                                    </Columns>
+                                    <PagerContent>
+                                        <MudDataGridPager T="SalaryComponent" />
+                                    </PagerContent>
+                                </MudDataGrid>
+                            </div>
+                        }
+                    }
+
+                    @* ── Sous-onglet 2 : Détails du bulletin sélectionné ── *@
+                    @if (_paieTab == 2 && _selectedPayrollRun != null)
+                    {
+                        <div class="aw-actionbar">
+                            <div class="aw-actionbar__filters" style="flex-wrap:wrap;gap:0.75rem 1.25rem;">
+                                <span>
+                                    <span class="aw-object-head__eyebrow" style="display:block;">Bulletin</span>
+                                    <strong>@_selectedPayrollRun.PayrollNumber</strong>
+                                </span>
+                                <span>
+                                    <span class="aw-object-head__eyebrow" style="display:block;">Période</span>
+                                    <strong>
+                                        @_selectedPayrollRun.PayPeriodStart.ToString("dd/MM/yyyy") –
+                                        @_selectedPayrollRun.PayPeriodEnd.ToString("dd/MM/yyyy")
+                                    </strong>
+                                </span>
+                                <span>
+                                    <span class="aw-object-head__eyebrow" style="display:block;">Brut</span>
+                                    <strong>@_selectedPayrollRun.TotalGrossSalary.ToString("N3") TND</strong>
+                                </span>
+                                <span>
+                                    <span class="aw-object-head__eyebrow" style="display:block;">Net</span>
+                                    <strong style="color:var(--aw-brand,#007a68);">@_selectedPayrollRun.TotalNetSalary.ToString("N3") TND</strong>
+                                </span>
+                                @{
+                                    var (rBadge, rLbl) = _selectedPayrollRun.Status switch
+                                    {
+                                        PayrollStatusEnum.Draft     => ("hub-badge--neutral", "Brouillon"),
+                                        PayrollStatusEnum.Prepared  => ("hub-badge--info",    "Préparé"),
+                                        PayrollStatusEnum.Approved  => ("hub-badge--success", "Approuvé"),
+                                        PayrollStatusEnum.Paid      => ("hub-badge--primary", "Payé"),
+                                        _                           => ("hub-badge--neutral", _selectedPayrollRun.Status.ToString())
+                                    };
+                                }
+                                <span class="hub-badge @rBadge">@rLbl</span>
+                            </div>
+                            <div class="aw-actionbar__actions">
+                                @if (_canGrhWrite && _selectedPayrollRun.Status == PayrollStatusEnum.Draft)
+                                {
+                                    <button type="button" class="aw-btn aw-btn--ghost"
+                                            @onclick="@(async () => await CalculatePayrollAutoAsync())"
+                                            disabled="@_calculatingPayroll"
+                                            title="Calcul automatique via sp_CalculatePayroll">
+                                        @if (_calculatingPayroll)
+                                        {
+                                            <span class="aw-spinner" role="status" aria-hidden="true"></span>
+                                        }
+                                        else
+                                        {
+                                            <i class="bi bi-calculator"></i>
+                                        }
+                                        Calculer
+                                    </button>
+                                    <button type="button" class="aw-btn aw-btn--primary" @onclick="OpenAddDetail">
+                                        <i class="bi bi-plus-lg"></i> Ajouter ligne
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        @if (_detailsLoading)
+                        {
+                            <div class="aw-table-region">
+                                <AwSkeleton Variant="table" Rows="5" />
+                            </div>
+                        }
+                        else if (!_payrollDetails.Any())
+                        {
+                            <div class="aw-table-region">
+                                <div class="aw-empty">
+                                    <i class="bi bi-people"></i>
+                                    <p>Aucune ligne de bulletin.</p>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="aw-table-region">
+                                <MudDataGrid T="PayrollDetail" Items="@_payrollDetails"
+                                             Dense="true" Hover="true" Bordered="true"
+                                             Elevation="0" Filterable="false" RowsPerPage="20">
+                                    <Columns>
+                                        <TemplateColumn Title="Employé">
+                                            <CellTemplate>
+                                                <span class="fw-semibold">@GetEmployeeName(context.Item.EmployeeId)</span>
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Salaire base (TND)" CellStyle="text-align:right;">
+                                            <CellTemplate>@context.Item.BaseSalary.ToString("N3")</CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Brut (TND)" CellStyle="text-align:right;">
+                                            <CellTemplate>@context.Item.GrossSalary.ToString("N3")</CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="CNSS (TND)" CellStyle="text-align:right;">
+                                            <CellTemplate><span class="text-danger">@context.Item.InsuranceAmount.ToString("N3")</span></CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="IRG (TND)" CellStyle="text-align:right;">
+                                            <CellTemplate><span class="text-danger">@context.Item.TaxAmount.ToString("N3")</span></CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Autres ret. (TND)" CellStyle="text-align:right;">
+                                            <CellTemplate><span class="text-danger">@context.Item.OtherDeductions.ToString("N3")</span></CellTemplate>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Net (TND)" CellStyle="text-align:right;">
+                                            <CellTemplate>
+                                                <span class="fw-bold text-success">@context.Item.NetSalary.ToString("N3")</span>
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                    </Columns>
+                                    <PagerContent>
+                                        <MudDataGridPager T="PayrollDetail" />
+                                    </PagerContent>
+                                </MudDataGrid>
+                            </div>
+                        }
+                    }
+                }
+
+            </div>
+        </div>
+    </div>
+    }
+}
+
+</ModuleGuard>
+
+@code {
+
+    /* ── Hub navigation ── */
+    int  _tab    = 0;
+    int  _orgTab = 0;
+    bool _loaded = false;
+    bool[] _tabLoaded = new bool[8];
+
+    /* ── Permissions ── */
+    bool _canGrhRead;
+    bool _canGrhWrite;
+    bool _canGrhDelete;
+
+    /* ══════════════════════════════════════════════════════════
+       ORGANISATION
+       ══════════════════════════════════════════════════════════ */
+    List<Company>            _companies           = new();
+    List<DepartmentReadDto>  _departments         = new();
+    List<JobPositionReadDto> _positions           = new();
+    List<Company>            _companiesFiltered   = new();
+    List<DepartmentReadDto>  _departmentsFiltered = new();
+    List<JobPositionReadDto> _positionsFiltered   = new();
+
+    bool _companiesLoading;
+    bool _departmentsLoading;
+    bool _positionsLoading;
+
+    string _companySearch    = "";
+    string _departmentSearch = "";
+    string _positionSearch   = "";
+
+#pragma warning disable CS0414, CS0649
+    bool _showCompanyForm;
+    bool _showDepartmentForm;
+    bool _showPositionForm;
+    bool _saving;
+    bool _showEmpForm;
+    bool _showContractForm;
+    bool _showLeaveForm;
+    bool _showAbsenceForm;
+    bool _showPayrollForm;
+    bool _showSalaryCompForm;
+    int  _editSalaryCompId;
+    bool _showDetailForm;
+    bool _recruitLoading;
+    bool _trainingLoading;
+    bool _evalLoading;
+    bool _docsLoading;
+#pragma warning restore CS0414, CS0649
+
+    int              _editCompanyId;
+    CompanyFormModel _companyForm = new();
+
+    int                 _editDepartmentId;
+    CreateDepartmentDto _deptForm = new();
+
+    int                   _editPositionId;
+    CreateJobPositionDto  _posForm = new();
+
+    /* ══════════════════════════════════════════════════════════
+       EMPLOYÉS — FICHES
+       ══════════════════════════════════════════════════════════ */
+    List<Employee> _employees         = new();
+    List<Employee> _employeesFiltered = new();
+    bool           _empLoading;
+    string         _employeeSearch = "";
+    int            _empDeptFilter  = 0;
+    int            _empTab         = 0;
+    int            _editEmpId;
+    EmployeeFormModel _empForm = new();
+
+    // Référentiels pour le formulaire employé
+    List<Service>                _services           = new();
+    List<EmployeeCategory>       _empCategories      = new();
+    List<EmployeeClassification> _empClassifications = new();
+
+    /* ══════════════════════════════════════════════════════════
+       EMPLOYÉS — CONTRATS
+       ══════════════════════════════════════════════════════════ */
+    int                    _selectedEmpIdForContracts;
+    List<EmployeeContract> _contracts        = new();
+    bool                   _contractsLoading;
+    ContractFormModel      _contractForm     = new();
+
+    /* ══════════════════════════════════════════════════════════
+       CONGÉS & ABSENCES
+       ══════════════════════════════════════════════════════════ */
+    int                _leaveTab          = 0;
+    List<LeaveRequest> _leaveRequests     = new();   // pending (compatibilité)
+    List<LeaveRequest> _allLeaveRequests  = new();
+    bool               _leaveLoading;
+    string             _leaveStatusFilter = "All";
+    LeaveRequestFormModel _leaveForm      = new();
+    List<LeaveType>    _leaveTypes        = new();
+
+    /* ══════════════════════════════════════════════════════════
+       ABSENCES
+       ══════════════════════════════════════════════════════════ */
+    List<Absence>    _absences        = new();
+    bool             _absenceLoading;
+    AbsenceFormModel _absenceForm     = new();
+    List<AbsenceType> _absenceTypes   = new();
+
+    /* ══════════════════════════════════════════════════════════
+       PAIE — BULLETINS
+       ══════════════════════════════════════════════════════════ */
+    int              _paieTab       = 0;
+    List<PayrollRun> _payrollRuns   = new();
+    bool             _payrollLoading;
+    int              _payrollYear   = DateTime.Now.Year;
+    int              _payrollMonth  = DateTime.Now.Month;
+    PayrollFormModel _payrollForm   = new();
+
+    /* ══════════════════════════════════════════════════════════
+       PAIE — COMPOSANTES SALARIALES
+       ══════════════════════════════════════════════════════════ */
+    List<SalaryComponent> _salaryComponents     = new();
+    bool                  _salaryCompLoading;
+    SalaryCompFormModel   _salaryCompForm        = new();
+
+    /* ══════════════════════════════════════════════════════════
+       PAIE — DÉTAILS (BULLETIN PAR EMPLOYÉ)
+       ══════════════════════════════════════════════════════════ */
+    PayrollRun?           _selectedPayrollRun;
+    bool                  _calculatingPayroll;
+    bool                  _resettingLeaves;
+    List<PayrollDetail>   _payrollDetails        = new();
+    bool                  _detailsLoading;
+    PayrollDetailFormModel _detailForm           = new();
+
+    /* ══════════════════════════════════════════════════════════
+       RECRUTEMENT
+       ══════════════════════════════════════════════════════════ */
+    List<JobOpening> _jobOpenings   = new();
+
+    /* ══════════════════════════════════════════════════════════
+       FORMATION
+       ══════════════════════════════════════════════════════════ */
+    List<TrainingProgram> _trainingPrograms = new();
+
+    /* ══════════════════════════════════════════════════════════
+       ÉVALUATIONS
+       ══════════════════════════════════════════════════════════ */
+    List<PerformanceEvaluation> _evaluations = new();
+    int                         _evalYear = DateTime.Now.Year;
+
+    /* ══════════════════════════════════════════════════════════
+       DOCUMENTS
+       ══════════════════════════════════════════════════════════ */
+    List<EmployeeDocument> _expiringDocs = new();
+
+    /* ════════════════════════════════════════════════════════════
+       INIT
+       ════════════════════════════════════════════════════════════ */
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Auth check only — no GRH DB calls here to avoid DbContext concurrency.
+        // All data loading is deferred to OnAfterRenderAsync (after JS interop is available).
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user      = authState.User;
+
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            var login   = user.FindFirst("login")?.Value
+                       ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isAdmin = AppFunctions.Normalize(user.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+
+            if (!string.IsNullOrEmpty(login))
+            {
+                var perms = await PermissionResolver.GetPermissionsAsync(login);
+                _canGrhRead   = PermissionGate.ViewTab(perms, "grh",
+                    () => PermissionGate.LegacyRead(perms, AppFunctions.GRH, isAdmin));
+                _canGrhWrite  = PermissionGate.DoAction(perms, "grh.write",
+                    () => PermissionGate.LegacyWrite(perms, AppFunctions.GRH, isAdmin));
+                _canGrhDelete = PermissionGate.LegacyDelete(perms, AppFunctions.GRH, isAdmin);
+            }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        if (!_canGrhRead)
+        {
+            _loaded = true;
+            StateHasChanged();
+            return;
+        }
+
+        try
+        {
+            // Retrieve the tab that was active before the refresh
+            _tab = await JS.InvokeAsync<int>("tabNavigation.getTab", "grh-hub", 0);
+        }
+        catch
+        {
+            _tab = 0;
+        }
+
+        // Load data for the active tab — single sequential chain, no concurrency
+        await LoadTabDataAsync(_tab);
+        _tabLoaded[_tab] = true;
+
+        _loaded = true;
+        StateHasChanged();
+    }
+
+    async Task OnTabChange(int tabIndex)
+    {
+        _tab = tabIndex;
+        CloseForms();
+        try { await JS.InvokeVoidAsync("tabNavigation.saveTab", "grh-hub", tabIndex); } catch { }
+
+        if (_canGrhRead && !_tabLoaded[tabIndex])
+        {
+            await LoadTabDataAsync(tabIndex);
+            _tabLoaded[tabIndex] = true;
+        }
+    }
+
+    async Task LoadTabDataAsync(int tabIndex)
+    {
+        switch (tabIndex)
+        {
+            case 0: await LoadOrgAsync();         break;
+            case 1: await LoadEmployeesAsync();    break;
+            case 2: await LoadLeaveAsync();        break;
+            case 3: await LoadPayrollAsync();      break;
+            case 4: await LoadRecruitAsync();      break;
+            case 5: await LoadTrainingAsync();     break;
+            case 6: await LoadEvaluationsAsync();  break;
+            case 7: await LoadDocumentsAsync();    break;
+        }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       CHARGEMENT — ORGANISATION
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadOrgAsync()
+    {
+        await LoadCompaniesAsync();
+        await LoadDepartmentsAsync();
+        await LoadPositionsAsync();
+    }
+
+    async Task LoadCompaniesAsync()
+    {
+        _companiesLoading = true;
+        try
+        {
+            _companies = (await CompanyService.GetAllCompaniesAsync()).ToList();
+            ApplyCompanySearch();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur sociétés : {ex.Message}", Severity.Error); }
+        finally { _companiesLoading = false; }
+    }
+
+    async Task LoadDepartmentsAsync()
+    {
+        _departmentsLoading = true;
+        try
+        {
+            var entities = (await DepartmentService.GetAllDepartmentsAsync()).ToList();
+            _departments = entities.Select(d => new DepartmentReadDto
+            {
+                Id             = d.Id,
+                DepartmentCode = d.DepartmentCode,
+                DepartmentName = d.DepartmentName,
+                CompanyName    = d.Company?.CompanyName ?? GetCompanyName(d.CompanyId),
+                EmployeeCount  = d.Employees?.Count ?? 0,
+                BudgetAmount   = d.Budget
+            }).ToList();
+            ApplyDepartmentSearch();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur départements : {ex.Message}", Severity.Error); }
+        finally { _departmentsLoading = false; }
+    }
+
+    async Task LoadPositionsAsync()
+    {
+        _positionsLoading = true;
+        try
+        {
+            var entities = (await JobPositionService.GetAllPositionsAsync()).ToList();
+            _positions = entities.Select(p => new JobPositionReadDto
+            {
+                Id                      = p.Id,
+                PositionCode            = p.PositionCode,
+                PositionName            = p.PositionName,
+                DepartmentName          = p.Department?.DepartmentName ?? GetDepartmentName(p.DepartmentId),
+                EducationLevel          = p.RequiredEducation,
+                ExperienceYearsRequired = p.RequiredExperience,
+                MinSalary               = p.SalaryRange_Min,
+                MaxSalary               = p.SalaryRange_Max,
+                EmployeeCount           = p.Employees?.Count ?? 0
+            }).ToList();
+            ApplyPositionSearch();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur postes : {ex.Message}", Severity.Error); }
+        finally { _positionsLoading = false; }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       CHARGEMENT — AUTRES ONGLETS
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadEmployeesAsync()
+    {
+        _empLoading = true;
+        try
+        {
+            _employees = (await EmployeeService.GetAllActiveEmployeesAsync()).ToList();
+
+            if (_services.Count == 0)
+                _services = (await ServiceService.GetAllServicesAsync()).ToList();
+            if (_empCategories.Count == 0)
+                _empCategories = (await EmployeeCategoryService.GetAllActiveAsync()).ToList();
+            if (_empClassifications.Count == 0)
+                _empClassifications = (await EmployeeClassificationService.GetAllActiveAsync()).ToList();
+
+            ApplyEmployeeSearch();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur employés : {ex.Message}", Severity.Error); }
+        finally { _empLoading = false; }
+    }
+
+    async Task LoadContractsAsync()
+    {
+        if (_selectedEmpIdForContracts == 0) return;
+        _contractsLoading = true;
+        try
+        {
+            _contracts = (await EmployeeService.GetEmployeeContractsAsync(_selectedEmpIdForContracts)).ToList();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur contrats : {ex.Message}", Severity.Error); }
+        finally { _contractsLoading = false; }
+    }
+
+    async Task LoadLeaveAsync()
+    {
+        _leaveLoading = true;
+        try
+        {
+            _allLeaveRequests = (await LeaveService.GetAllLeaveRequestsAsync()).ToList();
+            _leaveRequests    = _allLeaveRequests.Where(r => r.Status == LeaveStatusEnum.Pending).ToList();
+
+            if (_leaveTypes.Count == 0)
+                _leaveTypes = (await LeaveTypeService.GetAllActiveAsync()).ToList();
+
+            if (_employees.Count == 0)
+                _employees = (await EmployeeService.GetAllActiveEmployeesAsync()).ToList();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur congés : {ex.Message}", Severity.Error); }
+        finally { _leaveLoading = false; }
+    }
+
+    async Task LoadAbsencesAsync()
+    {
+        _absenceLoading = true;
+        try
+        {
+            _absences = (await AbsenceService.GetAllAbsencesAsync()).ToList();
+
+            if (_absenceTypes.Count == 0)
+                _absenceTypes = (await AbsenceTypeService.GetAllActiveAsync()).ToList();
+
+            if (_employees.Count == 0)
+                _employees = (await EmployeeService.GetAllActiveEmployeesAsync()).ToList();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur absences : {ex.Message}", Severity.Error); }
+        finally { _absenceLoading = false; }
+    }
+
+    async Task LoadPayrollAsync()
+    {
+        _payrollLoading = true;
+        try
+        {
+            _payrollRuns = (await PayrollService.GetPayrollsByYearAndMonthAsync(
+                _payrollYear, _payrollMonth)).ToList();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur paie : {ex.Message}", Severity.Error); }
+        finally { _payrollLoading = false; }
+    }
+
+    async Task LoadSalaryComponentsAsync()
+    {
+        _salaryCompLoading = true;
+        try { _salaryComponents = (await SalaryComponentService.GetAllActiveAsync()).ToList(); }
+        catch (Exception ex) { Snackbar.Add($"Erreur composantes : {ex.Message}", Severity.Error); }
+        finally { _salaryCompLoading = false; }
+    }
+
+    async Task LoadPayrollDetailsAsync()
+    {
+        if (_selectedPayrollRun == null) return;
+        _detailsLoading = true;
+        try
+        {
+            _payrollDetails = (await PayrollService.GetPayrollDetailsAsync(_selectedPayrollRun.Id)).ToList();
+            if (_employees.Count == 0)
+                _employees = (await EmployeeService.GetAllActiveEmployeesAsync()).ToList();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur détails : {ex.Message}", Severity.Error); }
+        finally { _detailsLoading = false; }
+    }
+
+    /* ── CRUD Bulletins ── */
+
+    void OpenCreatePayroll() => Nav.NavigateTo("/grh/paie/bulletin/form");
+
+    void OpenPayrollDetails(PayrollRun run)
+    {
+        _selectedPayrollRun = run;
+        _paieTab = 2;
+        _ = LoadPayrollDetailsAsync();
+    }
+
+    async Task SavePayrollAsync()
+    {
+        if (_payrollForm.PeriodStart >= _payrollForm.PeriodEnd)
+        {
+            Snackbar.Add("La date de fin doit être postérieure à la date de début.", Severity.Warning);
+            return;
+        }
+        try
+        {
+            var run = await PayrollService.CreatePayrollRunAsync(
+                _payrollForm.PeriodStart, _payrollForm.PeriodEnd);
+            run.TotalGrossSalary = _payrollForm.TotalGross;
+            run.TotalNetSalary   = _payrollForm.TotalNet;
+            run.TotalDeductions  = _payrollForm.TotalDeductions;
+            run.NumberOfEmployees = _payrollForm.NumberOfEmployees;
+            run.Notes            = _payrollForm.Notes;
+            await PayrollService.ProcessPayrollAsync(run.Id);  // stays Draft until explicit action
+            _showPayrollForm = false;
+            await LoadPayrollAsync();
+            Snackbar.Add("Bulletin créé avec succès.", Severity.Success);
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+    }
+
+    async Task ProcessPayrollActionAsync(int id)
+    {
+        try
+        {
+            await PayrollService.ProcessPayrollAsync(id);
+            await LoadPayrollAsync();
+            Snackbar.Add("Bulletin passé en statut Préparé.", Severity.Success);
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+    }
+
+    async Task CalculatePayrollAutoAsync()
+    {
+        if (_selectedPayrollRun == null) return;
+        _calculatingPayroll = true;
+        try
+        {
+            var (result, message) = await PayrollService.CalculatePayrollAsync(
+                _selectedPayrollRun.Id,
+                _selectedPayrollRun.PayPeriodStart,
+                _selectedPayrollRun.PayPeriodEnd,
+                calculatedBy: 0);
+
+            if (result == "SUCCESS")
+            {
+                await LoadPayrollAsync();
+                await LoadPayrollDetailsAsync();
+                Snackbar.Add("Calcul automatique réussi — bulletins générés pour tous les employés actifs.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add($"Erreur SP : {message}", Severity.Error);
+            }
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+        finally { _calculatingPayroll = false; }
+    }
+
+    async Task ResetAnnualLeavesActionAsync()
+    {
+        _resettingLeaves = true;
+        try
+        {
+            var (result, message) = await LeaveService.ResetAnnualLeavesAsync(DateTime.Now.Year);
+            if (result == "SUCCESS")
+                Snackbar.Add($"Réinitialisation annuelle {DateTime.Now.Year} effectuée — soldes reportés.", Severity.Success);
+            else
+                Snackbar.Add($"Erreur SP : {message}", Severity.Error);
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+        finally { _resettingLeaves = false; }
+    }
+
+    async Task ApprovePayrollActionAsync(int id)
+    {
+        try
+        {
+            await PayrollService.ApprovePayrollAsync(id);
+            await LoadPayrollAsync();
+            Snackbar.Add("Bulletin approuvé.", Severity.Success);
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+    }
+
+    async Task MarkPaidActionAsync(int id)
+    {
+        try
+        {
+            await PayrollService.MarkAsPaidAsync(id);
+            await LoadPayrollAsync();
+            Snackbar.Add("Bulletin marqué Payé.", Severity.Success);
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+    }
+
+    async Task DeletePayrollActionAsync(int id)
+    {
+        try
+        {
+            await PayrollService.DeletePayrollRunAsync(id);
+            if (_selectedPayrollRun?.Id == id) { _selectedPayrollRun = null; _paieTab = 0; }
+            await LoadPayrollAsync();
+            Snackbar.Add("Bulletin supprimé.", Severity.Success);
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+    }
+
+    /* ── CRUD Composantes salariales ── */
+
+    void OpenCreateSalaryComp()          => Nav.NavigateTo("/grh/paie/composante/form");
+    void OpenEditSalaryComp(SalaryComponent sc) => Nav.NavigateTo($"/grh/paie/composante/form/{sc.Id}");
+
+    async Task SaveSalaryCompAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_salaryCompForm.ComponentCode) ||
+            string.IsNullOrWhiteSpace(_salaryCompForm.ComponentName))
+        {
+            Snackbar.Add("Code et libellé obligatoires.", Severity.Warning);
+            return;
+        }
+        try
+        {
+            if (_editSalaryCompId == 0)
+            {
+                await SalaryComponentService.AddAsync(new SalaryComponent
+                {
+                    ComponentCode     = _salaryCompForm.ComponentCode.Trim(),
+                    ComponentName     = _salaryCompForm.ComponentName.Trim(),
+                    ComponentType     = _salaryCompForm.ComponentType,
+                    CalculationMethod = _salaryCompForm.CalculationMethod,
+                    DefaultAmount     = _salaryCompForm.DefaultAmount,
+                    Percentage        = _salaryCompForm.Percentage,
+                    Description       = _salaryCompForm.Description,
+                    IsActive          = true
+                });
+                Snackbar.Add("Composante ajoutée.", Severity.Success);
+            }
+            else
+            {
+                var sc = await SalaryComponentService.GetByIdAsync(_editSalaryCompId);
+                sc.ComponentCode     = _salaryCompForm.ComponentCode.Trim();
+                sc.ComponentName     = _salaryCompForm.ComponentName.Trim();
+                sc.ComponentType     = _salaryCompForm.ComponentType;
+                sc.CalculationMethod = _salaryCompForm.CalculationMethod;
+                sc.DefaultAmount     = _salaryCompForm.DefaultAmount;
+                sc.Percentage        = _salaryCompForm.Percentage;
+                sc.Description       = _salaryCompForm.Description;
+                await SalaryComponentService.UpdateAsync(sc);
+                Snackbar.Add("Composante mise à jour.", Severity.Success);
+            }
+            _showSalaryCompForm = false;
+            await LoadSalaryComponentsAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+    }
+
+    async Task DeleteSalaryCompAsync(int id)
+    {
+        try
+        {
+            await SalaryComponentService.DeleteAsync(id);
+            await LoadSalaryComponentsAsync();
+            Snackbar.Add("Composante supprimée.", Severity.Success);
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+    }
+
+    /* ── CRUD Détails bulletin ── */
+
+    void OpenAddDetail()
+    {
+        if (_selectedPayrollRun != null)
+            Nav.NavigateTo($"/grh/paie/detail/form/{_selectedPayrollRun.Id}");
+        else
+            Snackbar.Add("Veuillez d'abord sélectionner un bulletin.", Severity.Warning);
+    }
+
+    async Task SaveDetailAsync()
+    {
+        if (_detailForm.EmployeeId == 0)
+        {
+            Snackbar.Add("Veuillez sélectionner un employé.", Severity.Warning);
+            return;
+        }
+        try
+        {
+            await PayrollService.AddOrUpdatePayrollDetailAsync(new PayrollDetail
+            {
+                PayrollRunId     = _selectedPayrollRun!.Id,
+                EmployeeId       = _detailForm.EmployeeId,
+                BaseSalary       = _detailForm.BaseSalary,
+                GrossSalary      = _detailForm.GrossSalary,
+                TaxAmount        = _detailForm.TaxAmount,
+                InsuranceAmount  = _detailForm.InsuranceAmount,
+                OtherDeductions  = _detailForm.OtherDeductions,
+                NetSalary        = _detailForm.NetSalary,
+                Notes            = _detailForm.Notes
+            });
+            _showDetailForm = false;
+            await LoadPayrollDetailsAsync();
+            Snackbar.Add("Ligne ajoutée.", Severity.Success);
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+    }
+
+    async Task LoadRecruitAsync()
+    {
+        _recruitLoading = true;
+        try
+        {
+            _jobOpenings = (await RecruitmentService.GetOpenJobsAsync()).ToList();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur recrutement : {ex.Message}", Severity.Error); }
+        finally { _recruitLoading = false; }
+    }
+
+    async Task LoadTrainingAsync()
+    {
+        _trainingLoading = true;
+        try
+        {
+            _trainingPrograms = (await TrainingService.GetAllProgramsAsync()).ToList();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur formation : {ex.Message}", Severity.Error); }
+        finally { _trainingLoading = false; }
+    }
+
+    async Task LoadEvaluationsAsync()
+    {
+        _evalLoading = true;
+        try
+        {
+            _evaluations = (await EvaluationService.GetYearEvaluationsAsync(_evalYear)).ToList();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur évaluations : {ex.Message}", Severity.Error); }
+        finally { _evalLoading = false; }
+    }
+
+    async Task LoadDocumentsAsync()
+    {
+        _docsLoading = true;
+        try
+        {
+            _expiringDocs = (await DocumentService.GetExpiringDocumentsAsync(30)).ToList();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur documents : {ex.Message}", Severity.Error); }
+        finally { _docsLoading = false; }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       RECHERCHE
+       ════════════════════════════════════════════════════════════ */
+
+    void FilterCompanies(string v)   { _companySearch    = v; ApplyCompanySearch(); }
+    void FilterDepartments(string v) { _departmentSearch = v; ApplyDepartmentSearch(); }
+    void FilterPositions(string v)   { _positionSearch   = v; ApplyPositionSearch(); }
+    void FilterEmployees(string v)   { _employeeSearch   = v; ApplyEmployeeSearch(); }
+
+    void ApplyCompanySearch()
+    {
+        if (string.IsNullOrWhiteSpace(_companySearch)) { _companiesFiltered = _companies; return; }
+        var q = _companySearch.Trim();
+        _companiesFiltered = _companies
+            .Where(c => c.CompanyCode.Contains(q, StringComparison.OrdinalIgnoreCase)
+                     || c.CompanyName.Contains(q, StringComparison.OrdinalIgnoreCase)
+                     || (c.City ?? "").Contains(q, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    void ApplyDepartmentSearch()
+    {
+        if (string.IsNullOrWhiteSpace(_departmentSearch)) { _departmentsFiltered = _departments; return; }
+        var q = _departmentSearch.Trim();
+        _departmentsFiltered = _departments
+            .Where(d => d.DepartmentCode.Contains(q, StringComparison.OrdinalIgnoreCase)
+                     || d.DepartmentName.Contains(q, StringComparison.OrdinalIgnoreCase)
+                     || (d.CompanyName ?? "").Contains(q, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    void ApplyPositionSearch()
+    {
+        if (string.IsNullOrWhiteSpace(_positionSearch)) { _positionsFiltered = _positions; return; }
+        var q = _positionSearch.Trim();
+        _positionsFiltered = _positions
+            .Where(p => p.PositionCode.Contains(q, StringComparison.OrdinalIgnoreCase)
+                     || p.PositionName.Contains(q, StringComparison.OrdinalIgnoreCase)
+                     || (p.DepartmentName ?? "").Contains(q, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    void ApplyEmployeeSearch()
+    {
+        var result = _employees.AsEnumerable();
+
+        if (_empDeptFilter > 0)
+            result = result.Where(e => e.DepartmentId == _empDeptFilter);
+
+        if (!string.IsNullOrWhiteSpace(_employeeSearch))
+        {
+            var q = _employeeSearch.Trim();
+            result = result.Where(e =>
+                e.EmployeeCode.Contains(q, StringComparison.OrdinalIgnoreCase)
+             || e.FirstName.Contains(q, StringComparison.OrdinalIgnoreCase)
+             || e.LastName.Contains(q, StringComparison.OrdinalIgnoreCase)
+             || (e.Email ?? "").Contains(q, StringComparison.OrdinalIgnoreCase));
+        }
+
+        _employeesFiltered = result.ToList();
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       FORMULAIRES — OUVERTURE / FERMETURE (Organisation)
+       ════════════════════════════════════════════════════════════ */
+
+    void CloseForms()
+    {
+        _showCompanyForm    = false;
+        _showDepartmentForm = false;
+        _showPositionForm   = false;
+        _editCompanyId      = 0;
+        _editDepartmentId   = 0;
+        _editPositionId     = 0;
+        _showEmpForm        = false;
+        _editEmpId          = 0;
+        _showContractForm   = false;
+        _showLeaveForm      = false;
+        _showAbsenceForm    = false;
+    }
+
+    void OpenCreateCompany()  => Nav.NavigateTo("/grh/societes/form");
+    void OpenEditCompany(Company c) => Nav.NavigateTo($"/grh/societes/form/{c.Id}");
+
+    async Task OpenCreateDepartment()
+    {
+        var form = new DepartmentDialog.DepartmentFormData
+        {
+            CompanyId = _companies.FirstOrDefault()?.Id ?? 0
+        };
+        await ShowDepartmentDialog(form, 0);
+    }
+
+    async Task OpenEditDepartment(DepartmentReadDto dto)
+    {
+        var form = new DepartmentDialog.DepartmentFormData
+        {
+            DepartmentCode = dto.DepartmentCode,
+            DepartmentName = dto.DepartmentName,
+            CompanyId      = _companies.FirstOrDefault(c => c.CompanyName == dto.CompanyName)?.Id ?? 0,
+            BudgetAmount   = dto.BudgetAmount ?? 0m
+        };
+        await ShowDepartmentDialog(form, dto.Id);
+    }
+
+    async Task ShowDepartmentDialog(DepartmentDialog.DepartmentFormData form, int editId)
+    {
+        var parameters = new DialogParameters<DepartmentDialog>
+        {
+            { x => x.Form, form },
+            { x => x.Companies, _companies },
+            { x => x.IsEdit, editId > 0 }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<DepartmentDialog>(null, parameters, options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: DepartmentDialog.DepartmentFormData data })
+        {
+            _deptForm = new CreateDepartmentDto
+            {
+                DepartmentCode = data.DepartmentCode,
+                DepartmentName = data.DepartmentName,
+                CompanyId      = data.CompanyId,
+                BudgetAmount   = data.BudgetAmount,
+                Description    = data.Description
+            };
+            _editDepartmentId = editId;
+            await SaveDepartmentAsync();
+        }
+    }
+
+    void OpenCreatePosition()          => Nav.NavigateTo("/grh/postes/form");
+    void OpenEditPosition(JobPositionReadDto dto) => Nav.NavigateTo($"/grh/postes/form/{dto.Id}");
+
+    /* ════════════════════════════════════════════════════════════
+       ENREGISTREMENT — ORGANISATION
+       ════════════════════════════════════════════════════════════ */
+
+    async Task SaveCompanyAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_companyForm.CompanyCode) ||
+            string.IsNullOrWhiteSpace(_companyForm.CompanyName))
+        {
+            Snackbar.Add("Le code et la raison sociale sont obligatoires.", Severity.Warning);
+            return;
+        }
+        _saving = true;
+        try
+        {
+            if (_editCompanyId > 0)
+            {
+                var entity = await CompanyService.GetCompanyAsync(_editCompanyId);
+                entity.CompanyCode = _companyForm.CompanyCode.Trim();
+                entity.CompanyName = _companyForm.CompanyName.Trim();
+                entity.City        = _companyForm.City;
+                entity.Phone       = _companyForm.Phone;
+                entity.Email       = _companyForm.Email;
+                entity.Country     = _companyForm.Country;
+                entity.Address     = _companyForm.Address;
+                await CompanyService.UpdateCompanyAsync(entity);
+                Snackbar.Add("Société modifiée avec succès.", Severity.Success);
+            }
+            else
+            {
+                var entity = await CompanyService.CreateCompanyAsync(
+                    _companyForm.CompanyCode.Trim(),
+                    _companyForm.CompanyName.Trim());
+                entity.City    = _companyForm.City;
+                entity.Phone   = _companyForm.Phone;
+                entity.Email   = _companyForm.Email;
+                entity.Country = _companyForm.Country;
+                entity.Address = _companyForm.Address;
+                await CompanyService.UpdateCompanyAsync(entity);
+                Snackbar.Add("Société créée avec succès.", Severity.Success);
+            }
+            CloseForms();
+            await LoadCompaniesAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    async Task SaveDepartmentAsync()
+    {
+        if (_deptForm.CompanyId <= 0 ||
+            string.IsNullOrWhiteSpace(_deptForm.DepartmentCode) ||
+            string.IsNullOrWhiteSpace(_deptForm.DepartmentName))
+        {
+            Snackbar.Add("La société, le code et le nom sont obligatoires.", Severity.Warning);
+            return;
+        }
+        _saving = true;
+        try
+        {
+            if (_editDepartmentId > 0)
+            {
+                var entity = await DepartmentService.GetDepartmentAsync(_editDepartmentId);
+                entity.DepartmentCode = _deptForm.DepartmentCode.Trim();
+                entity.DepartmentName = _deptForm.DepartmentName.Trim();
+                entity.CompanyId      = _deptForm.CompanyId;
+                entity.Description    = _deptForm.Description;
+                entity.Budget         = _deptForm.BudgetAmount;
+                await DepartmentService.UpdateDepartmentAsync(entity);
+                Snackbar.Add("Département modifié avec succès.", Severity.Success);
+            }
+            else
+            {
+                var entity = await DepartmentService.CreateDepartmentAsync(
+                    _deptForm.DepartmentCode.Trim(),
+                    _deptForm.DepartmentName.Trim(),
+                    _deptForm.CompanyId);
+                entity.Description = _deptForm.Description;
+                entity.Budget      = _deptForm.BudgetAmount;
+                await DepartmentService.UpdateDepartmentAsync(entity);
+                Snackbar.Add("Département créé avec succès.", Severity.Success);
+            }
+            CloseForms();
+            await LoadDepartmentsAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    async Task SavePositionAsync()
+    {
+        if (_posForm.DepartmentId <= 0 ||
+            string.IsNullOrWhiteSpace(_posForm.PositionCode) ||
+            string.IsNullOrWhiteSpace(_posForm.PositionName))
+        {
+            Snackbar.Add("Le département, le code et l'intitulé sont obligatoires.", Severity.Warning);
+            return;
+        }
+        _saving = true;
+        try
+        {
+            Department? dept = null;
+            try { dept = await DepartmentService.GetDepartmentAsync(_posForm.DepartmentId); } catch { }
+            if (dept == null) { Snackbar.Add("Département introuvable.", Severity.Warning); return; }
+
+            if (_editPositionId > 0)
+            {
+                var entity = await JobPositionService.GetJobPositionAsync(_editPositionId);
+                entity.PositionCode       = _posForm.PositionCode.Trim();
+                entity.PositionName       = _posForm.PositionName.Trim();
+                entity.DepartmentId       = dept.Id;
+                entity.CompanyId          = dept.CompanyId;
+                entity.RequiredEducation  = _posForm.EducationLevel;
+                entity.RequiredExperience = _posForm.ExperienceYearsRequired;
+                entity.SalaryRange_Min    = _posForm.MinSalary;
+                entity.SalaryRange_Max    = _posForm.MaxSalary;
+                entity.Description        = _posForm.Description;
+                await JobPositionService.UpdateJobPositionAsync(entity);
+                Snackbar.Add("Poste modifié avec succès.", Severity.Success);
+            }
+            else
+            {
+                var entity = await JobPositionService.CreateJobPositionAsync(
+                    _posForm.PositionCode.Trim(),
+                    _posForm.PositionName.Trim(),
+                    dept.Id,
+                    dept.CompanyId);
+                entity.RequiredEducation  = _posForm.EducationLevel;
+                entity.RequiredExperience = _posForm.ExperienceYearsRequired;
+                entity.SalaryRange_Min    = _posForm.MinSalary;
+                entity.SalaryRange_Max    = _posForm.MaxSalary;
+                entity.Description        = _posForm.Description;
+                await JobPositionService.UpdateJobPositionAsync(entity);
+                Snackbar.Add("Poste créé avec succès.", Severity.Success);
+            }
+            CloseForms();
+            await LoadPositionsAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       SUPPRESSION — ORGANISATION
+       ════════════════════════════════════════════════════════════ */
+
+    async Task DeleteCompanyAsync(Company company)
+    {
+        if (!await Confirmer($"Supprimer la société « {company.CompanyName} » ?")) return;
+        try
+        {
+            await CompanyService.DeleteCompanyAsync(company.Id);
+            Snackbar.Add("Société supprimée.", Severity.Success);
+            await LoadCompaniesAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Suppression impossible : {ex.Message}", Severity.Error); }
+    }
+
+    async Task DeleteDepartmentAsync(DepartmentReadDto dto)
+    {
+        if (!await Confirmer($"Supprimer le département « {dto.DepartmentName} » ?")) return;
+        try
+        {
+            await DepartmentService.DeleteDepartmentAsync(dto.Id);
+            Snackbar.Add("Département supprimé.", Severity.Success);
+            await LoadDepartmentsAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Suppression impossible : {ex.Message}", Severity.Error); }
+    }
+
+    async Task DeletePositionAsync(JobPositionReadDto dto)
+    {
+        if (!await Confirmer($"Supprimer le poste « {dto.PositionName} » ?")) return;
+        try
+        {
+            await JobPositionService.DeleteJobPositionAsync(dto.Id);
+            Snackbar.Add("Poste supprimé.", Severity.Success);
+            await LoadPositionsAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Suppression impossible : {ex.Message}", Severity.Error); }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       EMPLOYÉS — CRUD
+       ════════════════════════════════════════════════════════════ */
+
+    void OpenCreateEmployee()         => Nav.NavigateTo("/grh/employes/form");
+    void OpenEditEmployee(Employee emp) => Nav.NavigateTo($"/grh/employes/form/{emp.Id}");
+
+    async Task SaveEmployeeAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_empForm.EmployeeCode) ||
+            string.IsNullOrWhiteSpace(_empForm.FirstName)    ||
+            string.IsNullOrWhiteSpace(_empForm.LastName)     ||
+            string.IsNullOrWhiteSpace(_empForm.Email))
+        {
+            Snackbar.Add("Le code, prénom, nom et email sont obligatoires.", Severity.Warning);
+            return;
+        }
+        if (_empForm.CompanyId == 0 || _empForm.DepartmentId == 0 ||
+            _empForm.ServiceId == 0 || _empForm.JobPositionId == 0)
+        {
+            Snackbar.Add("Société, département, service et poste sont obligatoires.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            if (_editEmpId > 0)
+            {
+                var entity = await EmployeeService.GetEmployeeByIdAsync(_editEmpId);
+                entity.FirstName               = _empForm.FirstName.Trim();
+                entity.LastName                = _empForm.LastName.Trim();
+                entity.Email                   = _empForm.Email.Trim();
+                entity.PhoneNumber             = _empForm.PhoneNumber;
+                entity.DateOfBirth             = _empForm.DateOfBirth;
+                entity.Gender                  = _empForm.Gender;
+                entity.MaritalStatus           = _empForm.MaritalStatus;
+                entity.Nationality             = _empForm.Nationality;
+                entity.Address                 = _empForm.Address;
+                entity.City                    = _empForm.City;
+                entity.ZipCode                 = _empForm.ZipCode;
+                entity.CompanyId               = _empForm.CompanyId;
+                entity.DepartmentId            = _empForm.DepartmentId;
+                entity.ServiceId               = _empForm.ServiceId;
+                entity.JobPositionId           = _empForm.JobPositionId;
+                entity.EmployeeCategoryId      = _empForm.EmployeeCategoryId;
+                entity.EmployeeClassificationId = _empForm.EmployeeClassificationId;
+                entity.BankName                = _empForm.BankName;
+                entity.AccountNumber           = _empForm.AccountNumber;
+                entity.EmergencyContactName    = _empForm.EmergencyContactName;
+                entity.EmergencyContactPhone   = _empForm.EmergencyContactPhone;
+                await EmployeeService.UpdateEmployeeAsync(entity);
+                Snackbar.Add("Employé modifié avec succès.", Severity.Success);
+            }
+            else
+            {
+                var entity = await EmployeeService.CreateEmployeeAsync(
+                    _empForm.EmployeeCode.Trim(),
+                    _empForm.FirstName.Trim(),
+                    _empForm.LastName.Trim(),
+                    _empForm.Email.Trim(),
+                    _empForm.CompanyId,
+                    _empForm.DepartmentId,
+                    _empForm.ServiceId,
+                    _empForm.JobPositionId);
+                entity.PhoneNumber             = _empForm.PhoneNumber;
+                entity.DateOfBirth             = _empForm.DateOfBirth;
+                entity.Gender                  = _empForm.Gender;
+                entity.MaritalStatus           = _empForm.MaritalStatus;
+                entity.Nationality             = _empForm.Nationality;
+                entity.Address                 = _empForm.Address;
+                entity.City                    = _empForm.City;
+                entity.ZipCode                 = _empForm.ZipCode;
+                entity.HireDate                = _empForm.HireDate;
+                entity.EmployeeCategoryId      = _empForm.EmployeeCategoryId;
+                entity.EmployeeClassificationId = _empForm.EmployeeClassificationId;
+                entity.BankName                = _empForm.BankName;
+                entity.AccountNumber           = _empForm.AccountNumber;
+                entity.EmergencyContactName    = _empForm.EmergencyContactName;
+                entity.EmergencyContactPhone   = _empForm.EmergencyContactPhone;
+                await EmployeeService.UpdateEmployeeAsync(entity);
+                Snackbar.Add("Employé créé avec succès.", Severity.Success);
+            }
+            CloseForms();
+            await LoadEmployeesAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    async Task DeactivateEmployeeActionAsync(Employee emp)
+    {
+        if (!await Confirmer($"Désactiver l'employé « {emp.FirstName} {emp.LastName} » ?")) return;
+        try
+        {
+            await EmployeeService.DeactivateEmployeeAsync(emp.Id);
+            Snackbar.Add("Employé désactivé.", Severity.Success);
+            await LoadEmployeesAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       CONTRATS — CRUD
+       ════════════════════════════════════════════════════════════ */
+
+    async Task OpenCreateContract()
+    {
+        var form = new ContractDialog.ContractFormData();
+        var parameters = new DialogParameters<ContractDialog>
+        {
+            { x => x.Form, form }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<ContractDialog>(null, parameters, options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: ContractDialog.ContractFormData data })
+        {
+            _contractForm = new ContractFormModel
+            {
+                ContractNumber = data.ContractNumber,
+                ContractType   = data.ContractType,
+                StartDate      = data.StartDate,
+                EndDate        = data.EndDate
+            };
+            await SaveContractAsync();
+        }
+    }
+
+    async Task SaveContractAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_contractForm.ContractNumber))
+        {
+            Snackbar.Add("Le numéro de contrat est obligatoire.", Severity.Warning);
+            return;
+        }
+        _saving = true;
+        try
+        {
+            var contract = new EmployeeContract
+            {
+                EmployeeId     = _selectedEmpIdForContracts,
+                ContractNumber = _contractForm.ContractNumber.Trim(),
+                ContractType   = _contractForm.ContractType,
+                StartDate      = _contractForm.StartDate,
+                EndDate        = _contractForm.EndDate,
+                IsActive       = true
+            };
+            await EmployeeService.AddContractAsync(contract);
+            Snackbar.Add("Contrat enregistré avec succès.", Severity.Success);
+            CloseForms();
+            await LoadContractsAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       CONGÉS — CRUD
+       ════════════════════════════════════════════════════════════ */
+
+    async Task OpenCreateLeaveRequest()
+    {
+        var form = new LeaveRequestDialog.LeaveRequestFormData();
+        var parameters = new DialogParameters<LeaveRequestDialog>
+        {
+            { x => x.Form, form },
+            { x => x.Employees, _employees },
+            { x => x.LeaveTypes, _leaveTypes }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<LeaveRequestDialog>(null, parameters, options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: LeaveRequestDialog.LeaveRequestFormData data })
+        {
+            _leaveForm = new LeaveRequestFormModel
+            {
+                EmployeeId  = data.EmployeeId,
+                LeaveTypeId = data.LeaveTypeId,
+                StartDate   = data.StartDate,
+                EndDate     = data.EndDate,
+                Reason      = data.Reason
+            };
+            await SaveLeaveRequestAsync();
+        }
+    }
+
+    async Task SaveLeaveRequestAsync()
+    {
+        if (_leaveForm.EmployeeId == 0 || _leaveForm.LeaveTypeId == 0)
+        {
+            Snackbar.Add("L'employé et le type de congé sont obligatoires.", Severity.Warning);
+            return;
+        }
+        if (_leaveForm.EndDate < _leaveForm.StartDate)
+        {
+            Snackbar.Add("La date de fin doit être postérieure à la date de début.", Severity.Warning);
+            return;
+        }
+        _saving = true;
+        try
+        {
+            await LeaveService.CreateLeaveRequestAsync(
+                _leaveForm.EmployeeId,
+                _leaveForm.LeaveTypeId,
+                _leaveForm.StartDate,
+                _leaveForm.EndDate,
+                _leaveForm.Reason ?? "");
+            Snackbar.Add("Demande de congé enregistrée.", Severity.Success);
+            CloseForms();
+            await LoadLeaveAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    async Task ApproveLeaveAsync(int id)
+    {
+        try
+        {
+            await LeaveService.ApproveLeaveRequestAsync(id, 0);
+            Snackbar.Add("Congé approuvé.", Severity.Success);
+            await LoadLeaveAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+    }
+
+    async Task RejectLeaveAsync(int id)
+    {
+        try
+        {
+            await LeaveService.RejectLeaveRequestAsync(id, "Refusé par le responsable.");
+            Snackbar.Add("Congé refusé.", Severity.Warning);
+            await LoadLeaveAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       ABSENCES — CRUD
+       ════════════════════════════════════════════════════════════ */
+
+    async Task OpenCreateAbsence()
+    {
+        var form = new AbsenceDialog.AbsenceFormData();
+        var parameters = new DialogParameters<AbsenceDialog>
+        {
+            { x => x.Form, form },
+            { x => x.Employees, _employees },
+            { x => x.AbsenceTypes, _absenceTypes }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<AbsenceDialog>(null, parameters, options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: AbsenceDialog.AbsenceFormData data })
+        {
+            _absenceForm = new AbsenceFormModel
+            {
+                EmployeeId    = data.EmployeeId,
+                AbsenceTypeId = data.AbsenceTypeId,
+                AbsenceDate   = data.AbsenceDate,
+                Duration      = data.Duration,
+                Reason        = data.Reason
+            };
+            await SaveAbsenceAsync();
+        }
+    }
+
+    async Task SaveAbsenceAsync()
+    {
+        if (_absenceForm.EmployeeId == 0 || _absenceForm.AbsenceTypeId == 0 || _absenceForm.Duration <= 0)
+        {
+            Snackbar.Add("Employé, type d'absence et durée sont obligatoires.", Severity.Warning);
+            return;
+        }
+        _saving = true;
+        try
+        {
+            await AbsenceService.CreateAbsenceAsync(
+                _absenceForm.EmployeeId,
+                _absenceForm.AbsenceTypeId,
+                _absenceForm.AbsenceDate,
+                _absenceForm.Duration,
+                _absenceForm.Reason ?? "");
+            Snackbar.Add("Absence enregistrée.", Severity.Success);
+            CloseForms();
+            await LoadAbsencesAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    async Task ApproveAbsenceActionAsync(int id)
+    {
+        try
+        {
+            await AbsenceService.ApproveAbsenceAsync(id);
+            Snackbar.Add("Absence approuvée.", Severity.Success);
+            await LoadAbsencesAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+    }
+
+    async Task RejectAbsenceActionAsync(int id)
+    {
+        try
+        {
+            await AbsenceService.RejectAbsenceAsync(id);
+            Snackbar.Add("Absence refusée.", Severity.Warning);
+            await LoadAbsencesAsync();
+        }
+        catch (Exception ex) { Snackbar.Add($"Erreur : {ex.Message}", Severity.Error); }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       UTILITAIRES
+       ════════════════════════════════════════════════════════════ */
+
+    async Task<bool> Confirmer(string message)
+    {
+        var result = await DialogService.ShowMessageBox("Confirmation", message,
+            yesText: "Supprimer", cancelText: "Annuler");
+        return result == true;
+    }
+
+    string GetCompanyName(int id)
+        => _companies.FirstOrDefault(c => c.Id == id)?.CompanyName ?? "";
+
+    string GetDepartmentName(int id)
+        => _departments.FirstOrDefault(d => d.Id == id)?.DepartmentName ?? "";
+
+    string GetPositionName(int id)
+        => _positions.FirstOrDefault(p => p.Id == id)?.PositionName ?? "";
+
+    string GetEmployeeName(int id)
+    {
+        var e = _employees.FirstOrDefault(x => x.Id == id);
+        return e is null ? $"#{id}" : $"{e.LastName} {e.FirstName}";
+    }
+
+    string GetLeaveTypeName(int id)
+        => _leaveTypes.FirstOrDefault(lt => lt.Id == id)?.LeaveTypeName ?? $"#{id}";
+
+    string GetAbsenceTypeName(int id)
+        => _absenceTypes.FirstOrDefault(at => at.Id == id)?.AbsenceTypeName ?? $"#{id}";
+
+    /* ════════════════════════════════════════════════════════════
+       MODÈLES LOCAUX — FORMULAIRES
+       ════════════════════════════════════════════════════════════ */
+
+    class CompanyFormModel
+    {
+        public string  CompanyCode { get; set; } = "";
+        public string  CompanyName { get; set; } = "";
+        public string? City        { get; set; }
+        public string? Phone       { get; set; }
+        public string? Email       { get; set; }
+        public string? Country     { get; set; }
+        public string? Address     { get; set; }
+    }
+
+    class EmployeeFormModel
+    {
+        public string   EmployeeCode            { get; set; } = "";
+        public string   FirstName               { get; set; } = "";
+        public string   LastName                { get; set; } = "";
+        public string   Email                   { get; set; } = "";
+        public string?  PhoneNumber             { get; set; }
+        public DateTime DateOfBirth             { get; set; } = DateTime.Today.AddYears(-25);
+        public string   Gender                  { get; set; } = "M";
+        public string?  MaritalStatus           { get; set; }
+        public string?  Nationality             { get; set; }
+        public string?  Address                 { get; set; }
+        public string?  City                    { get; set; }
+        public string?  ZipCode                 { get; set; }
+        public int      CompanyId               { get; set; }
+        public int      DepartmentId            { get; set; }
+        public int      ServiceId               { get; set; }
+        public int      JobPositionId           { get; set; }
+        public int      EmployeeCategoryId      { get; set; }
+        public int      EmployeeClassificationId { get; set; }
+        public string   ContractType            { get; set; } = "CDI";
+        public DateTime HireDate                { get; set; } = DateTime.Today;
+        public string?  BankName                { get; set; }
+        public string?  AccountNumber           { get; set; }
+        public string?  EmergencyContactName    { get; set; }
+        public string?  EmergencyContactPhone   { get; set; }
+    }
+
+    class ContractFormModel
+    {
+        public string    ContractNumber { get; set; } = "";
+        public string    ContractType   { get; set; } = "CDI";
+        public DateTime  StartDate      { get; set; } = DateTime.Today;
+        public DateTime? EndDate        { get; set; }
+    }
+
+    class LeaveRequestFormModel
+    {
+        public int      EmployeeId  { get; set; }
+        public int      LeaveTypeId { get; set; }
+        public DateTime StartDate   { get; set; } = DateTime.Today;
+        public DateTime EndDate     { get; set; } = DateTime.Today.AddDays(1);
+        public string?  Reason      { get; set; }
+    }
+
+    class AbsenceFormModel
+    {
+        public int      EmployeeId    { get; set; }
+        public int      AbsenceTypeId { get; set; }
+        public DateTime AbsenceDate   { get; set; } = DateTime.Today;
+        public int      Duration      { get; set; } = 8;
+        public string?  Reason        { get; set; }
+    }
+
+    class PayrollFormModel
+    {
+        public DateTime PeriodStart       { get; set; } = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        public DateTime PeriodEnd         { get; set; } = new DateTime(DateTime.Today.Year, DateTime.Today.Month,
+                                               DateTime.DaysInMonth(DateTime.Today.Year, DateTime.Today.Month));
+        public decimal  TotalGross        { get; set; }
+        public decimal  TotalNet          { get; set; }
+        public decimal  TotalDeductions   { get; set; }
+        public int      NumberOfEmployees { get; set; }
+        public string?  Notes             { get; set; }
+    }
+
+    class SalaryCompFormModel
+    {
+        public string   ComponentCode     { get; set; } = "";
+        public string   ComponentName     { get; set; } = "";
+        public string   ComponentType     { get; set; } = "Base";
+        public string   CalculationMethod { get; set; } = "Fixed";
+        public decimal? DefaultAmount     { get; set; }
+        public decimal? Percentage        { get; set; }
+        public string?  Description       { get; set; }
+    }
+
+    class PayrollDetailFormModel
+    {
+        public int      EmployeeId       { get; set; }
+        public decimal  BaseSalary       { get; set; }
+        public decimal  GrossSalary      { get; set; }
+        public decimal  TaxAmount        { get; set; }
+        public decimal  InsuranceAmount  { get; set; }
+        public decimal  OtherDeductions  { get; set; }
+        public decimal  NetSalary        { get; set; }
+        public string?  Notes            { get; set; }
+    }
+}

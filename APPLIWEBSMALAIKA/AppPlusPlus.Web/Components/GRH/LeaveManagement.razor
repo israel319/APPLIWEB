@@ -1,0 +1,266 @@
+@page "/grh/leaves"
+@using AppPlusPlus.Application.Services.GRH
+@using AppPlusPlus.Application.DTOs.GRH.Leave
+@using MudBlazor
+@inject ILeaveService LeaveService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+<PageTitle>@AppSettings.AppName — Congés</PageTitle>
+
+<div class="aw-page aw-page--workspace">
+    <div class="aw-workspace">
+        <header class="aw-object-head">
+            <div class="aw-object-head__identity">
+                <p class="aw-object-head__eyebrow">Module GRH</p>
+                <h1 class="aw-object-head__title">Gestion des congés</h1>
+                <p class="aw-object-head__desc">Demandes, validation et suivi</p>
+            </div>
+        </header>
+
+        <nav class="aw-modnav" aria-label="Filtres demandes" role="tablist">
+            <button type="button" role="tab" aria-selected="@(activeTabIndex == 0)"
+                    class="aw-modnav__item @(activeTabIndex == 0 ? "aw-modnav__item--active" : "")"
+                    @onclick="@(() => activeTabIndex = 0)">
+                <i class="bi bi-list-ul" aria-hidden="true"></i>
+                <span>Toutes les demandes</span>
+            </button>
+            <button type="button" role="tab" aria-selected="@(activeTabIndex == 1)"
+                    class="aw-modnav__item @(activeTabIndex == 1 ? "aw-modnav__item--active" : "")"
+                    @onclick="@(() => activeTabIndex = 1)">
+                <i class="bi bi-hourglass-split" aria-hidden="true"></i>
+                <span>En attente</span>
+            </button>
+            <button type="button" role="tab" aria-selected="@(activeTabIndex == 2)"
+                    class="aw-modnav__item @(activeTabIndex == 2 ? "aw-modnav__item--active" : "")"
+                    @onclick="@(() => activeTabIndex = 2)">
+                <i class="bi bi-check-circle" aria-hidden="true"></i>
+                <span>Approuvées</span>
+            </button>
+            <button type="button" role="tab" aria-selected="@(activeTabIndex == 3)"
+                    class="aw-modnav__item @(activeTabIndex == 3 ? "aw-modnav__item--active" : "")"
+                    @onclick="@(() => activeTabIndex = 3)">
+                <i class="bi bi-x-circle" aria-hidden="true"></i>
+                <span>Rejetées</span>
+            </button>
+        </nav>
+
+        <div class="aw-workspace__body">
+            <div class="aw-actionbar">
+                <div class="aw-actionbar__actions">
+                    <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="LoadLeaveRequests">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="OpenCreateDialog">
+                        <i class="bi bi-plus-lg"></i> Nouvelle demande
+                    </button>
+                </div>
+            </div>
+
+            @if (isLoading)
+            {
+                <div class="aw-table-region">
+                    <div class="aw-loading">
+                        <span class="aw-spinner" role="status" aria-hidden="true"></span>
+                        <span>Chargement des demandes…</span>
+                    </div>
+                </div>
+            }
+            else if (leaveRequests.Count == 0)
+            {
+                <div class="aw-table-region">
+                    <div class="aw-empty">
+                        <i class="bi bi-calendar-check"></i>
+                        <p>Aucune demande de congé trouvée.</p>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="aw-table-region">
+                    <MudDataGrid Items="@leaveRequests" Hover="true" Bordered="false" Dense="true"
+                                 Striped="true" Elevation="0">
+                        <Columns>
+                            <PropertyColumn Property="x => x.RequestNumber" Title="Numéro" />
+                            <PropertyColumn Property="x => x.EmployeeName" Title="Employé" />
+                            <PropertyColumn Property="x => x.LeaveTypeName" Title="Type" />
+                            <PropertyColumn Property="x => x.StartDate" Title="Du" Format="dd/MM/yyyy" />
+                            <PropertyColumn Property="x => x.EndDate" Title="Au" Format="dd/MM/yyyy" />
+                            <TemplateColumn Title="Jours">
+                                <CellTemplate>
+                                    @((context.Item.EndDate - context.Item.StartDate).Days + 1)
+                                </CellTemplate>
+                            </TemplateColumn>
+                            <PropertyColumn Property="x => x.Status" Title="Statut">
+                                <CellTemplate>
+                                    <MudChip Size="Size.Small" Label="true"
+                                             Color="@GetStatusColor(context.Item.Status)">
+                                        @context.Item.Status
+                                    </MudChip>
+                                </CellTemplate>
+                            </PropertyColumn>
+                            <TemplateColumn CellClass="d-flex gap-2" Title="Actions">
+                                <CellTemplate>
+                                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Visibility"
+                                                  Color="Color.Info" OnClick="() => ViewLeaveRequest(context.Item.Id)" />
+                                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Edit"
+                                                  Color="Color.Primary" OnClick="() => EditLeaveRequest(context.Item.Id)" />
+                                </CellTemplate>
+                            </TemplateColumn>
+                        </Columns>
+                        <PagerContent>
+                            <MudDataGridPager T="LeaveRequestListDto" />
+                        </PagerContent>
+                    </MudDataGrid>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@if (showDialog && formModel != null)
+{
+    <div class="aw-page" style="max-width:480px;margin:0 auto 2rem;">
+        <div class="aw-form">
+            <header class="aw-form__head">
+                <div>
+                    <p class="aw-form__eyebrow">Congés</p>
+                    <h1 class="aw-form__title">Nouvelle demande de congé</h1>
+                </div>
+                <div class="aw-form__actions">
+                    <button type="button" class="aw-btn aw-btn--ghost" @onclick="CloseDialog">Annuler</button>
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="SaveLeaveRequest">Enregistrer</button>
+                </div>
+            </header>
+            <div class="aw-form__body">
+                <div class="aw-form__grid">
+                    <div class="aw-field">
+                        <AwDateField Label="Date de début" @bind-Value="leaveStartDate" />
+                    </div>
+                    <div class="aw-field">
+                        <AwDateField Label="Date de fin" @bind-Value="leaveEndDate" />
+                    </div>
+                    <div class="aw-field aw-form__span-2">
+                        <label class="aw-field__label">Motif</label>
+                        <MudTextField @bind-Value="formModel.Reason" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="3" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Type de congé</label>
+                        <MudNumericField @bind-Value="formModel.LeaveTypeId" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<LeaveRequestListDto> leaveRequests = new();
+    private bool isLoading = false;
+    private bool showDialog = false;
+    private int activeTabIndex = 0;
+    private CreateLeaveRequestDto? formModel;
+    private DateTime? leaveStartDate;
+    private DateTime? leaveEndDate;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadLeaveRequests();
+    }
+
+    private async Task LoadLeaveRequests()
+    {
+        try
+        {
+            isLoading = true;
+            var pendingRequests = await LeaveService.GetPendingLeaveRequestsAsync();
+            leaveRequests = pendingRequests.Select(request => new LeaveRequestListDto
+            {
+                Id = request.Id,
+                RequestNumber = request.RequestNumber,
+                EmployeeName = request.Employee != null
+                    ? $"{request.Employee.FirstName} {request.Employee.LastName}"
+                    : string.Empty,
+                LeaveTypeName = request.LeaveType?.LeaveTypeName ?? string.Empty,
+                StartDate = request.StartDate,
+                EndDate = request.EndDate,
+                Status = request.Status.ToString()
+            }).ToList();
+            isLoading = false;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Erreur: {ex.Message}", Severity.Error);
+            isLoading = false;
+        }
+    }
+
+    private void OpenCreateDialog()
+    {
+        formModel = new CreateLeaveRequestDto();
+        leaveStartDate = DateTime.Today;
+        leaveEndDate = DateTime.Today;
+        showDialog = true;
+    }
+
+    private void EditLeaveRequest(int id)
+    {
+        // TODO: Charger les données
+        formModel = new CreateLeaveRequestDto();
+        leaveStartDate = DateTime.Today;
+        leaveEndDate = DateTime.Today;
+        showDialog = true;
+    }
+
+    private void ViewLeaveRequest(int id)
+    {
+        Navigation.NavigateTo($"/grh/leaves/{id}");
+    }
+
+    private async Task SaveLeaveRequest()
+    {
+        if (formModel != null)
+        {
+            try
+            {
+                formModel.StartDate = leaveStartDate ?? DateTime.Today;
+                formModel.EndDate = leaveEndDate ?? formModel.StartDate;
+
+                await LeaveService.CreateLeaveRequestAsync(
+                    formModel.EmployeeId,
+                    formModel.LeaveTypeId,
+                    formModel.StartDate,
+                    formModel.EndDate,
+                    formModel.Reason ?? string.Empty);
+
+                Snackbar.Add("Demande de congé enregistrée", Severity.Success);
+                CloseDialog();
+                await LoadLeaveRequests();
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Erreur: {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    private void CloseDialog()
+    {
+        showDialog = false;
+        formModel = null;
+        leaveStartDate = null;
+        leaveEndDate = null;
+    }
+
+    private Color GetStatusColor(string status)
+    {
+        return status?.ToLower() switch
+        {
+            "approved" => Color.Success,
+            "pending" => Color.Warning,
+            "rejected" => Color.Error,
+            "draft" => Color.Default,
+            _ => Color.Default
+        };
+    }
+}

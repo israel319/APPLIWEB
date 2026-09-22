@@ -1,0 +1,164 @@
+@page "/admin/versement/nouveau"
+@page "/admin/versement/modifier/{ExpenseId:int}"
+@rendermode InteractiveServer
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@inject IApproService ApproService
+@inject ILookupService LookupService
+@inject IUserCurrencyPreferenceService UserCurrency
+@inject AuthenticationStateProvider AuthStateProvider
+@using AppPlusPlus.Domain.Common
+@using AppPlusPlus.Application.Services.Administration
+@inject IPermissionResolver PermissionResolver
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>@AppSettings.AppName — @(_isEdit ? "Modifier le versement" : "Nouveau versement")</PageTitle>
+
+<div class="aw-page">
+    <EditForm Model="@_item" OnValidSubmit="@OnSubmit">
+        <div class="aw-form">
+            <header class="aw-form__head">
+                <div>
+                    <p class="aw-form__eyebrow">Administration</p>
+                    <h1 class="aw-form__title">@(_isEdit ? "Modifier le versement" : "Nouveau versement")</h1>
+                </div>
+                <div class="aw-form__actions">
+                    <button type="button" class="aw-btn aw-btn--ghost" @onclick="@OnCancel">
+                        <i class="bi bi-arrow-left"></i> Annuler
+                    </button>
+                    <button type="submit" class="aw-btn aw-btn--primary">
+                        <i class="bi bi-check-lg"></i> Enregistrer
+                    </button>
+                </div>
+            </header>
+            <div class="aw-form__body">
+                @if (_item.VersementId.HasValue)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                        Versement lié à la clôture N°@_item.VersementId — certaines infos sont en lecture seule.
+                    </MudAlert>
+                }
+
+                <div class="aw-form__grid">
+                    <div class="aw-field">
+                        <label class="aw-field__label">Source</label>
+                        <MudSelect T="int" @bind-Value="_item.SourceId" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Clearable="true"
+                                   Placeholder="Choisir" Disabled="@_item.VersementId.HasValue">
+                            @foreach (var s in _sources)
+                            {
+                                <MudSelectItem T="int" Value="@s.Id">@s.Sources</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Caisse de destination</label>
+                        <MudSelect T="int?" @bind-Value="_item.CaisseId" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Clearable="true"
+                                   Placeholder="Choisir">
+                            @foreach (var c in _caisses)
+                            {
+                                <MudSelectItem T="int?" Value="@c.CaisseId">@c.Description</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </div>
+                    <div class="aw-field aw-form__span-2">
+                        <label class="aw-field__label">Motif / Description</label>
+                        <input type="text" class="aw-input" @bind="_item.Description" maxlength="200"
+                               placeholder="Ex : Versement recette du jour, remise fournisseur…" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Devise</label>
+                        <MudSelect T="int?" @bind-Value="_item.CurrencyId" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Clearable="true"
+                                   Placeholder="Choisir">
+                            @foreach (var m in _monnaies)
+                            {
+                                <MudSelectItem T="int?" Value="@m.IdMonais">@m.DescriptionMonais</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Montant USD</label>
+                        <MudNumericField @bind-Value="_item.AmountUSD" T="decimal?" Format="N2" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                         Placeholder="0.00" Disabled="@_item.VersementId.HasValue" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Montant CDF</label>
+                        <MudNumericField @bind-Value="_item.AmountCDF" T="decimal?" Format="N2" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                         Placeholder="0.00" Disabled="@_item.VersementId.HasValue" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Déposeur</label>
+                        <input type="text" class="aw-input" @bind="_item.Depositeur" maxlength="100"
+                               placeholder="Nom de la personne qui dépose" />
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Commentaire</label>
+                        <input type="text" class="aw-input" @bind="_item.Comment" maxlength="200"
+                               placeholder="Optionnel" />
+                    </div>
+                </div>
+            </div>
+        </div>
+    </EditForm>
+</div>
+
+@code {
+    [Parameter] public int? ExpenseId { get; set; }
+
+    bool _isEdit;
+    ApproExpense _item = new();
+    List<ExpenseSource> _sources = new();
+    List<Caisse> _caisses = new();
+    List<Money> _monnaies = new();
+    string _currentLogin = "";
+    string _backRoute = "/administration";
+
+    void OnCancel() => Navigation.NavigateTo(_backRoute);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+            if (!string.IsNullOrEmpty(_currentLogin))
+            {
+                var perms = await PermissionResolver.GetPermissionsAsync(_currentLogin);
+                _backRoute = perms.HasHierarchicalGrants
+                    ? PermissionCatalog.TabHubRoute("administration", perms.Grants)
+                    : "/administration";
+            }
+        }
+
+        _sources = await LookupService.GetExpenseSourcesAsync();
+        _caisses = await LookupService.GetCaissesAsync();
+        _monnaies = await LookupService.GetMoneysAsync();
+
+        await UserCurrency.EnsureLoadedAsync();
+        if (!ExpenseId.HasValue && !_item.CurrencyId.HasValue)
+            _item.CurrencyId = UserCurrency.PreferredMoneyId;
+
+        if (ExpenseId.HasValue)
+        {
+            _isEdit = true;
+            var existing = await ApproService.GetApproExpenseByIdAsync(ExpenseId.Value);
+            if (existing != null) _item = existing;
+        }
+    }
+
+    async Task OnSubmit()
+    {
+        _item.UserLogin = _currentLogin;
+        _item.CreationDate = DateTime.Now;
+        _item.MoneyId = _item.CurrencyId ?? _item.MoneyId;
+        if (_isEdit)
+            await ApproService.UpdateApproExpenseAsync(_item);
+        else
+            await ApproService.AddApproExpenseAsync(_item);
+        Navigation.NavigateTo(_backRoute);
+    }
+}

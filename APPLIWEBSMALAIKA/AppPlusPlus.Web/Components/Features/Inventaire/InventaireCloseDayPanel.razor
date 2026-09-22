@@ -1,0 +1,237 @@
+@using MudBlazor
+@using AppPlusPlus.Application.DTOs.Inventaire
+@using AppPlusPlus.Application.Services.Inventaire
+@using AppPlusPlus.Domain.Common
+@using System.Globalization
+@inject IInventaireService InventaireService
+@inject ISnackbar Snackbar
+
+<section class="aw-inventaire-slip aw-inventaire-slip--close" aria-label="Clôture de la journée">
+    <div class="aw-inventaire-slip__head">
+        <div>
+            <p class="aw-inventaire-slip__kicker">Clôture</p>
+            <h3 class="aw-inventaire-slip__title">
+                @DateJour.ToString("dddd dd MMMM yyyy", CultureInfo.GetCultureInfo("fr-FR"))
+            </h3>
+        </div>
+        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="() => OnCancel.InvokeAsync()" title="Fermer">
+            <i class="bi bi-x-lg"></i>
+        </button>
+    </div>
+
+    <dl class="aw-inventaire-slip__rows">
+        <div class="aw-inventaire-slip__row">
+            <dt>Départ</dt>
+            <dd>@CurrencyFormat.Cdf(Session.MontantInitial, "N0")</dd>
+        </div>
+        <div class="aw-inventaire-slip__row aw-inventaire-slip__row--plus">
+            <dt>Réception du jour</dt>
+            <dd>
+                @if (Reception is null || Reception.NbLignes == 0)
+                {
+                    <span class="aw-table__meta">Aucune</span>
+                }
+                else
+                {
+                    <span>+ @CurrencyFormat.Cdf(ReceptionMontant, "N0")</span>
+                    <span class="aw-inventaire-slip__meta">@Reception.NbLignes ligne(s)</span>
+                }
+            </dd>
+        </div>
+    </dl>
+
+    <div class="aw-inventaire-slip__form">
+        <div class="aw-inventaire-slip__field">
+            <label for="close-ventes">Ventes</label>
+            <div class="aw-inventaire-slip__input-wrap">
+                <input id="close-ventes"
+                       type="number"
+                       class="aw-input"
+                       value="@FormatAmountInput(_montantVentes)"
+                       @onchange="OnVentesChanged"
+                       min="0"
+                       step="1000"
+                       placeholder="Montant" />
+                <span>FC</span>
+            </div>
+        </div>
+        <div class="aw-inventaire-slip__field">
+            <label for="close-depenses">Dépenses</label>
+            <div class="aw-inventaire-slip__input-wrap">
+                <input id="close-depenses"
+                       type="number"
+                       class="aw-input"
+                       value="@FormatAmountInput(_montantDepenses)"
+                       @onchange="OnDepensesChanged"
+                       min="0"
+                       step="1000"
+                       placeholder="Montant" />
+                <span>FC</span>
+            </div>
+        </div>
+        @if (_montantDepenses > 0)
+        {
+            <div class="aw-inventaire-slip__field aw-inventaire-slip__field--full">
+                <label for="close-observation">
+                    Observation <span class="aw-field__required" aria-hidden="true">*</span>
+                </label>
+                <textarea id="close-observation"
+                          class="aw-input aw-inventaire-slip__textarea @(_observationError ? "aw-input--invalid" : "")"
+                          rows="3"
+                          maxlength="255"
+                          placeholder="Commentaire obligatoire pour justifier la dépense…"
+                          value="@_observation"
+                          @oninput="OnObservationInput"></textarea>
+                @if (_observationError)
+                {
+                    <p class="aw-field__error">Indiquez un commentaire lorsque des dépenses sont saisies.</p>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="aw-inventaire-slip__total">
+        <span>Il restera</span>
+        <strong>@CurrencyFormat.Cdf(ResteApresCloture, "N0")</strong>
+    </div>
+
+    <div class="aw-inventaire-slip__actions">
+        @if (Reception?.Statut == InventaireReceptionStatut.Ouvert && Reception.NbLignes > 0)
+        {
+            <button type="button" class="aw-btn aw-btn--ghost" @onclick="() => OnBackToReception.InvokeAsync()" disabled="@_saving">
+                <i class="bi bi-arrow-left"></i> Retour réception
+            </button>
+        }
+        else
+        {
+            <button type="button" class="aw-btn aw-btn--ghost" @onclick="() => OnCancel.InvokeAsync()" disabled="@_saving">Annuler</button>
+        }
+        <button type="button" class="aw-btn aw-btn--primary" @onclick="ConfirmAsync" disabled="@_saving">
+            <i class="bi bi-lock"></i> Confirmer la clôture
+        </button>
+    </div>
+</section>
+
+@code {
+    [Parameter] public InventaireSessionDto Session { get; set; } = default!;
+    [Parameter] public InventaireReceptionDto? Reception { get; set; }
+    [Parameter] public DateOnly DateJour { get; set; }
+    [Parameter] public decimal VentesAutresJours { get; set; }
+    [Parameter] public decimal InitialVentes { get; set; }
+    [Parameter] public decimal InitialDepenses { get; set; }
+    [Parameter] public string? InitialObservation { get; set; }
+    [Parameter] public string UserLogin { get; set; } = "";
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback OnBackToReception { get; set; }
+    [Parameter] public EventCallback OnClosed { get; set; }
+
+    decimal _montantVentes;
+    decimal _montantDepenses;
+    string _observation = "";
+    bool _observationError;
+    bool _saving;
+    int _formInitKey;
+
+    decimal ReceptionMontant =>
+        Reception?.Statut == InventaireReceptionStatut.Ouvert ? Reception.MontantTotal
+        : Reception?.MontantTotal ?? 0;
+
+    decimal ReceptionsTotales =>
+        Session.MontantReceptions + (Reception?.Statut == InventaireReceptionStatut.Ouvert ? Reception.MontantTotal : 0);
+
+    decimal ResteApresCloture =>
+        Session.MontantInitial + ReceptionsTotales - VentesAutresJours - _montantVentes - _montantDepenses;
+
+    protected override void OnParametersSet()
+    {
+        var key = HashCode.Combine(Session.IdInventaire, DateJour);
+        if (_formInitKey == key)
+            return;
+
+        _formInitKey = key;
+        _montantVentes = InitialVentes;
+        _montantDepenses = InitialDepenses;
+        _observation = InitialDepenses > 0 && !string.IsNullOrWhiteSpace(InitialObservation)
+            ? InitialObservation.Trim()
+            : "";
+        _observationError = false;
+    }
+
+    static string? FormatAmountInput(decimal value) =>
+        value == 0 ? null : value.ToString(CultureInfo.InvariantCulture);
+
+    static decimal ParseAmount(object? value)
+    {
+        if (value is null)
+            return 0;
+
+        var text = value.ToString();
+        if (string.IsNullOrWhiteSpace(text))
+            return 0;
+
+        return decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed)
+            ? Math.Max(0, parsed)
+            : 0;
+    }
+
+    void OnVentesChanged(ChangeEventArgs e) => _montantVentes = ParseAmount(e.Value);
+
+    void OnDepensesChanged(ChangeEventArgs e)
+    {
+        _montantDepenses = ParseAmount(e.Value);
+        if (_montantDepenses <= 0)
+        {
+            _observation = "";
+            _observationError = false;
+        }
+    }
+
+    void OnObservationInput(ChangeEventArgs e) => _observation = e.Value?.ToString() ?? "";
+
+    async Task ConfirmAsync()
+    {
+        _observationError = false;
+
+        if (_montantDepenses > 0 && string.IsNullOrWhiteSpace(_observation))
+        {
+            _observationError = true;
+            Snackbar.Add("Une observation est obligatoire lorsqu'il y a des dépenses.", Severity.Warning);
+            return;
+        }
+        if (_montantVentes <= 0 && _montantDepenses <= 0 &&
+            (Reception is null || Reception.NbLignes == 0))
+        {
+            Snackbar.Add("Saisissez les ventes ou dépenses, ou ajoutez des lignes à la réception.", Severity.Warning);
+            return;
+        }
+
+        if (Reception?.Statut == InventaireReceptionStatut.Ouvert && Reception.NbLignes == 0)
+        {
+            Snackbar.Add("La réception ouverte n'a aucune ligne.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            await InventaireService.CloseDayAsync(new InventaireCloseDayRequest
+            {
+                IdInventaire = Session.IdInventaire,
+                DateJour = DateJour,
+                MontantVentes = _montantVentes,
+                MontantDepenses = _montantDepenses,
+                Observation = string.IsNullOrWhiteSpace(_observation) ? null : _observation.Trim(),
+                UserLogin = UserLogin
+            });
+            await OnClosed.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

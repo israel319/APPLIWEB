@@ -1,0 +1,198 @@
+@page "/grh/recruitment"
+@using AppPlusPlus.Application.Services.GRH
+@using AppPlusPlus.Application.DTOs.GRH.Recruitment
+@using MudBlazor
+@inject IRecruitmentService RecruitmentService
+@inject ISnackbar Snackbar
+
+<PageTitle>@AppSettings.AppName — Recrutement</PageTitle>
+
+<div class="aw-page aw-page--workspace">
+    <div class="aw-workspace">
+        <header class="aw-object-head">
+            <div class="aw-object-head__identity">
+                <p class="aw-object-head__eyebrow">Module GRH</p>
+                <h1 class="aw-object-head__title">Recrutement</h1>
+                <p class="aw-object-head__desc">Offres d'emploi et candidats</p>
+            </div>
+        </header>
+
+        <nav class="aw-modnav" aria-label="Sections recrutement" role="tablist">
+            <button type="button" role="tab" aria-selected="@(_tab == 0)"
+                    class="aw-modnav__item @(_tab == 0 ? "aw-modnav__item--active" : "")"
+                    @onclick="@(() => _tab = 0)">
+                <i class="bi bi-briefcase" aria-hidden="true"></i>
+                <span>Offres d'emploi</span>
+            </button>
+            <button type="button" role="tab" aria-selected="@(_tab == 1)"
+                    class="aw-modnav__item @(_tab == 1 ? "aw-modnav__item--active" : "")"
+                    @onclick="@(() => _tab = 1)">
+                <i class="bi bi-person" aria-hidden="true"></i>
+                <span>Candidats</span>
+            </button>
+        </nav>
+
+        <div class="aw-workspace__body">
+            @if (_tab == 0)
+            {
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--primary" @onclick="OpenJobOpeningDialog">
+                            <i class="bi bi-plus-lg"></i> Nouvelle offre
+                        </button>
+                    </div>
+                </div>
+
+                @if (isLoading)
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-loading">
+                            <span class="aw-spinner" role="status" aria-hidden="true"></span>
+                            <span>Chargement des offres…</span>
+                        </div>
+                    </div>
+                }
+                else if (jobOpenings.Count > 0)
+                {
+                    <div class="aw-table-region">
+                        <MudDataGrid Items="@jobOpenings" Hover="true" Bordered="false" Dense="true"
+                                     Striped="true" Elevation="0">
+                            <Columns>
+                                <PropertyColumn Property="x => x.OpeningCode" Title="Code" />
+                                <PropertyColumn Property="x => x.JobTitle" Title="Titre" />
+                                <PropertyColumn Property="x => x.PositionName" Title="Poste" />
+                                <PropertyColumn Property="x => x.NumberOfPositions" Title="Postes" />
+                                <PropertyColumn Property="x => x.Status" Title="Statut">
+                                    <CellTemplate>
+                                        <MudChip Size="Size.Small" Label="true"
+                                                 Color="@GetOpeningStatusColor(context.Item.Status)">
+                                            @context.Item.Status
+                                        </MudChip>
+                                    </CellTemplate>
+                                </PropertyColumn>
+                                <PropertyColumn Property="x => x.CandidateCount" Title="Candidats" />
+                            </Columns>
+                        </MudDataGrid>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-briefcase"></i>
+                            <p>Aucune offre d'emploi.</p>
+                        </div>
+                    </div>
+                }
+            }
+            else
+            {
+                @if (isLoading)
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-loading">
+                            <span class="aw-spinner" role="status" aria-hidden="true"></span>
+                            <span>Chargement des candidats…</span>
+                        </div>
+                    </div>
+                }
+                else if (candidates.Count > 0)
+                {
+                    <div class="aw-table-region">
+                        <MudDataGrid Items="@candidates" Hover="true" Bordered="false" Dense="true"
+                                     Striped="true" Elevation="0">
+                            <Columns>
+                                <PropertyColumn Property="x => x.CandidateCode" Title="Code" />
+                                <PropertyColumn Property="x => x.FullName" Title="Nom" />
+                                <PropertyColumn Property="x => x.Email" Title="Email" />
+                                <PropertyColumn Property="x => x.CurrentPosition" Title="Poste Actuel" />
+                                <PropertyColumn Property="x => x.Status" Title="Statut">
+                                    <CellTemplate>
+                                        <MudChip Size="Size.Small" Label="true"
+                                                 Color="@GetCandidateStatusColor(context.Item.Status)">
+                                            @context.Item.Status
+                                        </MudChip>
+                                    </CellTemplate>
+                                </PropertyColumn>
+                                <PropertyColumn Property="x => x.Rating" Title="Score" />
+                                <TemplateColumn CellClass="d-flex gap-2" Title="Actions">
+                                    <CellTemplate>
+                                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Visibility"
+                                                      Color="Color.Info" />
+                                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Edit"
+                                                      Color="Color.Primary" />
+                                    </CellTemplate>
+                                </TemplateColumn>
+                            </Columns>
+                        </MudDataGrid>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-person"></i>
+                            <p>Aucun candidat.</p>
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<JobOpeningReadDto> jobOpenings = new();
+    private List<CandidateReadDto> candidates = new();
+    private int _tab = 0;
+    private bool isLoading = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadRecruitmentData();
+    }
+
+    private async Task LoadRecruitmentData()
+    {
+        try
+        {
+            isLoading = true;
+            // TODO: Appeler les services
+            await Task.Delay(500);
+            isLoading = false;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Erreur: {ex.Message}", Severity.Error);
+            isLoading = false;
+        }
+    }
+
+    private void OpenJobOpeningDialog()
+    {
+        // TODO: Ouvrir le dialog pour créer une offre
+    }
+
+    private Color GetOpeningStatusColor(string status)
+    {
+        return status?.ToLower() switch
+        {
+            "open" => Color.Success,
+            "closed" => Color.Error,
+            "onhold" => Color.Warning,
+            _ => Color.Default
+        };
+    }
+
+    private Color GetCandidateStatusColor(string status)
+    {
+        return status?.ToLower() switch
+        {
+            "hired" => Color.Success,
+            "rejected" => Color.Error,
+            "shortlisted" => Color.Warning,
+            "new" => Color.Info,
+            _ => Color.Default
+        };
+    }
+}

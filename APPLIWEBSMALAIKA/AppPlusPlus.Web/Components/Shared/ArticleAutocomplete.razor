@@ -1,0 +1,97 @@
+@using MudBlazor
+@using AppPlusPlus.Domain.Entities.Stock
+
+<div class="search-autocomplete-wrap">
+    <MudAutocomplete T="string"
+                     @bind-Text="_localText"
+                     Value="@Value"
+                     ValueChanged="OnValueChanged"
+                     SearchFunc="@Search"
+                     ToStringFunc="@FormatArticle"
+                     Placeholder="@Placeholder"
+                     Clearable="true"
+                     CoerceText="true"
+                     ResetValueOnEmptyText="true"
+                     Variant="Variant.Outlined"
+                     Margin="Margin.Dense"
+                     Dense="true"
+                     Class="search-autocomplete"
+                     InputClass="@MudSearchDefaults.InputClass"
+                     PopoverClass="@MudSearchDefaults.PopoverClass"
+                     DropdownSettings="@MudSearchDefaults.Dropdown"
+                     AnchorOrigin="Origin.BottomLeft"
+                     TransformOrigin="Origin.TopLeft"
+                     RelativeWidth="DropdownWidth.Relative"
+                     MaxHeight="200"
+                     MaxItems="12"
+                     MinCharacters="@MinCharacters"
+                     OpenOnFocus="@OpenOnFocus"
+                     DebounceInterval="80"
+                     Immediate="true">
+        <ItemTemplate Context="id">
+            @{
+                var art = Articles.FirstOrDefault(a => a.IdArticle == id);
+            }
+            <div class="lh-sm py-1">
+                <div class="fw-medium">@(art?.Description ?? id)</div>
+                @if (art != null && !string.IsNullOrWhiteSpace(art.IdArticle))
+                {
+                    <small class="text-muted">@art.IdArticle</small>
+                }
+            </div>
+        </ItemTemplate>
+    </MudAutocomplete>
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public List<Article> Articles { get; set; } = new();
+    [Parameter] public string Placeholder { get; set; } = "Rechercher un article…";
+    [Parameter] public int MinCharacters { get; set; } = 1;
+    [Parameter] public bool OpenOnFocus { get; set; }
+
+    string? _localText;
+    string? _syncValue;
+
+    protected override void OnParametersSet()
+    {
+        if (!string.Equals(Value, _syncValue, StringComparison.Ordinal))
+        {
+            _syncValue = Value;
+            _localText = string.IsNullOrWhiteSpace(Value) ? null : FormatArticle(Value);
+        }
+    }
+
+    async Task OnValueChanged(string? val)
+    {
+        _syncValue = val;
+        if (!string.IsNullOrWhiteSpace(val))
+        {
+            var art = Articles.FirstOrDefault(a => a.IdArticle == val)
+                   ?? Articles.FirstOrDefault(a => a.Description != null
+                        && a.Description.Equals(val.Trim(), StringComparison.OrdinalIgnoreCase));
+            _localText = art?.Description ?? val;
+        }
+        else
+        {
+            _localText = null;
+        }
+        await ValueChanged.InvokeAsync(val);
+    }
+
+    string FormatArticle(string? id) =>
+        Articles.FirstOrDefault(a => a.IdArticle == id)?.Description ?? id ?? "";
+
+    Task<IEnumerable<string>> Search(string? value, CancellationToken _)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return Task.FromResult(Enumerable.Empty<string>());
+
+        var q = Articles.Where(a =>
+            (a.Description != null && a.Description.Contains(value, StringComparison.OrdinalIgnoreCase))
+            || a.IdArticle.Contains(value, StringComparison.OrdinalIgnoreCase));
+
+        return Task.FromResult(q.Select(a => a.IdArticle).Take(12));
+    }
+}

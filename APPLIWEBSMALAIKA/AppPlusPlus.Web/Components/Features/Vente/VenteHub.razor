@@ -1,0 +1,2123 @@
+@page "/vente"
+@rendermode InteractiveServer
+@inject IFacturationService FacturationService
+@inject ILivraisonService LivraisonService
+@inject IClotureService ClotureService
+@inject ILocalisationService LocalisationService
+@inject IPermissionResolver PermissionResolver
+@inject MudBlazor.IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IFinanceService FinanceService
+@inject IUserCurrencyPreferenceService UserCurrency
+@using System.Security.Claims
+@using AppPlusPlus.Domain.Entities.Finance
+@implements IDisposable
+
+<ModuleGuard ModuleCode="vente" ModuleName="Ventes & Facturation">
+
+<PageTitle>@AppSettings.AppName — Ventes</PageTitle>
+
+@if (!_loaded)
+{
+    <div class="aw-page">
+        <AwSkeleton Variant="page" Rows="7" />
+    </div>
+}
+else
+{
+    @if (!_hasSalesReadAccess)
+    {
+        <div class="aw-page">
+            <div class="aw-shell" style="max-width:720px;margin:1.5rem auto;">
+                <div class="aw-empty">
+                    <i class="bi bi-lock"></i>
+                    <p><strong>Accès refusé</strong><br />Votre rôle ne possède pas les droits de lecture sur les ventes.</p>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+    <div class="aw-page aw-page--workspace">
+        <div class="aw-workspace">
+            <header class="aw-object-head">
+                <div class="aw-object-head__identity">
+                    <h1 class="aw-object-head__title">Ventes</h1>
+                    <p class="aw-object-head__desc">
+                        @GetVenteSectionDescription()
+                        @if (_activePeriode != null)
+                        {
+                            <text> · Période : @_activePeriode.FromDate?.ToString("dd/MM/yyyy") — @_activePeriode.ToDate?.ToString("dd/MM/yyyy")</text>
+                            @if (!string.IsNullOrWhiteSpace(_activePeriode.Comment))
+                            {
+                                <text> (@_activePeriode.Comment)</text>
+                            }
+                        }
+                        else
+                        {
+                            <text> · <span style="color:var(--aw-accent);">Aucune période active</span></text>
+                        }
+                    </p>
+                </div>
+            </header>
+
+            <nav class="aw-railnav" aria-label="Sections ventes" role="tablist">
+                @if (_canFacturationRead)
+                {
+                    <button type="button" role="tab" aria-selected="@(_tab == 0)"
+                            class="aw-railnav__item @(_tab == 0 ? "aw-railnav__item--active" : "")"
+                            title="Factures"
+                            @onclick="@(async () => await OnTabChange(0))">
+                        <i class="bi bi-file-text" aria-hidden="true"></i>
+                        Factures
+                        @if (_factData.Count > 0)
+                        {
+                            <span class="aw-railnav__count">@_factData.Count</span>
+                        }
+                    </button>
+                }
+                @if (_canLivraisonRead)
+                {
+                    <button type="button" role="tab" aria-selected="@(_tab == 1)"
+                            class="aw-railnav__item @(_tab == 1 ? "aw-railnav__item--active" : "")"
+                            title="Livraisons"
+                            @onclick="@(async () => await OnTabChange(1))">
+                        <i class="bi bi-truck" aria-hidden="true"></i>
+                        Livraisons
+                        @if (_livData.Count > 0)
+                        {
+                            <span class="aw-railnav__count">@_livData.Count</span>
+                        }
+                    </button>
+                }
+                @if (_canPaiementRead)
+                {
+                    <button type="button" role="tab" aria-selected="@(_tab == 2)"
+                            class="aw-railnav__item @(_tab == 2 ? "aw-railnav__item--active" : "")"
+                            title="Paiements"
+                            @onclick="@(async () => await OnTabChange(2))">
+                        <i class="bi bi-cash" aria-hidden="true"></i>
+                        Paiements
+                        @{
+                            var payOpen = _payData.Count(p => p.Reste > 0 && p.Facture.Status != 3);
+                        }
+                        @if (payOpen > 0)
+                        {
+                            <span class="aw-railnav__count aw-railnav__count--alert">@payOpen</span>
+                        }
+                    </button>
+                }
+                @if (_canFacturationWrite)
+                {
+                    <button type="button" role="tab" aria-selected="@(_tab == 3)"
+                            class="aw-railnav__item @(_tab == 3 ? "aw-railnav__item--active" : "")"
+                            title="Clôtures journalières"
+                            @onclick="@(async () => await OnTabChange(3))">
+                        <i class="bi bi-calendar-check" aria-hidden="true"></i>
+                        Clôtures
+                        @{
+                            var clotPending = _clotureData.Count(c => c.StatutCloture == 0);
+                        }
+                        @if (clotPending > 0)
+                        {
+                            <span class="aw-railnav__count aw-railnav__count--alert">@clotPending</span>
+                        }
+                    </button>
+                }
+            </nav>
+
+            <div class="aw-workspace__body">
+
+            @if (_userPendingClotureToday)
+            {
+                <div class="aw-empty" style="min-height:auto;padding:0.75rem 1rem;flex-direction:row;gap:0.75rem;justify-content:flex-start;align-items:center;margin-bottom:0.75rem;">
+                    <i class="bi bi-hourglass-split" style="color:var(--aw-accent);"></i>
+                    <p style="margin:0;flex:1;">
+                        Clôture soumise — en attente d'approbation admin. Transactions bloquées jusqu'à validation.
+                    </p>
+                    @if (_tab != 3)
+                    {
+                        <button type="button" class="aw-btn aw-btn--ghost" @onclick="@(async () => await OnTabChange(3))">
+                            Voir le suivi
+                        </button>
+                    }
+                </div>
+            }
+            else if (_myTodayApprovedCloture != null)
+            {
+                <div class="aw-empty" style="min-height:auto;padding:0.75rem 1rem;flex-direction:row;gap:0.75rem;justify-content:flex-start;align-items:center;margin-bottom:0.75rem;">
+                    <i class="bi bi-check-circle" style="color:var(--aw-brand);"></i>
+                    <p style="margin:0;">
+                        Clôture du @_myTodayApprovedCloture.DateCloture:dd/MM/yyyy approuvée par @_myTodayApprovedCloture.TraitePar —
+                        vous pouvez continuer à vendre. Les factures <strong>clôturées</strong> et celles de la <strong>nouvelle période</strong> sont séparées ci-dessous.
+                    </p>
+                </div>
+            }
+
+            @* ══════════════════ FACTURES ══════════════════ *@
+            @if (_tab == 0 && _canFacturationRead)
+            {
+                var fBrouillon = _factData.Count(r => r.DisplayStatus == 0);
+                var fValidee = _factData.Count(r => r.DisplayStatus == 1);
+                var fPayee = _factData.Count(r => r.DisplayStatus == 2);
+                var fPartiel = _factData.Count(r => r.DisplayStatus == 4);
+                var fCloturees = _factData.Count(r => r.EstCloturee);
+                var fApresCloture = _factData.Count(r => r.ApresCloture);
+                var fOpen = fBrouillon + fValidee + fPartiel;
+                var fPaidPct = _factData.Count == 0 ? 0d : Math.Round(100d * fPayee / _factData.Count, 1);
+                var fCoverTone = fOpen == 0 ? "brand" : fPartiel > 0 ? "accent" : "brand";
+                var factPageItems = PageOf(_factFiltered, _factPage, _factPageSize).ToList();
+
+                @if (_factData.Any())
+                {
+                    <section class="aw-overview aw-overview--with-cover" aria-label="Vue d'ensemble factures">
+                        <div class="aw-overview__top">
+                            <div class="aw-overview__intro">
+                                <h2 class="aw-overview__title">Vue d'ensemble</h2>
+                                <p class="aw-overview__lead">
+                                    Facturation du jour : validation, encaissement et clôture.
+                                </p>
+                            </div>
+                            <div class="@($"aw-overview__cover aw-overview__cover--{fCoverTone}")">
+                                <span class="aw-overview__cover-value">@fPaidPct.ToString("0.#")&nbsp;%</span>
+                                <span class="aw-overview__cover-label">factures payées</span>
+                            </div>
+                        </div>
+                        <div class="aw-overview__meter" role="meter"
+                             aria-valuemin="0" aria-valuemax="100" aria-valuenow="@((int)fPaidPct)"
+                             aria-label="Part des factures payées">
+                            <div class="aw-overview__meter-track">
+                                <div class="@($"aw-overview__meter-fill aw-overview__meter-fill--{fCoverTone}")"
+                                     style="width: @(fPaidPct.ToString(System.Globalization.CultureInfo.InvariantCulture))%"></div>
+                            </div>
+                        </div>
+                        <div class="aw-overview__metrics">
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-pencil"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Brouillon</span>
+                                    <span class="aw-overview__metric-value">@fBrouillon</span>
+                                    <span class="aw-overview__metric-hint">À finaliser</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-hourglass-split"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Ouvertes</span>
+                                    <span class="aw-overview__metric-value">@(fValidee + fPartiel)</span>
+                                    <span class="aw-overview__metric-hint">Validées / partielles</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-check-circle"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Payées</span>
+                                    <span class="aw-overview__metric-value">@fPayee</span>
+                                    <span class="aw-overview__metric-hint">Encaissées</span>
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+                }
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <AwDebouncedInput Placeholder="Rechercher n°, client, article…"
+                                          AriaLabel="Rechercher une facture"
+                                          Value="@_factSearch"
+                                          ValueChanged="OnFactSearchChanged" />
+                    </div>
+                    <div class="aw-actionbar__filters">
+                        @if (_factData.Any())
+                        {
+                            <AwSearchSelect AriaLabel="Statut de la facture"
+                                            Placeholder="Statut"
+                                            Searchable="false"
+                                            Value="@(_factStatusFilter?.ToString() ?? "")"
+                                            ValueChanged="OnFactStatusFilterChanged"
+                                            Options="@GetFactStatusFilterOptions(fBrouillon, fValidee, fPayee, fPartiel)" />
+                            @if (fCloturees > 0 || fApresCloture > 0)
+                            {
+                                <AwSearchSelect AriaLabel="Filtre clôture"
+                                                Placeholder="Clôture"
+                                                Searchable="false"
+                                                Value="@_factClotureFilter"
+                                                ValueChanged="OnFactClotureFilterChanged"
+                                                Options="@GetFactClotureFilterOptions(fCloturees, fApresCloture)" />
+                            }
+                        }
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--ghost" title="Exporter Excel"
+                                disabled="@(!_factData.Any())" @onclick="ExportFacturesExcel">
+                            <i class="bi bi-file-earmark-excel"></i> Exporter
+                        </button>
+                        @if (_canFacturationWrite)
+                        {
+                            <button type="button" class="aw-btn aw-btn--primary"
+                                    disabled="@_userPendingClotureToday"
+                                    @onclick="@(() => Navigation.NavigateTo("/vente/facturation"))">
+                                <i class="bi bi-plus-lg"></i> Nouvelle facture
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                @if (_canFacturationWrite && !string.IsNullOrEmpty(_login))
+                {
+                    <div class="vente-encaissement-bar">
+                        <EncaissementDailyStrip @ref="_dailyStrip" Login="@_login" Compact="true" DisplayTaux="_displayTaux" />
+                    </div>
+                }
+
+                @if (_factData.Any(r => r.EstCloturee) && _factData.Any(r => r.ApresCloture))
+                {
+                    <div class="aw-empty" style="min-height:auto;padding:0.5rem 0.85rem;flex-direction:row;gap:0.5rem;justify-content:flex-start;margin-bottom:0.75rem;">
+                        <i class="bi bi-layout-split" aria-hidden="true"></i>
+                        <p style="margin:0;font-size:0.85rem;">
+                            <strong>@fCloturees</strong> facture(s) déjà clôturée(s) ·
+                            <strong>@fApresCloture</strong> à inclure dans la prochaine clôture
+                        </p>
+                    </div>
+                }
+
+                @if (_factLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!factPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-receipt"></i>
+                            <p>Aucune facture pour ces filtres.</p>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var factSection in GetFactDisplaySections(factPageItems))
+                    {
+                        @if (factSection.ShowHeader)
+                        {
+                            <div style="display:flex;align-items:center;gap:0.5rem;margin:0.5rem 0 0.35rem;">
+                                <span class="aw-badge @factSection.BadgeClass"><i class="bi @factSection.Icon" aria-hidden="true"></i>@factSection.Title</span>
+                                <span class="aw-table__meta">@factSection.Count facture(s)</span>
+                            </div>
+                        }
+                        <div class="aw-table-region" @key="@($"{UserCurrency.DisplayRevision}-{factSection.Key}")"
+                             style="@factSection.GridStyle">
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>N° / Date</th>
+                                            <th>Client / Articles</th>
+                                            <th>Qté</th>
+                                            <th>Montant</th>
+                                            <th>Statut</th>
+                                            <th>Opérateur</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var item in factSection.Rows)
+                                        {
+                                            var (flbl, fbadge, ficon) = item.DisplayStatus switch
+                                            {
+                                                0 => ("Brouillon", "aw-badge--muted", "bi-pencil"),
+                                                1 => ("Validée", "aw-badge--brand", "bi-check2"),
+                                                2 => ("Payée", "aw-badge--brand", "bi-check-circle"),
+                                                3 => ("Annulée", "aw-badge--danger", "bi-x-circle"),
+                                                4 => ("Partiel", "aw-badge--accent", "bi-hourglass-split"),
+                                                _ => ("—", "aw-badge--muted", "bi-question")
+                                            };
+                                            <tr @onclick="@(() => OnFactRowClick(item))" style="cursor:pointer;">
+                                                <td>
+                                                    <span class="aw-table__title">N° @item.Id</span>
+                                                    <span class="aw-table__meta">@item.Date.ToString("dd/MM/yyyy")</span>
+                                                </td>
+                                                <td>
+                                                    <span class="aw-table__title">@item.Client</span>
+                                                    <span class="aw-table__meta">@item.Articles</span>
+                                                </td>
+                                                <td><span class="aw-badge aw-badge--muted">@item.TotalQte.ToString("N0")</span></td>
+                                                <td>
+                                                    <span class="aw-table__title">@FactFcUsdDisplay(item.Total, item.Taux)</span>
+                                                    @if (item.Paye > 0)
+                                                    {
+                                                        <span class="aw-table__meta" style="color:var(--aw-brand);">Payé : @FactFcUsdDisplay(item.Paye, item.Taux)</span>
+                                                    }
+                                                    @if (item.DisplayStatus >= 1 && item.DisplayStatus != 3 && item.Solde > 0)
+                                                    {
+                                                        <span class="aw-table__meta" style="color:var(--aw-danger);">Reste : @FactFcUsdDisplay(item.Solde, item.Taux)</span>
+                                                    }
+                                                </td>
+                                                <td>
+                                                    <span class="aw-badge @fbadge"><i class="bi @ficon" aria-hidden="true"></i>@flbl</span>
+                                                    @if (item.EstCloturee)
+                                                    {
+                                                        <span class="aw-badge aw-badge--muted"><i class="bi bi-lock-fill" aria-hidden="true"></i>Clôturée</span>
+                                                    }
+                                                    else if (item.ApresCloture)
+                                                    {
+                                                        <span class="aw-badge aw-badge--brand"><i class="bi bi-plus-circle" aria-hidden="true"></i>Nouvelle période</span>
+                                                    }
+                                                    else if (item.ClotureEnAttente)
+                                                    {
+                                                        <span class="aw-badge aw-badge--accent"><i class="bi bi-hourglass-split" aria-hidden="true"></i>Clôture en attente</span>
+                                                    }
+                                                </td>
+                                                <td>
+                                                    <span class="aw-table__meta"><i class="bi bi-person-circle" aria-hidden="true"></i> @item.Login</span>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    }
+                    <AwPager TotalCount="_factFiltered.Count"
+                             Page="_factPage"
+                             PageSize="_factPageSize"
+                             ItemLabel="facture"
+                             PageChanged="SetFactPage"
+                             PageSizeChanged="SetFactPageSize" />
+                }
+            }
+
+            @* ══════════════════ LIVRAISONS ══════════════════ *@
+            @if (_tab == 1 && _canLivraisonRead)
+            {
+                var livPayees = _livData.Count(IsLivPaid);
+                var livEnAttente = _livData.Count(IsLivPending);
+                var livEnCours = _livData.Count - livPayees - livEnAttente;
+                var livDonePct = _livData.Count == 0 ? 0d : Math.Round(100d * livPayees / _livData.Count, 1);
+                var livCoverTone = livEnAttente == 0 ? "brand" : "accent";
+                var livPageItems = PageOf(_livFiltered, _livPage, _livPageSize).ToList();
+
+                @if (_livData.Any())
+                {
+                    <section class="aw-overview aw-overview--with-cover" aria-label="Vue d'ensemble livraisons">
+                        <div class="aw-overview__top">
+                            <div class="aw-overview__intro">
+                                <h2 class="aw-overview__title">Vue d'ensemble</h2>
+                                <p class="aw-overview__lead">
+                                    Suivi des livraisons clients : attente, facturation et paiement.
+                                </p>
+                            </div>
+                            <div class="@($"aw-overview__cover aw-overview__cover--{livCoverTone}")">
+                                <span class="aw-overview__cover-value">@livDonePct.ToString("0.#")&nbsp;%</span>
+                                <span class="aw-overview__cover-label">livraisons payées</span>
+                            </div>
+                        </div>
+                        <div class="aw-overview__meter" role="meter"
+                             aria-valuemin="0" aria-valuemax="100" aria-valuenow="@((int)livDonePct)"
+                             aria-label="Part des livraisons payées">
+                            <div class="aw-overview__meter-track">
+                                <div class="@($"aw-overview__meter-fill aw-overview__meter-fill--{livCoverTone}")"
+                                     style="width: @(livDonePct.ToString(System.Globalization.CultureInfo.InvariantCulture))%"></div>
+                            </div>
+                        </div>
+                        <div class="aw-overview__metrics">
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-hourglass-split"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">En attente</span>
+                                    <span class="aw-overview__metric-value">@livEnAttente</span>
+                                    <span class="aw-overview__metric-hint">À livrer / facturer</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-truck"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">En cours</span>
+                                    <span class="aw-overview__metric-value">@livEnCours</span>
+                                    <span class="aw-overview__metric-hint">Livrées / partielles</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-check-circle"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Payées</span>
+                                    <span class="aw-overview__metric-value">@livPayees</span>
+                                    <span class="aw-overview__metric-hint">Soldées</span>
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+                }
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <AwDebouncedInput Placeholder="Rechercher n°, client, porteur…"
+                                          AriaLabel="Rechercher une livraison"
+                                          Value="@_livSearch"
+                                          ValueChanged="OnLivSearchChanged" />
+                    </div>
+                    <div class="aw-actionbar__filters">
+                        @if (_livData.Any())
+                        {
+                            <AwSearchSelect AriaLabel="Statut de la livraison"
+                                            Placeholder="Statut"
+                                            Searchable="false"
+                                            Value="@_livStatusFilter"
+                                            ValueChanged="OnLivStatusFilterChanged"
+                                            Options="@GetLivStatusFilterOptions(livEnAttente, livEnCours, livPayees)" />
+                        }
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        @if (_canLivraisonWrite)
+                        {
+                            <button type="button" class="aw-btn aw-btn--primary"
+                                    disabled="@_userPendingClotureToday" @onclick="OnAddLivraison">
+                                <i class="bi bi-truck"></i> Nouvelle livraison
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                @if (_livLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!livPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-truck"></i>
+                            <p>Aucune livraison pour ces filtres.</p>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>N° / Date</th>
+                                        <th>Client</th>
+                                        <th>Commande / Porteur</th>
+                                        <th>Montant</th>
+                                        <th>Statut</th>
+                                        <th>Facture</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in livPageItems)
+                                    {
+                                        string llbl; string lbadge; string licon;
+                                        if (item.Fact != null)
+                                        {
+                                            var fTotal = (double)(item.Fact.TotalApresReduction ?? item.Fact.Total ?? 0);
+                                            var fPaye = item.Fact.Payments?.Sum(p => (double)p.Montant) ?? 0;
+                                            if (fPaye >= fTotal && fTotal > 0) { llbl = "Payée"; lbadge = "aw-badge--brand"; licon = "bi-check-circle"; }
+                                            else if (fPaye > 0) { llbl = "Partiel"; lbadge = "aw-badge--accent"; licon = "bi-hourglass-split"; }
+                                            else { llbl = "Facturée"; lbadge = "aw-badge--brand"; licon = "bi-receipt"; }
+                                        }
+                                        else
+                                        {
+                                            (llbl, lbadge, licon) = (item.Status ?? 0) switch
+                                            {
+                                                1 => ("Livrée", "aw-badge--brand", "bi-truck"),
+                                                _ => ("En attente", "aw-badge--accent", "bi-hourglass-split")
+                                            };
+                                        }
+                                        var montant = item.Details.Sum(d => d.MontantPaye ?? 0);
+                                        <tr @onclick="@(() => OnLivraisonRowClick(item))" style="cursor:pointer;">
+                                            <td>
+                                                <span class="aw-table__title">N° @item.LivraisonId</span>
+                                                <span class="aw-table__meta">@(item.Date?.ToString("dd/MM/yyyy") ?? "—")</span>
+                                            </td>
+                                            <td>
+                                                @if (item.Customer != null)
+                                                {
+                                                    <span class="aw-table__title">@item.Customer.CustomerName</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-table__meta">—</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (item.CommandeId.HasValue)
+                                                {
+                                                    <span class="aw-badge aw-badge--muted">C-@item.CommandeId</span>
+                                                }
+                                                @if (!string.IsNullOrWhiteSpace(item.Porteur))
+                                                {
+                                                    <span class="aw-table__meta"><i class="bi bi-person" aria-hidden="true"></i> @item.Porteur</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <span class="aw-table__title"><CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="montant" Taux="_displayTaux" /></span>
+                                                <span class="aw-table__meta">@item.Details.Count article@(item.Details.Count > 1 ? "s" : "")</span>
+                                            </td>
+                                            <td>
+                                                <span class="aw-badge @lbadge"><i class="bi @licon" aria-hidden="true"></i>@llbl</span>
+                                            </td>
+                                            <td>
+                                                @if (item.Fact != null)
+                                                {
+                                                    <span class="aw-badge aw-badge--brand">F-@item.Fact.Id</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-table__meta">—</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="_livFiltered.Count"
+                                 Page="_livPage"
+                                 PageSize="_livPageSize"
+                                 ItemLabel="livraison"
+                                 PageChanged="SetLivPage"
+                                 PageSizeChanged="SetLivPageSize" />
+                    </div>
+                }
+            }
+
+            @* ══════════════════ PAIEMENTS ══════════════════ *@
+            @if (_tab == 2 && _canPaiementRead)
+            {
+                var payImpayees = _payData.Count(p => p.Reste > 0 && p.Facture.Status != 3);
+                var payPayees = _payData.Count - payImpayees;
+                var payDonePct = _payData.Count == 0 ? 0d : Math.Round(100d * payPayees / _payData.Count, 1);
+                var payCoverTone = payImpayees == 0 ? "brand" : "accent";
+                var payPageItems = PageOf(_payFiltered, _payPage, _payPageSize).ToList();
+
+                @if (_payData.Any())
+                {
+                    <section class="aw-overview aw-overview--with-cover" aria-label="Vue d'ensemble paiements">
+                        <div class="aw-overview__top">
+                            <div class="aw-overview__intro">
+                                <h2 class="aw-overview__title">Vue d'ensemble</h2>
+                                <p class="aw-overview__lead">
+                                    Suivi des encaissements : soldes et paiements partiels.
+                                </p>
+                            </div>
+                            <div class="@($"aw-overview__cover aw-overview__cover--{payCoverTone}")">
+                                <span class="aw-overview__cover-value">@payImpayees</span>
+                                <span class="aw-overview__cover-label">impayée(s)</span>
+                            </div>
+                        </div>
+                        <div class="aw-overview__meter" role="meter"
+                             aria-valuemin="0" aria-valuemax="100" aria-valuenow="@((int)payDonePct)"
+                             aria-label="Part des factures soldées">
+                            <div class="aw-overview__meter-track">
+                                <div class="@($"aw-overview__meter-fill aw-overview__meter-fill--{payCoverTone}")"
+                                     style="width: @(payDonePct.ToString(System.Globalization.CultureInfo.InvariantCulture))%"></div>
+                            </div>
+                        </div>
+                        <div class="aw-overview__metrics">
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-exclamation-circle"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Impayées</span>
+                                    <span class="aw-overview__metric-value">@payImpayees</span>
+                                    <span class="aw-overview__metric-hint">Reste à encaisser</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-check-circle"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Soldées</span>
+                                    <span class="aw-overview__metric-value">@payPayees</span>
+                                    <span class="aw-overview__metric-hint">Payées intégralement</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-cash-stack"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Total</span>
+                                    <span class="aw-overview__metric-value">@_payData.Count</span>
+                                    <span class="aw-overview__metric-hint">Factures suivies</span>
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+                }
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <AwDebouncedInput Placeholder="Rechercher facture, client…"
+                                          AriaLabel="Rechercher un paiement"
+                                          Value="@_paySearch"
+                                          ValueChanged="OnPaySearchChanged" />
+                    </div>
+                    <div class="aw-actionbar__filters">
+                        @if (_payData.Any())
+                        {
+                            <AwSearchSelect AriaLabel="Statut du paiement"
+                                            Placeholder="Statut"
+                                            Searchable="false"
+                                            Value="@_payStatusFilter"
+                                            ValueChanged="OnPayStatusFilterChanged"
+                                            Options="@GetPayStatusFilterOptions(payImpayees, payPayees)" />
+                        }
+                    </div>
+                </div>
+
+                @if (_payLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!payPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-cash"></i>
+                            <p>Aucun paiement pour ces filtres.</p>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:2.5rem;"></th>
+                                        <th>Facture / Client</th>
+                                        <th>Origine</th>
+                                        <th>Montant</th>
+                                        <th>Reste</th>
+                                        <th>Statut</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in payPageItems)
+                                    {
+                                        var taux = item.Facture.Taux > 0 ? item.Facture.Taux : _displayTaux;
+                                        var expanded = _payExpandedIds.Contains(item.Facture.Id);
+                                        <tr>
+                                            <td>
+                                                <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon"
+                                                        title="@(expanded ? "Masquer l'historique" : "Voir l'historique")"
+                                                        @onclick="@(() => TogglePayExpand(item.Facture.Id))"
+                                                        @onclick:stopPropagation="true">
+                                                    <i class="bi @(expanded ? "bi-chevron-down" : "bi-chevron-right")"></i>
+                                                </button>
+                                            </td>
+                                            <td>
+                                                <span class="aw-table__title">F-@item.Facture.Id</span>
+                                                <span class="aw-table__meta">@item.ClientName</span>
+                                            </td>
+                                            <td>
+                                                @if (item.Facture.CommandeId.HasValue)
+                                                {
+                                                    <span class="aw-badge aw-badge--muted">Cmd N° @item.Facture.CommandeId</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-badge aw-badge--muted">Vente directe</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <span class="aw-table__title"><CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="(item.Facture.TotalApresReduction ?? item.Facture.Total ?? 0)" Taux="taux" /></span>
+                                                <span class="aw-table__meta" style="color:var(--aw-brand);">Payé : <CurrencyText Inline="true" Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="item.TotalPaye" Taux="taux" /></span>
+                                            </td>
+                                            <td>
+                                                <span class="aw-badge @(item.Reste <= 0 ? "aw-badge--brand" : "aw-badge--danger")">
+                                                    <CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="item.Reste" Taux="taux" />
+                                                </span>
+                                            </td>
+                                            <td>
+                                                @if (item.Facture.Status == 3)
+                                                {
+                                                    <span class="aw-badge aw-badge--danger"><i class="bi bi-x-circle" aria-hidden="true"></i>Annulée</span>
+                                                }
+                                                else if (item.Reste <= 0 || (item.IsDirectSale && item.Facture.Status is 1 or 2))
+                                                {
+                                                    <span class="aw-badge aw-badge--brand"><i class="bi bi-check-circle" aria-hidden="true"></i>Payée</span>
+                                                }
+                                                else if (item.TotalPaye > 0)
+                                                {
+                                                    <span class="aw-badge aw-badge--accent"><i class="bi bi-hourglass-split" aria-hidden="true"></i>Partiel</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-badge aw-badge--danger"><i class="bi bi-exclamation-circle" aria-hidden="true"></i>Impayée</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (item.Reste > 0 && _canFacturationWrite)
+                                                {
+                                                    <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm"
+                                                            title="Enregistrer un paiement"
+                                                            @onclick="@(() => OnPayerPaiement(item))"
+                                                            @onclick:stopPropagation="true">
+                                                        <i class="bi bi-cash-coin"></i> Payer
+                                                    </button>
+                                                }
+                                            </td>
+                                        </tr>
+                                        @if (expanded)
+                                        {
+                                            <tr>
+                                                <td colspan="7" style="background:var(--aw-surface-2, #f8fafc);padding:0.75rem 1rem;">
+                                                    @if (item.Payments.Any())
+                                                    {
+                                                        <div class="aw-table__meta" style="font-weight:600;margin-bottom:0.35rem;">Historique des paiements</div>
+                                                        <div class="aw-table-wrap">
+                                                            <table class="aw-table">
+                                                                <thead>
+                                                                    <tr>
+                                                                        <th>N°</th>
+                                                                        <th>Date</th>
+                                                                        <th style="text-align:right;">Montant</th>
+                                                                        <th>Note</th>
+                                                                        <th>Utilisateur</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    @foreach (var p in item.Payments)
+                                                                    {
+                                                                        <tr>
+                                                                            <td>@p.Id</td>
+                                                                            <td>@p.Date.ToString("dd/MM/yyyy")</td>
+                                                                            <td style="text-align:right;">@UserCurrency.FormatPayment(p, taux)</td>
+                                                                            <td>@p.Note</td>
+                                                                            <td>@p.User</td>
+                                                                        </tr>
+                                                                    }
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="aw-table__meta">Aucun paiement enregistré.</span>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="_payFiltered.Count"
+                                 Page="_payPage"
+                                 PageSize="_payPageSize"
+                                 ItemLabel="facture"
+                                 PageChanged="SetPayPage"
+                                 PageSizeChanged="SetPayPageSize" />
+                    </div>
+                }
+            }
+
+            @* ══════════════════ CLÔTURES ══════════════════ *@
+            @if (_tab == 3 && _canFacturationWrite)
+            {
+                var clotApprouvees = _clotureData.Count(c => c.StatutCloture == 1);
+                var clotEnAttente = _clotureData.Count(c => c.StatutCloture == 0);
+                var clotRejetees = _clotureData.Count(c => c.StatutCloture == 2);
+                var clotDonePct = _clotureData.Count == 0 ? 0d : Math.Round(100d * clotApprouvees / _clotureData.Count, 1);
+                var clotCoverTone = clotEnAttente == 0 ? "brand" : "accent";
+                var clotPageItems = PageOf(_clotureFiltered, _cloturePage, _cloturePageSize).ToList();
+
+                @if (_clotureData.Any())
+                {
+                    <section class="aw-overview aw-overview--with-cover" aria-label="Vue d'ensemble clôtures">
+                        <div class="aw-overview__top">
+                            <div class="aw-overview__intro">
+                                <h2 class="aw-overview__title">Vue d'ensemble</h2>
+                                <p class="aw-overview__lead">
+                                    Clôtures journalières : soumissions, approbations et rejets.
+                                </p>
+                            </div>
+                            <div class="@($"aw-overview__cover aw-overview__cover--{clotCoverTone}")">
+                                <span class="aw-overview__cover-value">@clotEnAttente</span>
+                                <span class="aw-overview__cover-label">en attente</span>
+                            </div>
+                        </div>
+                        <div class="aw-overview__meter" role="meter"
+                             aria-valuemin="0" aria-valuemax="100" aria-valuenow="@((int)clotDonePct)"
+                             aria-label="Part des clôtures approuvées">
+                            <div class="aw-overview__meter-track">
+                                <div class="@($"aw-overview__meter-fill aw-overview__meter-fill--{clotCoverTone}")"
+                                     style="width: @(clotDonePct.ToString(System.Globalization.CultureInfo.InvariantCulture))%"></div>
+                            </div>
+                        </div>
+                        <div class="aw-overview__metrics">
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-hourglass-split"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">En attente</span>
+                                    <span class="aw-overview__metric-value">@clotEnAttente</span>
+                                    <span class="aw-overview__metric-hint">À modérer</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-check-circle"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Approuvées</span>
+                                    <span class="aw-overview__metric-value">@clotApprouvees</span>
+                                    <span class="aw-overview__metric-hint">Validées</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--danger" aria-hidden="true"><i class="bi bi-x-circle"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Rejetées</span>
+                                    <span class="aw-overview__metric-value">@clotRejetees</span>
+                                    <span class="aw-overview__metric-hint">À refaire</span>
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+                }
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__filters">
+                        @if (_clotureData.Any())
+                        {
+                            <AwSearchSelect AriaLabel="Statut de la clôture"
+                                            Placeholder="Statut"
+                                            Searchable="false"
+                                            Value="@_clotureStatusFilter"
+                                            ValueChanged="OnClotureStatusFilterChanged"
+                                            Options="@GetClotureStatusFilterOptions(clotEnAttente, clotApprouvees, clotRejetees)" />
+                        }
+                        @if (_userLocalisations.Count > 1)
+                        {
+                            <AwSearchSelect AriaLabel="Localisation"
+                                            Placeholder="Localisation"
+                                            Searchable="false"
+                                            Value="@(_clotureLocFilter?.ToString() ?? "")"
+                                            ValueChanged="OnClotureLocFilterChanged"
+                                            Options="@GetClotureLocFilterOptions()" />
+                        }
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--primary"
+                                disabled="@_userPendingClotureToday" @onclick="OnCloturer">
+                            <i class="bi bi-calendar-check"></i> Clôturer la journée
+                        </button>
+                    </div>
+                </div>
+
+                @if (_clotureLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!clotPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-calendar-check"></i>
+                            <p>Aucune clôture pour ces filtres.</p>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date / Heure</th>
+                                        <th>Localisation</th>
+                                        <th>Type</th>
+                                        <th>Montant</th>
+                                        <th>Destination</th>
+                                        <th>Ventes</th>
+                                        <th>Utilisateur</th>
+                                        <th>Statut</th>
+                                        <th>Traitement</th>
+                                        @if (_showClotureActions)
+                                        {
+                                            <th>Actions</th>
+                                        }
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in clotPageItems)
+                                    {
+                                        var isMine = string.Equals(item.UserLogin, _login, StringComparison.OrdinalIgnoreCase);
+                                        var ventes = item.NombreOperations;
+                                        <tr>
+                                            <td>
+                                                <span class="aw-table__title">@item.DateCloture.ToString("dd/MM/yyyy")</span>
+                                                <span class="aw-table__meta">@item.HeureCloture.ToString("HH:mm")</span>
+                                            </td>
+                                            <td>
+                                                <span class="aw-table__meta"><i class="bi bi-geo-alt" aria-hidden="true"></i> @(item.Localisation?.DescriptionLocalisation ?? "—")</span>
+                                            </td>
+                                            <td>@item.TypeOperation</td>
+                                            <td>
+                                                <span class="aw-table__title" style="color:var(--aw-brand);"><CurrencyText Mode="@CurrencyText.DisplayMode.FromFcStored" Amount="item.Montant" Taux="_displayTaux" /></span>
+                                            </td>
+                                            <td>@item.ModeVersement</td>
+                                            <td>
+                                                <span class="aw-badge aw-badge--muted" title="Nombre de factures payées incluses dans la clôture">
+                                                    @ventes vente@(ventes > 1 ? "s" : "")
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <span class="aw-table__meta"><i class="bi bi-person-circle" aria-hidden="true"></i> @item.UserLogin</span>
+                                            </td>
+                                            <td>
+                                                @switch (item.StatutCloture)
+                                                {
+                                                    case 0:
+                                                        <span class="aw-badge aw-badge--accent" title="En attente d'approbation par un autre utilisateur">
+                                                            <i class="bi bi-hourglass-split" aria-hidden="true"></i>En attente
+                                                        </span>
+                                                        break;
+                                                    case 1:
+                                                        <span class="aw-badge aw-badge--brand"><i class="bi bi-check-circle" aria-hidden="true"></i>Approuvée</span>
+                                                        break;
+                                                    case 2:
+                                                        <span class="aw-badge aw-badge--danger" title="@item.MotifRejet"><i class="bi bi-x-circle" aria-hidden="true"></i>Rejetée</span>
+                                                        break;
+                                                }
+                                                @if (isMine && item.DateCloture == DateOnly.FromDateTime(DateTime.Today))
+                                                {
+                                                    <span class="aw-badge aw-badge--muted">Ma clôture</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (item.StatutCloture == 0)
+                                                {
+                                                    <span class="aw-table__meta">—</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-table__meta">@item.TraitePar</span>
+                                                    @if (item.DateTraitement.HasValue)
+                                                    {
+                                                        <span class="aw-table__meta">@item.DateTraitement.Value.ToString("dd/MM HH:mm")</span>
+                                                    }
+                                                }
+                                            </td>
+                                            @if (_showClotureActions)
+                                            {
+                                                <td>
+                                                    @if (CanModerateCloture(item) && item.StatutCloture == 0)
+                                                    {
+                                                        <div style="display:flex;gap:0.25rem;">
+                                                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" title="Approuver"
+                                                                    @onclick="@(() => OnApprouverCloture(item))">
+                                                                <i class="bi bi-check-circle" style="color:var(--aw-brand);"></i>
+                                                            </button>
+                                                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" title="Rejeter"
+                                                                    @onclick="@(() => OnRejeterCloture(item))">
+                                                                <i class="bi bi-x-circle" style="color:var(--aw-danger);"></i>
+                                                            </button>
+                                                        </div>
+                                                    }
+                                                    else if (item.StatutCloture != 0)
+                                                    {
+                                                        <span class="aw-table__meta">Traité</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="aw-table__meta">—</span>
+                                                    }
+                                                </td>
+                                            }
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="_clotureFiltered.Count"
+                                 Page="_cloturePage"
+                                 PageSize="_cloturePageSize"
+                                 ItemLabel="clôture"
+                                 PageChanged="SetCloturePage"
+                                 PageSizeChanged="SetCloturePageSize" />
+                    </div>
+                }
+            }
+
+            </div>
+        </div>
+    </div>
+    }
+}
+
+</ModuleGuard>
+
+@code {
+    /* ── Hub ── */
+    int _tab;
+    bool _loaded;
+    Periode? _activePeriode;
+    bool _hasSalesReadAccess;
+    bool _canVenteRead;
+    bool _canFacturationRead;
+    bool _canLivraisonRead;
+    bool _canPaiementRead;
+    bool _canFacturationWrite;
+    bool _canFacturationDelete;
+    bool _canLivraisonWrite;
+    bool _canLivraisonDelete;
+    List<int> _currentUserLocalisations = new();
+
+    static readonly int[] PageSizeChoices = [10, 25, 50, 100];
+
+    /* ── Facture state ── */
+    List<FactRowDto> _factData = new();
+    bool _factLoading;
+    bool _factLoadedOnce;
+    string _factSearch = "";
+    int? _factStatusFilter;
+    string _factClotureFilter = "all";
+    int _factPage = 1;
+    int _factPageSize = 25;
+
+    List<FactRowDto> _factFiltered = new();
+
+    void SetFactStatusFilter(int? status)
+    {
+        _factStatusFilter = status;
+        if (!status.HasValue)
+            _factClotureFilter = "all";
+        ApplyFactFilter();
+    }
+
+    void SetFactClotureFilter(string filter)
+    {
+        _factClotureFilter = filter;
+        ApplyFactFilter();
+    }
+
+    Task OnFactStatusFilterChanged(string? value)
+    {
+        SetFactStatusFilter(int.TryParse(value, out var st) ? st : null);
+        return Task.CompletedTask;
+    }
+
+    Task OnFactClotureFilterChanged(string? value)
+    {
+        SetFactClotureFilter(string.IsNullOrWhiteSpace(value) ? "all" : value);
+        return Task.CompletedTask;
+    }
+
+    List<AwSearchSelect.Option> GetFactStatusFilterOptions(int brouillon, int validee, int payee, int partiel)
+    {
+        var list = new List<AwSearchSelect.Option>
+        {
+            new("", $"Statut : tous ({_factData.Count})"),
+            new("0", $"Brouillon ({brouillon})"),
+            new("1", $"Validées ({validee})"),
+            new("2", $"Payées ({payee})")
+        };
+        if (partiel > 0)
+            list.Add(new("4", $"Partiel ({partiel})"));
+        return list;
+    }
+
+    List<AwSearchSelect.Option> GetFactClotureFilterOptions(int cloturees, int apres)
+    {
+        var list = new List<AwSearchSelect.Option>
+        {
+            new("all", "Clôture : toutes")
+        };
+        if (cloturees > 0)
+            list.Add(new("closed", $"Clôturées ({cloturees})"));
+        if (apres > 0)
+            list.Add(new("new", $"Nouvelle période ({apres})"));
+        return list;
+    }
+
+    void ApplyFactFilter()
+    {
+        _factFiltered = _factData.Where(r =>
+        {
+            if (_factStatusFilter.HasValue && r.DisplayStatus != _factStatusFilter.Value)
+                return false;
+            if (_factClotureFilter == "closed" && !r.EstCloturee)
+                return false;
+            if (_factClotureFilter == "new" && !r.ApresCloture)
+                return false;
+            if (!string.IsNullOrWhiteSpace(_factSearch))
+            {
+                var s = _factSearch.Trim();
+                return r.Id.ToString().Contains(s, StringComparison.OrdinalIgnoreCase)
+                    || r.Client.Contains(s, StringComparison.OrdinalIgnoreCase)
+                    || r.Articles.Contains(s, StringComparison.OrdinalIgnoreCase)
+                    || r.Login.Contains(s, StringComparison.OrdinalIgnoreCase);
+            }
+            return true;
+        }).ToList();
+        _factPage = 1;
+    }
+
+    void OnFactSearchChanged(string value)
+    {
+        _factSearch = value ?? "";
+        ApplyFactFilter();
+    }
+
+    sealed record FactDisplaySection(
+        string Key,
+        string Title,
+        string BadgeClass,
+        string Icon,
+        string GridStyle,
+        bool ShowHeader,
+        int Count,
+        List<FactRowDto> Rows);
+
+    IEnumerable<FactDisplaySection> GetFactDisplaySections(IList<FactRowDto>? pageRows = null)
+    {
+        var hasClosed = _factFiltered.Any(r => r.EstCloturee);
+        var hasNew = _factFiltered.Any(r => r.ApresCloture);
+        var split = hasClosed && hasNew && _factClotureFilter == "all";
+        var source = pageRows ?? _factFiltered;
+
+        if (!split)
+        {
+            yield return new FactDisplaySection("all", "", "", "", "", false, source.Count, source.ToList());
+            yield break;
+        }
+
+        var closed = source.Where(r => r.EstCloturee).ToList();
+        var post = source.Where(r => r.ApresCloture).ToList();
+        var other = source.Where(r => !r.EstCloturee && !r.ApresCloture).ToList();
+
+        if (post.Any())
+        {
+            yield return new FactDisplaySection(
+                "new", "Nouvelle période — à clôturer", "aw-badge--brand", "bi-plus-circle",
+                "border-left:3px solid var(--aw-brand);", true, post.Count, post);
+        }
+
+        if (closed.Any())
+        {
+            yield return new FactDisplaySection(
+                "closed", "Période clôturée", "aw-badge--muted", "bi-lock-fill",
+                "opacity:.92;", true, closed.Count, closed);
+        }
+
+        if (other.Any())
+        {
+            yield return new FactDisplaySection(
+                "other", "Autres factures", "aw-badge--muted", "bi-receipt",
+                "", true, other.Count, other);
+        }
+    }
+
+    /* ── Livraison state ── */
+    List<Livraison> _livData = new();
+    List<Livraison> _livFiltered = new();
+    bool _livLoading;
+    bool _livLoadedOnce;
+    string _livStatusFilter = "all";
+    string _livSearch = "";
+    int _livPage = 1;
+    int _livPageSize = 25;
+
+    /* ── Paiement state ── */
+    List<FactureViewDto> _payData = new();
+    List<FactureViewDto> _payFiltered = new();
+    bool _payLoading;
+    bool _payLoadedOnce;
+    string _payStatusFilter = "all";
+    string _paySearch = "";
+    int _payPage = 1;
+    int _payPageSize = 25;
+    HashSet<int> _payExpandedIds = new();
+
+    /* ── Clôture state ── */
+    List<Versement> _clotureData = new();
+    List<Versement> _clotureFiltered = new();
+    bool _clotureLoading;
+    bool _clotureLoadedOnce;
+    int? _clotureLocFilter;
+    string _clotureStatusFilter = "all";
+    int _cloturePage = 1;
+    int _cloturePageSize = 25;
+    List<Localisation> _userLocalisations = new();
+    string _login = "";
+    bool _userPendingClotureToday;
+    Versement? _myTodayApprovedCloture;
+    bool _isAdmin;
+    bool _showClotureActions;
+    decimal _displayTaux;
+    EncaissementDailyStrip? _dailyStrip;
+
+    /* ════════════════════════════════════════════════════════════
+       INIT
+       ════════════════════════════════════════════════════════════ */
+
+    decimal EffectiveTaux(decimal factTaux) => factTaux > 0 ? factTaux : _displayTaux;
+
+    decimal FactFcToUsd(double amountFc, decimal factTaux) =>
+        CurrencyFormat.CdfStoredToUsd((decimal)amountFc, EffectiveTaux(factTaux));
+
+    string FactFcUsdDisplay(double amountFc, decimal factTaux) =>
+        UserCurrency.FormatFromFcStored((decimal)amountFc, EffectiveTaux(factTaux));
+
+    string GetVenteSectionDescription() => _tab switch
+    {
+        1 => "Gestion des livraisons clients — préparation, facturation et suivi.",
+        2 => "Suivi des encaissements et soldes restants sur factures.",
+        3 => "Clôtures journalières — soumission et modération.",
+        _ => "Gestion des factures, livraisons et paiements."
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        UserCurrency.OnChanged += OnCurrencyPreferenceChanged;
+        await UserCurrency.EnsureLoadedAsync();
+        await LoadSecurityAsync();
+
+        try { _activePeriode = await FinanceService.GetActivePeriodeAsync(); } catch { }
+
+        // Vérifier si l'utilisateur a clôturé la journée
+        await RefreshClotureUserStateAsync();
+
+        var tauxList = await FinanceService.GetTauxAsync();
+        _displayTaux = tauxList.OrderByDescending(t => t.Id).FirstOrDefault()?.TauxValue ?? 0;
+
+        _loaded = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        try
+        {
+            var savedTab = await JS.InvokeAsync<int>("tabNavigation.getTab", "vente", ResolveDefaultTab());
+            if (IsTabAllowed(savedTab))
+                _tab = savedTab;
+            else
+                _tab = ResolveDefaultTab();
+        }
+        catch
+        {
+            _tab = ResolveDefaultTab();
+        }
+
+        await LoadActiveTabAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    int ResolveDefaultTab()
+    {
+        if (_canFacturationRead) return 0;
+        if (_canLivraisonRead) return 1;
+        if (_canPaiementRead) return 2;
+        if (_canFacturationWrite) return 3;
+        return 0;
+    }
+
+    bool IsTabAllowed(int tab) => tab switch
+    {
+        0 => _canFacturationRead,
+        1 => _canLivraisonRead,
+        2 => _canPaiementRead,
+        3 => _canFacturationWrite,
+        _ => false
+    };
+
+    async Task LoadActiveTabAsync()
+    {
+        switch (_tab)
+        {
+            case 0 when _canFacturationRead && !_factLoadedOnce:
+                await LoadFactures();
+                _factLoadedOnce = true;
+                break;
+            case 1 when _canLivraisonRead && !_livLoadedOnce:
+                await LoadLivraisons();
+                _livLoadedOnce = true;
+                break;
+            case 2 when _canPaiementRead && !_payLoadedOnce:
+                await LoadPaiements();
+                _payLoadedOnce = true;
+                break;
+            case 3 when _canFacturationWrite && !_clotureLoadedOnce:
+                await LoadClotures();
+                _clotureLoadedOnce = true;
+                break;
+        }
+    }
+
+    async Task OnTabChange(int tabIndex)
+    {
+        _tab = tabIndex;
+        try
+        {
+            await JS.InvokeVoidAsync("tabNavigation.saveTab", "vente", tabIndex);
+        }
+        catch { }
+
+        await LoadActiveTabAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    async Task LoadSecurityAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            _hasSalesReadAccess = false;
+            return;
+        }
+
+        var login = user.FindFirst("login")?.Value
+            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        _login = login ?? "";
+
+        var permissions = await PermissionResolver.GetPermissionsAsync(login);
+        var isAdmin = AppFunctions.Normalize(user.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+        _isAdmin = isAdmin;
+
+        _canVenteRead = PermissionGate.ViewTab(permissions, "vente",
+            () => PermissionGate.LegacyRead(permissions, AppFunctions.Vente, isAdmin));
+        _canFacturationRead = PermissionGate.ViewSubTab(permissions, "vente.facturation",
+            () => PermissionGate.LegacyRead(permissions, AppFunctions.Facturation, isAdmin));
+        _canLivraisonRead = PermissionGate.ViewSubTab(permissions, "vente.livraisons",
+            () => PermissionGate.LegacyRead(permissions, AppFunctions.Livraison, isAdmin));
+        _canPaiementRead = _canFacturationRead;
+
+        _hasSalesReadAccess = _canFacturationRead || _canLivraisonRead
+            || (permissions.HasHierarchicalGrants && _canVenteRead);
+
+        _canFacturationWrite = PermissionGate.DoAction(permissions, "vente.facturation.write",
+            () => PermissionGate.LegacyWrite(permissions, AppFunctions.Facturation, isAdmin));
+        _canFacturationDelete = PermissionGate.DoAction(permissions, "vente.facturation.delete",
+            () => PermissionGate.LegacyDelete(permissions, AppFunctions.Facturation, isAdmin));
+        _canLivraisonWrite = PermissionGate.DoAction(permissions, "vente.livraisons.write",
+            () => PermissionGate.LegacyWrite(permissions, AppFunctions.Livraison, isAdmin)
+                || PermissionGate.LegacyWrite(permissions, AppFunctions.Vente, isAdmin));
+        _canLivraisonDelete = PermissionGate.DoAction(permissions, "vente.livraisons.delete",
+            () => PermissionGate.LegacyDelete(permissions, AppFunctions.Livraison, isAdmin));
+        _showClotureActions = _canFacturationWrite;
+
+        // Fetch user's assigned localisations via ILocalisationService
+        _currentUserLocalisations = await LocalisationService.GetUserLocalisationIdsAsync(_login, isAdmin);
+        _userLocalisations = await LocalisationService.GetFilteredLocalisationsAsync(_currentUserLocalisations, isAdmin);
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       PAGINATION
+       ════════════════════════════════════════════════════════════ */
+
+    IList<T> PageOf<T>(IList<T> items, int page, int pageSize) =>
+        items.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+    int PageCount(int total, int pageSize) =>
+        total <= 0 ? 1 : (int)Math.Ceiling(total / (double)Math.Max(1, pageSize));
+
+    void SetFactPage(int page) =>
+        _factPage = Math.Clamp(page, 1, PageCount(_factFiltered.Count, _factPageSize));
+
+    void SetFactPageSize(int size)
+    {
+        if (!PageSizeChoices.Contains(size)) return;
+        _factPageSize = size;
+        _factPage = 1;
+    }
+
+    void SetLivPage(int page) =>
+        _livPage = Math.Clamp(page, 1, PageCount(_livFiltered.Count, _livPageSize));
+
+    void SetLivPageSize(int size)
+    {
+        if (!PageSizeChoices.Contains(size)) return;
+        _livPageSize = size;
+        _livPage = 1;
+    }
+
+    void SetPayPage(int page) =>
+        _payPage = Math.Clamp(page, 1, PageCount(_payFiltered.Count, _payPageSize));
+
+    void SetPayPageSize(int size)
+    {
+        if (!PageSizeChoices.Contains(size)) return;
+        _payPageSize = size;
+        _payPage = 1;
+    }
+
+    void SetCloturePage(int page) =>
+        _cloturePage = Math.Clamp(page, 1, PageCount(_clotureFiltered.Count, _cloturePageSize));
+
+    void SetCloturePageSize(int size)
+    {
+        if (!PageSizeChoices.Contains(size)) return;
+        _cloturePageSize = size;
+        _cloturePage = 1;
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       FACTURES
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadFactures()
+    {
+        _factLoading = true;
+        _factData = await FacturationService.GetFactureRowsAsync(_currentUserLocalisations, _login);
+        _factLoading = false;
+        ApplyFactFilter();
+        if (_dailyStrip != null)
+            await _dailyStrip.RefreshAsync();
+    }
+
+    async Task OnFactRowClick(FactRowDto item)
+    {
+        var parameters = new DialogParameters<FactureDetail>
+        {
+            { x => x.FactId, item.Id },
+            { x => x.DisplayStatus, item.DisplayStatus },
+            { x => x.CanWrite, _canFacturationWrite },
+            { x => x.CanDelete, _canFacturationDelete }
+        };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<FactureDetail>(
+            $"Facture N°{item.Id}", parameters, options);
+        var result = await dialog.Result;
+
+        if (result is not null && !result.Canceled)
+        {
+            var action = result.Data?.ToString();
+            if (action == "edit")
+                Navigation.NavigateTo($"/vente/facturation/{item.Id}");
+            else if (action == "delete")
+                await OnDeleteFacture(item);
+            else if (action == "pay")
+                await OnPayerFacture(item);
+        }
+    }
+
+    async Task OnDeleteFacture(FactRowDto row)
+    {
+        if (_userPendingClotureToday)
+        {
+            Snackbar.Add("Clôture en attente d'approbation admin. Aucune transaction n'est possible.", Severity.Error);
+            return;
+        }
+        if (!_canFacturationDelete)
+        {
+            Snackbar.Add("Suppression facture non autorisée.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBox(
+            "Confirmation",
+            $"Supprimer la facture N°{row.Id} et toutes ses lignes ?",
+            yesText: "Supprimer",
+            cancelText: "Annuler");
+
+        if (confirm == true)
+        {
+            var result = await FacturationService.DeleteFactureAsync(row.Id);
+            if (!result.Success)
+            {
+                Snackbar.Add(result.Message, Severity.Error);
+                return;
+            }
+            await LoadFactures();
+        }
+    }
+
+    async Task OnPayerFacture(FactRowDto row)
+    {
+        if (!_canFacturationWrite)
+        {
+            Snackbar.Add("Paiement facture non autorisé.", Severity.Warning);
+            return;
+        }
+        if (_userPendingClotureToday)
+        {
+            Snackbar.Add("Clôture en attente d'approbation admin. Aucune transaction n'est possible.", Severity.Error);
+            return;
+        }
+
+        var parameters = new DialogParameters<PaymentDialog> { { x => x.FactId, row.Id } };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<PaymentDialog>(
+            $"Paiement — Facture N°{row.Id}", parameters, options);
+        var result = await dialog.Result;
+
+        if (result is not null && !result.Canceled)
+            await LoadFactures();
+    }
+
+    async Task ExportFacturesExcel()
+    {
+        using var workbook = new ClosedXML.Excel.XLWorkbook();
+        var ws = workbook.Worksheets.Add("Factures");
+
+        string[] headers = { "N° Fact", "Client", "Articles", "Qté", "Total", "Date", "Status", "Login" };
+        for (int i = 0; i < headers.Length; i++)
+        {
+            var cell = ws.Cell(1, i + 1);
+            cell.Value = headers[i];
+            cell.Style.Font.Bold = true;
+            cell.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#4472C4");
+            cell.Style.Font.FontColor = ClosedXML.Excel.XLColor.White;
+        }
+
+        int row = 2;
+        foreach (var r in _factFiltered)
+        {
+            ws.Cell(row, 1).Value = r.Id;
+            ws.Cell(row, 2).Value = r.Client;
+            ws.Cell(row, 3).Value = r.Articles;
+            ws.Cell(row, 4).Value = r.TotalQte;
+            ws.Cell(row, 5).Value = r.Total;
+            ws.Cell(row, 5).Style.NumberFormat.Format = "#,##0.00";
+            ws.Cell(row, 6).Value = r.Date.ToString("dd/MM/yyyy");
+            ws.Cell(row, 7).Value = r.DisplayStatus switch { 0 => "Brouillon", 1 => "Validée", 2 => "Payée", 3 => "Annulée", 4 => "Partiel", _ => "—" };
+            ws.Cell(row, 8).Value = r.Login;
+            row++;
+        }
+
+        ws.Columns().AdjustToContents();
+
+        using var ms = new System.IO.MemoryStream();
+        workbook.SaveAs(ms);
+        var bytes = ms.ToArray();
+        var base64 = Convert.ToBase64String(bytes);
+        var fileName = $"Factures_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+
+        await JS.InvokeVoidAsync("eval", $@"
+            var a = document.createElement('a');
+            a.href = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{base64}';
+            a.download = '{fileName}';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        ");
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       LIVRAISONS
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadLivraisons()
+    {
+        _livLoading = true;
+        _livData = await LivraisonService.GetLivraisonsByLocalisationsAsync(_currentUserLocalisations, _login);
+        ApplyLivFilter();
+        _livLoading = false;
+    }
+
+    void SetLivStatusFilter(string filter)
+    {
+        _livStatusFilter = filter;
+        ApplyLivFilter();
+    }
+
+    Task OnLivStatusFilterChanged(string? value)
+    {
+        SetLivStatusFilter(string.IsNullOrWhiteSpace(value) ? "all" : value);
+        return Task.CompletedTask;
+    }
+
+    List<AwSearchSelect.Option> GetLivStatusFilterOptions(int enAttente, int enCours, int payees) =>
+    [
+        new("all", $"Statut : toutes ({_livData.Count})"),
+        new("pending", $"En attente ({enAttente})"),
+        new("progress", $"En cours ({enCours})"),
+        new("paid", $"Payées ({payees})")
+    ];
+
+    void ApplyLivFilter()
+    {
+        _livFiltered = _livData.Where(l =>
+        {
+            if (_livStatusFilter == "pending" && !IsLivPending(l)) return false;
+            if (_livStatusFilter == "paid" && !IsLivPaid(l)) return false;
+            if (_livStatusFilter == "progress" && (IsLivPending(l) || IsLivPaid(l))) return false;
+            if (!string.IsNullOrWhiteSpace(_livSearch))
+            {
+                var s = _livSearch.Trim();
+                return l.LivraisonId.ToString().Contains(s, StringComparison.OrdinalIgnoreCase)
+                    || (l.Customer?.CustomerName?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || (l.Porteur?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false);
+            }
+            return true;
+        }).ToList();
+        _livPage = 1;
+    }
+
+    void OnLivSearchChanged(string value)
+    {
+        _livSearch = value ?? "";
+        ApplyLivFilter();
+    }
+
+    static bool IsLivPaid(Livraison l) =>
+        l.Fact != null
+        && (l.Fact.TotalApresReduction ?? l.Fact.Total ?? 0) > 0
+        && (l.Fact.Payments?.Sum(p => (double)p.Montant) ?? 0) >= (double)(l.Fact.TotalApresReduction ?? l.Fact.Total ?? 0);
+
+    static bool IsLivPending(Livraison l) => l.Fact == null && (l.Status ?? 0) != 1;
+
+    async Task OnLivraisonRowClick(Livraison item)
+    {
+        var parameters = new DialogParameters<LivraisonDetailDialog>
+        {
+            { x => x.LivraisonId, item.LivraisonId },
+            { x => x.CanWrite, _canLivraisonWrite },
+            { x => x.CanDelete, _canLivraisonDelete }
+        };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<LivraisonDetailDialog>(
+            $"Livraison N° {item.LivraisonId}", parameters, options);
+        var result = await dialog.Result;
+
+        if (result is not null && !result.Canceled)
+        {
+            var action = result.Data?.ToString();
+            switch (action)
+            {
+                case "edit":
+                    await OnEditLivraison(item);
+                    break;
+                case "deliver":
+                    await OnMarquerLivree(item);
+                    break;
+                case "pay":
+                    await OnPayerLivraison(item);
+                    break;
+                case "delete":
+                    await OnDeleteLivraison(item);
+                    break;
+            }
+        }
+    }
+
+    async Task OnAddLivraison()
+    {
+        if (_userPendingClotureToday)
+        {
+            Snackbar.Add("Clôture en attente d'approbation admin. Aucune transaction n'est possible.", Severity.Error);
+            return;
+        }
+        if (!_canLivraisonWrite)
+        {
+            Snackbar.Add("Création livraison non autorisée.", Severity.Warning);
+            return;
+        }
+
+        var parameters = new DialogParameters<LivraisonForm>();
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<LivraisonForm>("Nouvelle livraison", parameters, options);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled) await LoadLivraisons();
+    }
+
+    async Task OnEditLivraison(Livraison item)
+    {
+        if (!_canLivraisonWrite)
+        {
+            Snackbar.Add("Modification livraison non autorisée.", Severity.Warning);
+            return;
+        }
+
+        var parameters = new DialogParameters<LivraisonForm> { { x => x.LivraisonId, item.LivraisonId } };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<LivraisonForm>("Modifier la livraison", parameters, options);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled) await LoadLivraisons();
+    }
+
+    async Task OnMarquerLivree(Livraison item)
+    {
+        if (!_canLivraisonWrite)
+        {
+            Snackbar.Add("Action non autorisée.", Severity.Warning);
+            return;
+        }
+
+        await LivraisonService.MarkLivraisonDeliveredAsync(item.LivraisonId);
+        await LoadLivraisons();
+    }
+
+    async Task OnPayerLivraison(Livraison liv)
+    {
+        if (_userPendingClotureToday)
+        {
+            Snackbar.Add("Clôture en attente d'approbation admin. Aucune transaction n'est possible.", Severity.Error);
+            return;
+        }
+        if (!_canLivraisonWrite)
+        {
+            Snackbar.Add("Paiement livraison non autorisé.", Severity.Warning);
+            return;
+        }
+
+        var montant = liv.Details.Sum(d => d.MontantPaye ?? 0);
+        var confirm = await DialogService.ShowMessageBox(
+            "Paiement de la livraison",
+            $"Payer la livraison N° {liv.LivraisonId} ?\n" +
+            $"Client : {liv.Customer?.CustomerName ?? "—"}\n" +
+            $"Montant : {UserCurrency.FormatFromFcStored(montant, _displayTaux)}\n\n" +
+            "Une facture sera automatiquement générée.",
+            yesText: "Payer & Facturer",
+            cancelText: "Annuler");
+
+        if (confirm != true) return;
+
+        var result = await LivraisonService.PayerLivraisonAsync(liv.LivraisonId, _login);
+        if (result.Success)
+        {
+            Snackbar.Add(result.Message, Severity.Success);
+            await LoadLivraisons();
+        }
+        else
+        {
+            Snackbar.Add(result.Message, Severity.Error);
+        }
+    }
+
+    async Task OnDeleteLivraison(Livraison item)
+    {
+        if (!_canLivraisonDelete)
+        {
+            Snackbar.Add("Suppression livraison non autorisée.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBox(
+            "Confirmation",
+            $"Supprimer la livraison N° {item.LivraisonId} ?",
+            yesText: "Supprimer",
+            cancelText: "Annuler");
+        if (confirm == true)
+        {
+            await LivraisonService.DeleteLivraisonAsync(item.LivraisonId);
+            Snackbar.Add("Livraison supprimée", Severity.Success);
+            await LoadLivraisons();
+        }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       PAIEMENTS
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadPaiements()
+    {
+        _payLoading = true;
+        _payData = await FacturationService.GetPaiementsAsync(_currentUserLocalisations, _login);
+        ApplyPayFilter();
+        _payLoading = false;
+    }
+
+    void SetPayStatusFilter(string filter)
+    {
+        _payStatusFilter = filter;
+        ApplyPayFilter();
+    }
+
+    Task OnPayStatusFilterChanged(string? value)
+    {
+        SetPayStatusFilter(string.IsNullOrWhiteSpace(value) ? "all" : value);
+        return Task.CompletedTask;
+    }
+
+    List<AwSearchSelect.Option> GetPayStatusFilterOptions(int impayees, int payees) =>
+    [
+        new("all", $"Statut : toutes ({_payData.Count})"),
+        new("unpaid", $"Impayées ({impayees})"),
+        new("paid", $"Soldées ({payees})")
+    ];
+
+    void TogglePayExpand(int factId)
+    {
+        if (!_payExpandedIds.Add(factId))
+            _payExpandedIds.Remove(factId);
+    }
+
+    void ApplyPayFilter()
+    {
+        _payFiltered = _payData.Where(p =>
+        {
+            if (_payStatusFilter == "unpaid" && (p.Reste <= 0 || p.Facture.Status == 3)) return false;
+            if (_payStatusFilter == "paid" && (p.Reste > 0 && p.Facture.Status != 3)) return false;
+            if (!string.IsNullOrWhiteSpace(_paySearch))
+            {
+                var s = _paySearch.Trim();
+                return p.Facture.Id.ToString().Contains(s, StringComparison.OrdinalIgnoreCase)
+                    || (p.ClientName?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || (p.Facture.CommandeId?.ToString().Contains(s, StringComparison.OrdinalIgnoreCase) ?? false);
+            }
+            return true;
+        }).ToList();
+        _payPage = 1;
+    }
+
+    void OnPaySearchChanged(string value)
+    {
+        _paySearch = value ?? "";
+        ApplyPayFilter();
+    }
+
+    async Task OnPayerPaiement(FactureViewDto fv)
+    {
+        if (!_canPaiementRead)
+        {
+            Snackbar.Add("Lecture paiements non autorisée.", Severity.Warning);
+            return;
+        }
+
+        if (!_canFacturationWrite)
+        {
+            Snackbar.Add("Paiement non autorisé.", Severity.Warning);
+            return;
+        }
+
+        var factTaux = fv.Facture.Taux > 0 ? fv.Facture.Taux : _displayTaux;
+        var factIsUsd = CurrencyFormat.IsUsd(fv.Facture.Money?.DescriptionMonais);
+        var parameters = new DialogParameters<PaiementForm>
+        {
+            { x => x.CommandeId, fv.Facture.CommandeId ?? 0 },
+            { x => x.FactId, fv.Facture.Id },
+            { x => x.MontantRest, fv.Reste },
+            { x => x.FactTaux, factTaux },
+            { x => x.FactIsUsd, factIsUsd }
+        };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<PaiementForm>(
+            $"Paiement — Facture F-{fv.Facture.Id}", parameters, options);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled) await LoadPaiements();
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       CLÔTURES
+       ════════════════════════════════════════════════════════════ */
+
+    async Task RefreshClotureUserStateAsync()
+    {
+        try
+        {
+            _userPendingClotureToday = await ClotureService.HasUserClosedTodayAsync(_login, _currentUserLocalisations);
+            var today = DateOnly.FromDateTime(DateTime.Today);
+            _myTodayApprovedCloture = _clotureData
+                .Where(v => v.DateCloture == today
+                    && v.StatutCloture == 1
+                    && string.Equals(v.UserLogin, _login, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(v => v.DateTraitement ?? v.HeureCloture)
+                .FirstOrDefault();
+        }
+        catch
+        {
+            _userPendingClotureToday = false;
+            _myTodayApprovedCloture = null;
+        }
+    }
+
+    async Task LoadClotures()
+    {
+        _clotureLoading = true;
+        var locIds = _currentUserLocalisations.Any()
+            ? _currentUserLocalisations
+            : _userLocalisations.Select(l => l.IdLocalisation).ToList();
+        _clotureData = await ClotureService.GetCloturesByLocalisationsAsync(locIds);
+        _clotureLoading = false;
+        ApplyClotureFilter();
+        await RefreshClotureUserStateAsync();
+    }
+
+    bool CanModerateCloture(Versement v)
+    {
+        if (v.StatutCloture != 0) return false;
+        if (string.Equals(v.UserLogin, _login, StringComparison.OrdinalIgnoreCase))
+            return _isAdmin;
+        return _isAdmin || _canFacturationWrite;
+    }
+
+    void SetClotureStatusFilter(string filter)
+    {
+        _clotureStatusFilter = filter;
+        ApplyClotureFilter();
+    }
+
+    Task OnClotureStatusFilterChanged(string? value)
+    {
+        SetClotureStatusFilter(string.IsNullOrWhiteSpace(value) ? "all" : value);
+        return Task.CompletedTask;
+    }
+
+    Task OnClotureLocFilterChanged(string? value)
+    {
+        _clotureLocFilter = int.TryParse(value, out var id) ? id : null;
+        ApplyClotureFilter();
+        return Task.CompletedTask;
+    }
+
+    List<AwSearchSelect.Option> GetClotureStatusFilterOptions(int enAttente, int approuvees, int rejetees)
+    {
+        var list = new List<AwSearchSelect.Option>
+        {
+            new("all", $"Statut : toutes ({_clotureData.Count})"),
+            new("pending", $"En attente ({enAttente})"),
+            new("approved", $"Approuvées ({approuvees})")
+        };
+        if (rejetees > 0)
+            list.Add(new("rejected", $"Rejetées ({rejetees})"));
+        return list;
+    }
+
+    List<AwSearchSelect.Option> GetClotureLocFilterOptions()
+    {
+        var list = new List<AwSearchSelect.Option> { new("", "Toutes localisations") };
+        foreach (var loc in _userLocalisations)
+            list.Add(new(loc.IdLocalisation.ToString(), loc.DescriptionLocalisation ?? $"Loc {loc.IdLocalisation}"));
+        return list;
+    }
+
+    void ApplyClotureFilter()
+    {
+        _clotureFiltered = _clotureData.Where(v =>
+        {
+            if (_clotureLocFilter.HasValue && v.LocalisationId != _clotureLocFilter.Value)
+                return false;
+            if (_clotureStatusFilter == "pending" && v.StatutCloture != 0) return false;
+            if (_clotureStatusFilter == "approved" && v.StatutCloture != 1) return false;
+            if (_clotureStatusFilter == "rejected" && v.StatutCloture != 2) return false;
+            return true;
+        }).ToList();
+        _cloturePage = 1;
+    }
+
+    async Task OnCloturer()
+    {
+        if (!_canFacturationWrite) return;
+        if (!_userLocalisations.Any())
+        {
+            Snackbar.Add("Aucune localisation assignée.", Severity.Warning);
+            return;
+        }
+
+        // Localisation avec activité du jour (ex. Magasin si vente là, pas Depot par défaut)
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var locIds = _currentUserLocalisations.Any()
+            ? _currentUserLocalisations
+            : _userLocalisations.Select(l => l.IdLocalisation).ToList();
+        var suggestedLocId = await ClotureService.GetSuggestedLocalisationForClotureAsync(today, locIds)
+            ?? _userLocalisations[0].IdLocalisation;
+        var selectedLoc = _userLocalisations.FirstOrDefault(l => l.IdLocalisation == suggestedLocId)
+            ?? _userLocalisations[0];
+        var selectedLocId = selectedLoc.IdLocalisation;
+        var selectedLocName = selectedLoc.DescriptionLocalisation ?? "—";
+
+        // Confirmation
+        var confirm = await DialogService.ShowMessageBox(
+            "Clôture journalière",
+            $"Clôturer la journée du {DateOnly.FromDateTime(DateTime.Today):dd/MM/yyyy} pour {selectedLocName} ?",
+            yesText: "Continuer",
+            cancelText: "Annuler");
+
+        if (confirm != true) return;
+
+        // Ouvrir le dialog de clôture
+        var parameters = new DialogParameters<ClotureForm>
+        {
+            { x => x.LocalisationId, selectedLocId },
+            { x => x.LocalisationName, selectedLocName },
+            { x => x.UserLogin, _login },
+            { x => x.AvailableLocalisations, _userLocalisations.ToList() },
+        };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<ClotureForm>(
+            $"Clôture — {selectedLocName}", parameters, options);
+        var result = await dialog.Result;
+
+        if (result is not null && !result.Canceled && result.Data is true)
+        {
+            await LoadClotures();
+            await LoadFactures();
+        }
+    }
+
+    async Task OnApprouverCloture(Versement v)
+    {
+        if (!CanModerateCloture(v))
+        {
+            Snackbar.Add(_isAdmin
+                ? "Vous ne pouvez pas approuver votre propre clôture."
+                : "Seul un autre utilisateur habilité peut approuver cette clôture.", Severity.Warning);
+            return;
+        }
+
+        var confirm = await DialogService.ShowMessageBox(
+            "Approuver la clôture",
+            $"Approuver la clôture du {v.DateCloture:dd/MM/yyyy} par {v.UserLogin} ?",
+            yesText: "Approuver",
+            cancelText: "Annuler");
+
+        if (confirm != true) return;
+
+        var ok = await ClotureService.UpdateClotureStatutAsync(v.Id, 1, _login);
+        if (!ok)
+        {
+            Snackbar.Add("Impossible de mettre à jour le statut de la clôture.", Severity.Error);
+            return;
+        }
+
+        await ClotureService.EnsureClotureExpenseAsync(v.Id);
+        Snackbar.Add("Clôture approuvée. L'utilisateur peut reprendre ses ventes.", Severity.Success);
+        await LoadClotures();
+        StateHasChanged();
+    }
+
+    async Task OnRejeterCloture(Versement v)
+    {
+        if (!CanModerateCloture(v))
+        {
+            Snackbar.Add("Vous ne pouvez pas rejeter votre propre clôture.", Severity.Warning);
+            return;
+        }
+
+        var motif = await DialogService.ShowMessageBox(
+            "Rejeter la clôture",
+            (MarkupString)$"Rejeter la clôture du <b>{v.DateCloture:dd/MM/yyyy}</b> par <b>{v.UserLogin}</b> ?<br/><small class='text-muted'>L'utilisateur pourra de nouveau effectuer des transactions.</small>",
+            yesText: "Rejeter",
+            cancelText: "Annuler");
+
+        if (motif != true) return;
+
+        var ok = await ClotureService.UpdateClotureStatutAsync(v.Id, 2, _login, "Rejetée par l'administrateur");
+        if (!ok)
+        {
+            Snackbar.Add("Impossible de mettre à jour le statut de la clôture.", Severity.Error);
+            return;
+        }
+
+        Snackbar.Add("Clôture rejetée. L'utilisateur peut reprendre ses transactions.", Severity.Warning);
+        await LoadClotures();
+        StateHasChanged();
+    }
+
+    void OnCurrencyPreferenceChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => UserCurrency.OnChanged -= OnCurrencyPreferenceChanged;
+}

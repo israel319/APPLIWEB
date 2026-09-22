@@ -1,0 +1,1730 @@
+@page "/stock"
+@using MudBlazor
+@rendermode InteractiveServer
+@using AppPlusPlus.Application.Services.Approvisionnement
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject ICatalogueService CatalogueService
+@inject ILocalisationService LocalisationService
+@inject NavigationManager Navigation
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+@inject IJSRuntime JS
+@using AppPlusPlus.Domain.Common
+@using AppPlusPlus.Application.DTOs.Approvisionnement
+@using AppPlusPlus.Application.DTOs.Stock
+@inject IApproPostingService ApproPosting
+@inject IApproQueryService ApproQuery
+@inject ICurrencyService Currency
+@inject IStockCatalogQueryService StockCatalogQuery
+@inject IStockService StockService
+@inject ITransformationService TransformationService
+@inject UiNavigationGate NavGate
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+
+<ModuleGuard ModuleCode="stock" ModuleName="Stock & Articles">
+
+<PageTitle>@AppSettings.AppName — Articles</PageTitle>
+
+@if (!_loaded)
+{
+    <div class="aw-page">
+        <AwSkeleton Variant="page" Rows="8" />
+    </div>
+}
+else
+{
+    @if (!_hasAnyArticlesAccess)
+    {
+        <div class="aw-page">
+            <div class="aw-shell" style="max-width:720px;margin:1.5rem auto;">
+                <div class="aw-empty">
+                    <i class="bi bi-lock"></i>
+                    <p><strong>Accès refusé</strong><br />Votre rôle ne possède pas les droits d'accès au module Stock.</p>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+    <div class="aw-page aw-page--workspace">
+        <div class="aw-workspace">
+            <header class="aw-object-head">
+                <div class="aw-object-head__identity">
+                    <h1 class="aw-object-head__title">@StockPageTitle</h1>
+                    <p class="aw-object-head__desc">@StockPageDescription</p>
+                </div>
+            </header>
+
+            @if (ShowStockSubNav)
+            {
+                <nav class="aw-railnav" aria-label="Sous-modules stock" role="tablist">
+                    @if (_canCatalogue)
+                    {
+                        <button type="button" role="tab" aria-selected="@(_tab == 0)"
+                                title="Référentiel articles"
+                                class="aw-railnav__item @(_tab == 0 ? "aw-railnav__item--active" : "")"
+                                @onclick="@(async () => await OnTabChange(0))">
+                            <i class="bi bi-grid-3x3-gap" aria-hidden="true"></i>
+                            Catalogue
+                        </button>
+                    }
+                    @if (_canAppro)
+                    {
+                        <button type="button" role="tab" aria-selected="@(_tab == 1)"
+                                title="Entrées & commandes"
+                                class="aw-railnav__item @(_tab == 1 ? "aw-railnav__item--active" : "")"
+                                @onclick="@(async () => await OnTabChange(1))">
+                            <i class="bi bi-truck" aria-hidden="true"></i>
+                            Approvisionnement
+                        </button>
+                    }
+                    @if (_canTransformation)
+                    {
+                        <button type="button" role="tab" aria-selected="@(_tab == 2)"
+                                title="Conversions stock"
+                                class="aw-railnav__item @(_tab == 2 ? "aw-railnav__item--active" : "")"
+                                @onclick="@(async () => await OnTabChange(2))">
+                            <i class="bi bi-arrow-left-right" aria-hidden="true"></i>
+                            Transformation
+                        </button>
+                    }
+                    @if (_canLocalisations)
+                    {
+                        <button type="button" role="tab" aria-selected="@(_tab == 3)"
+                                title="Magasins & dépôts"
+                                class="aw-railnav__item @(_tab == 3 ? "aw-railnav__item--active" : "")"
+                                @onclick="@(async () => await OnTabChange(3))">
+                            <i class="bi bi-geo-alt" aria-hidden="true"></i>
+                            Localisations
+                        </button>
+                    }
+                    @if (_canInventaire)
+                    {
+                        <button type="button" role="tab" title="Inventaire magasin"
+                                class="aw-railnav__item"
+                                @onclick="@(() => Navigation.NavigateTo("/stock/inventaire"))">
+                            <i class="bi bi-clipboard-data" aria-hidden="true"></i>
+                            Inventaire
+                        </button>
+                    }
+                </nav>
+            }
+
+            <div class="aw-workspace__body">
+            @* ══════════════════ CATALOGUE ══════════════════ *@
+            @if (_tab == 0 && (_canCatalogue || (_isVendeur && !_useHierarchicalGrants)))
+            {
+                    var artOk = _articleViews.Count(a => !a.HasRupture && !a.HasLowStock);
+                    var artBas = _articleViews.Count(a => a.HasLowStock);
+                    var artRupture = _articleViews.Count(a => a.HasRupture);
+                    var artBudgetGap = _articleViews.Count(a => a.BudgetRestantQty > 0);
+                    var totalBudgetQty = _articleViews.Sum(a => a.TotalBudgetQty);
+                    var totalStockQty = _articleViews.Sum(a => a.TotalStock);
+                    var totalResteQty = _articleViews.Sum(a => a.BudgetRestantQty);
+                    var coverPct = totalBudgetQty > 0
+                        ? Math.Min(100d, Math.Round(100d * (double)totalStockQty / totalBudgetQty, 1))
+                        : 0d;
+                    var coverTone = coverPct >= 80 ? "brand" : coverPct >= 40 ? "accent" : "danger";
+                    var artPageItems = PageOf(_articlesFiltered, _artPage, _artPageSize).ToList();
+
+                @if (_articleViews.Any())
+                {
+                    <section class="aw-overview aw-overview--with-cover" aria-label="Vue d'ensemble du stock">
+                        <div class="aw-overview__top">
+                            <div class="aw-overview__intro">
+                                <h2 class="aw-overview__title">Couverture objectif</h2>
+                            </div>
+                            <div class="@($"aw-overview__cover aw-overview__cover--{coverTone}")">
+                                <span class="aw-overview__cover-value">@coverPct.ToString("0.#")&nbsp;%</span>
+                                <span class="aw-overview__cover-label">atteint</span>
+                            </div>
+                        </div>
+
+                        <div class="aw-overview__meter" role="meter"
+                             aria-valuemin="0" aria-valuemax="100" aria-valuenow="@((int)coverPct)"
+                             aria-label="Couverture du stock par rapport à l'objectif">
+                            <div class="aw-overview__meter-track">
+                                <div class="@($"aw-overview__meter-fill aw-overview__meter-fill--{coverTone}")"
+                                     style="width: @(coverPct.ToString(System.Globalization.CultureInfo.InvariantCulture))%"></div>
+                            </div>
+                        </div>
+
+                        <div class="aw-overview__metrics">
+                            <article class="aw-overview__metric">
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Stock physique</span>
+                                    <span class="aw-overview__metric-value">
+                                        @QuantityFormat.Display(totalStockQty)
+                                        <span class="aw-overview__metric-unit">unités</span>
+                                    </span>
+                                    <span class="aw-overview__metric-hint">Disponible en magasin</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Objectif</span>
+                                    <span class="aw-overview__metric-value">
+                                        @totalBudgetQty.ToString("N0")
+                                        <span class="aw-overview__metric-unit">unités</span>
+                                    </span>
+                                    <span class="aw-overview__metric-hint">Cible entreprise</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">À approvisionner</span>
+                                    <span class="aw-overview__metric-value">
+                                        @totalResteQty.ToString("N0")
+                                        <span class="aw-overview__metric-unit">unités</span>
+                                    </span>
+                                    <span class="aw-overview__metric-hint">Écart à combler</span>
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+                }
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <AwDebouncedInput Placeholder="Rechercher un article…"
+                                          AriaLabel="Rechercher un article"
+                                          Value="@_artSearch"
+                                          ValueChanged="OnArtSearchChanged" />
+                    </div>
+                    <div class="aw-actionbar__filters">
+                        <AwSearchSelect AriaLabel="État du stock"
+                                        Placeholder="État : tous"
+                                        Value="@_artStockFilter"
+                                        ValueChanged="OnStockFilterValueChanged"
+                                        Options="@_stockFilterOptions" />
+                        <AwSearchSelect AriaLabel="Catégorie"
+                                        Placeholder="Toutes catégories"
+                                        Value="@(_artCategoryFilter?.ToString() ?? "")"
+                                        ValueChanged="OnCategoryFilterValueChanged"
+                                        Options="@_categoryFilterOptions" />
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="RefreshArticleData">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                        @if (_canStockWrite)
+                        {
+                            <button type="button" class="aw-btn aw-btn--primary" @onclick="@(() => Navigation.NavigateTo("/gestion/article/nouveau"))">
+                                <i class="bi bi-plus-lg"></i> Nouvel article
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                @if (_artLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!artPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-inbox"></i>
+                            <p>Aucun article pour ces filtres.</p>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>Article</th>
+                                        <th>Catégorie</th>
+                                        <th>Prix</th>
+                                        <th>Loc.</th>
+                                        <th>Qté stock</th>
+                                        <th>Objectif</th>
+                                        <th>Manque</th>
+                                        <th>État</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in artPageItems)
+                                    {
+                                        <tr style="cursor:pointer;" @key="item.IdArticle" @onclick="@(() => OnArticleClick(item))">
+                                            <td>
+                                                <span class="aw-table__title">@item.Description</span>
+                                                <span class="aw-table__meta">@item.IdArticle</span>
+                                            </td>
+                                            <td><span class="aw-badge aw-badge--muted">@item.CategoryName</span></td>
+                                            <td class="aw-table__num">
+                                                <CurrencyText Mode="@CurrencyText.DisplayMode.ApproNative"
+                                                              Amount="(decimal)(item.Price ?? 0)"
+                                                              IsUsd="item.IsUsd"
+                                                              Format="N2" />
+                                            </td>
+                                            <td class="aw-table__num">@item.LocationCount</td>
+                                            <td>
+                                                @if (item.HasRupture)
+                                                {
+                                                    <span class="aw-badge aw-badge--danger">@QuantityFormat.Display(item.TotalStock)</span>
+                                                }
+                                                else if (item.HasLowStock)
+                                                {
+                                                    <span class="aw-badge aw-badge--accent">@QuantityFormat.Display(item.TotalStock)</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-table__num">@QuantityFormat.Display(item.TotalStock)</span>
+                                                }
+                                            </td>
+                                            <td class="aw-table__num">
+                                                @(item.TotalBudgetQty > 0 ? item.TotalBudgetQty.ToString("N0") : "—")
+                                            </td>
+                                            <td>
+                                                @if (item.BudgetRestantQty > 0)
+                                                {
+                                                    <span class="aw-badge aw-badge--accent">@item.BudgetRestantQty.ToString("N0")</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-table__num">@(item.TotalBudgetQty > 0 ? "0" : "—")</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (item.HasRupture)
+                                                {
+                                                    <span class="aw-badge aw-badge--danger">Rupture</span>
+                                                }
+                                                else if (item.HasLowStock)
+                                                {
+                                                    <span class="aw-badge aw-badge--accent">Stock bas</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-badge aw-badge--brand">OK</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="_articlesFiltered.Count"
+                                 Page="_artPage"
+                                 PageSize="_artPageSize"
+                                 ItemLabel="article"
+                                 PageChanged="SetArtPage"
+                                 PageSizeChanged="SetArtPageSize" />
+                    </div>
+                }
+            }
+
+            @* ══════════════════ APPROVISIONNEMENT ══════════════════ *@
+            @if (_tab == 1)
+            {
+                var today = DateTime.Today;
+                var approFiltered = GetFilteredAppros();
+                var approMonth = _approData.Where(a => a.Date.Month == today.Month && a.Date.Year == today.Year && !a.IsCancelled && !a.IsTransfer).ToList();
+                var approViaCmd = _approData.Count(a => a.IsFromCommand);
+                var approDirect = _approData.Count(a => !a.IsFromCommand);
+                var aCommander = _articleViews.Count(a => a.BudgetRestantQty > 0);
+                var approPageItems = PageOf(approFiltered, _approPage, _approPageSize).ToList();
+
+                @if (_approData.Any() || aCommander > 0)
+                {
+                    <section class="aw-overview" aria-label="Vue d'ensemble approvisionnement">
+                        <div class="aw-overview__top">
+                            <div class="aw-overview__intro">
+                                <h2 class="aw-overview__title">Pipeline d'approvisionnement</h2>
+                                <p class="aw-overview__lead">
+                                    Suivi des réceptions, du besoin à combler et de l'origine des entrées stock.
+                                </p>
+                            </div>
+                            <div class="@($"aw-overview__cover {(aCommander > 0 ? "aw-overview__cover--accent" : "aw-overview__cover--brand")}")">
+                                <span class="aw-overview__cover-value">@aCommander</span>
+                                <span class="aw-overview__cover-label">article(s) sous objectif</span>
+                            </div>
+                        </div>
+                        <div class="aw-overview__metrics">
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-calendar3"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Réceptions ce mois</span>
+                                    <span class="aw-overview__metric-value">@approMonth.Count</span>
+                                    <span class="aw-overview__metric-hint">Entrées enregistrées sur le mois en cours</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-box-arrow-in-down"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Quantité reçue (mois)</span>
+                                    <span class="aw-overview__metric-value">
+                                        @approMonth.Sum(a => a.Qte).ToString("N0")
+                                        <span class="aw-overview__metric-unit">unités</span>
+                                    </span>
+                                    <span class="aw-overview__metric-hint">Volume physique rentré en stock</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-signpost-split"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Origine des réceptions</span>
+                                    <span class="aw-overview__metric-value" style="font-size:0.95rem;">
+                                        @approViaCmd cmd · @approDirect direct
+                                    </span>
+                                    <span class="aw-overview__metric-hint">Via commande fournisseur vs entrée libre</span>
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+                }
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <AwDebouncedInput Placeholder="Rechercher article, n°, référence…"
+                                          AriaLabel="Rechercher un approvisionnement"
+                                          Value="@_approSearch"
+                                          ValueChanged="OnApproSearchValueChanged" />
+                    </div>
+                    <div class="aw-actionbar__filters">
+                        <div class="aw-seg" role="group" aria-label="Filtrer les réceptions">
+                            <button type="button" class="aw-seg__btn @(_approScope == "all" ? "aw-seg__btn--active" : null)" @onclick="@(() => SetApproScope("all"))">Tous</button>
+                            <button type="button" class="aw-seg__btn @(_approScope == "month" ? "aw-seg__btn--active" : null)" @onclick="@(() => SetApproScope("month"))">Ce mois</button>
+                            <button type="button" class="aw-seg__btn @(_approScope == "order" ? "aw-seg__btn--active" : null)" @onclick="@(() => SetApproScope("order"))">Via commande</button>
+                            <button type="button" class="aw-seg__btn @(_approScope == "direct" ? "aw-seg__btn--active" : null)" @onclick="@(() => SetApproScope("direct"))">Direct</button>
+                        </div>
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="RefreshApproData">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                        @if (_canApproWrite)
+                        {
+                            <button type="button" class="aw-btn aw-btn--primary" @onclick="OnAddAppro">
+                                <i class="bi bi-plus-lg"></i> Nouvelle réception
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                @if (_approLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!approPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-truck"></i>
+                            <p>Aucune réception pour ces filtres.</p>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region" @key="@UserCurrency.DisplayRevision">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>Réception</th>
+                                        <th>Contenu</th>
+                                        <th>Référence</th>
+                                        <th>Origine</th>
+                                        <th>Lieu</th>
+                                        <th class="aw-table__num">Qté</th>
+                                        <th class="aw-table__num">Taux</th>
+                                        <th class="aw-table__num">Valeur achat</th>
+                                        <th>Statut</th>
+                                        <th>Opérateur</th>
+                                        @if (_canApproWrite || _canApproDelete)
+                                        {
+                                            <th style="width:6rem;"></th>
+                                        }
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in approPageItems)
+                                    {
+                                        <tr class="aw-table__row--clickable @(item.IsCancelled ? "text-muted" : null)"
+                                            title="Cliquer pour voir le détail"
+                                            @onclick="@(() => OpenApproDetailAsync(item))">
+                                            <td>
+                                                <span class="aw-table__title">N° @item.Id</span>
+                                                <span class="aw-table__meta">@item.Date.ToString("dd/MM/yyyy")</span>
+                                            </td>
+                                            <td>
+                                                <span class="aw-table__title">@item.ArticleName</span>
+                                                @if (item.LineCount > 1)
+                                                {
+                                                    <span class="aw-table__meta">@item.LineCount lignes</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <span class="aw-table__meta">@(string.IsNullOrWhiteSpace(item.Reference) ? "—" : item.Reference)</span>
+                                            </td>
+                                            <td>
+                                                @if (item.IsFromCommand)
+                                                {
+                                                    <span class="aw-badge aw-badge--brand">Cmd @(item.CommandId?.ToString() ?? "—")</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-badge aw-badge--muted">Direct</span>
+                                                }
+                                            </td>
+                                            <td><span class="aw-table__meta">@(string.IsNullOrWhiteSpace(item.LocalisationLabel) ? "—" : item.LocalisationLabel)</span></td>
+                                            <td class="aw-table__num">@item.Qte.ToString("N0")</td>
+                                            <td class="aw-table__num"><span class="aw-table__meta">@item.Taux.ToString("N0")</span></td>
+                                            <td class="aw-table__num">
+                                                <strong>@CurrencyFormat.Cdf(item.TotalAchatFc, "N0")</strong>
+                                            </td>
+                                            <td>
+                                                @if (item.IsTransfer)
+                                                {
+                                                    <span class="aw-badge aw-badge--muted">Transfert</span>
+                                                }
+                                                else if (item.IsCancelled)
+                                                {
+                                                    <span class="aw-badge aw-badge--danger">Annulé</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-badge aw-badge--success">Validé</span>
+                                                }
+                                            </td>
+                                            <td><span class="aw-table__meta">@item.User</span></td>
+                                            @if (_canApproWrite || _canApproDelete)
+                                            {
+                                                <td class="text-end" @onclick:stopPropagation="true">
+                                                    @if (!item.IsCancelled && _canApproWrite)
+                                                    {
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm"
+                                                                title="@(item.IsTransfer ? "Annuler le transfert (contre-passation stock)" : "Annuler (contre-passation stock)")"
+                                                                @onclick:stopPropagation="true"
+                                                                @onclick:preventDefault="true"
+                                                                @onclick="@(() => OnCancelAppro(item))">
+                                                            <i class="bi bi-x-circle"></i>
+                                                        </button>
+                                                    }
+                                                    @if (item.IsCancelled && _canApproDelete)
+                                                    {
+                                                        <button type="button" class="aw-btn aw-btn--danger aw-btn--icon aw-btn--sm" title="Supprimer définitivement"
+                                                                @onclick:stopPropagation="true"
+                                                                @onclick:preventDefault="true"
+                                                                @onclick="@(() => OnDeleteAppro(item))">
+                                                            <i class="bi bi-trash"></i>
+                                                        </button>
+                                                    }
+                                                </td>
+                                            }
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="approFiltered.Count"
+                                 Page="_approPage"
+                                 PageSize="_approPageSize"
+                                 ItemLabel="réception"
+                                 PageChanged="SetApproPage"
+                                 PageSizeChanged="SetApproPageSize" />
+                    </div>
+                }
+            }
+
+            @* ══════════════════ TRANSFORMATION ══════════════════ *@
+            @if (_tab == 2)
+            {
+                var todayT = DateTime.Today;
+                var transFiltered = GetFilteredTransformations();
+                var transMonth = _transData.Where(t => t.Date.Month == todayT.Month && t.Date.Year == todayT.Year).ToList();
+                var qtyOut = _transData.Sum(t => t.Qte);
+                var qtyIn = _transData.Sum(t => t.ToQte ?? t.Qte);
+                var transPageItems = PageOf(transFiltered, _transPage, _transPageSize).ToList();
+
+                @if (_transData.Any())
+                {
+                    <section class="aw-overview" aria-label="Vue d'ensemble transformations">
+                        <div class="aw-overview__top">
+                            <div class="aw-overview__intro">
+                                <h2 class="aw-overview__title">Flux de transformation</h2>
+                                <p class="aw-overview__lead">
+                                    Consommation de matières premières et génération de produits finis ou semi-finis.
+                                </p>
+                            </div>
+                            <div class="aw-overview__cover aw-overview__cover--brand">
+                                <span class="aw-overview__cover-value">@transMonth.Count</span>
+                                <span class="aw-overview__cover-label">opération(s) ce mois</span>
+                            </div>
+                        </div>
+                        <div class="aw-overview__metrics">
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--accent" aria-hidden="true"><i class="bi bi-box-arrow-up-right"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Matières consommées</span>
+                                    <span class="aw-overview__metric-value">
+                                        @qtyOut.ToString("N0")
+                                        <span class="aw-overview__metric-unit">unités</span>
+                                    </span>
+                                    <span class="aw-overview__metric-hint">Quantité sortie du stock source</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-box-seam"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Produits générés</span>
+                                    <span class="aw-overview__metric-value">
+                                        @qtyIn.ToString("N0")
+                                        <span class="aw-overview__metric-unit">unités</span>
+                                    </span>
+                                    <span class="aw-overview__metric-hint">Quantité entrée en stock destination</span>
+                                </div>
+                            </article>
+                            <article class="aw-overview__metric">
+                                <span class="aw-overview__icon aw-overview__icon--brand" aria-hidden="true"><i class="bi bi-percent"></i></span>
+                                <div class="aw-overview__metric-body">
+                                    <span class="aw-overview__metric-label">Rendement global</span>
+                                    <span class="aw-overview__metric-value">
+                                        @(qtyOut > 0 ? (100m * qtyIn / qtyOut).ToString("N0") : "—")
+                                        <span class="aw-overview__metric-unit">%</span>
+                                    </span>
+                                    <span class="aw-overview__metric-hint">Ratio produits générés / matières consommées</span>
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+                }
+
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <AwDebouncedInput Placeholder="Rechercher source, destination, n°…"
+                                          AriaLabel="Rechercher une transformation"
+                                          Value="@_transSearch"
+                                          ValueChanged="OnTransSearchValueChanged" />
+                    </div>
+                    <div class="aw-actionbar__filters">
+                        <div class="aw-seg" role="group" aria-label="Période">
+                            <button type="button" class="aw-seg__btn @(_transScope == "all" ? "aw-seg__btn--active" : null)" @onclick="@(() => SetTransScope("all"))">Toutes</button>
+                            <button type="button" class="aw-seg__btn @(_transScope == "month" ? "aw-seg__btn--active" : null)" @onclick="@(() => SetTransScope("month"))">Ce mois</button>
+                        </div>
+                    </div>
+                    <div class="aw-actionbar__actions">
+                        <button type="button" class="aw-btn aw-btn--ghost" title="Actualiser" @onclick="RefreshTransData">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                        @if (_canApproWrite)
+                        {
+                            <button type="button" class="aw-btn aw-btn--primary" @onclick="OnAddTrans">
+                                <i class="bi bi-plus-lg"></i> Nouvelle transformation
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                @if (_transLoading)
+                {
+                    <div class="aw-table-region">
+                        <AwSkeleton Variant="table" Rows="5" />
+                    </div>
+                }
+                else if (!transPageItems.Any())
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-empty">
+                            <i class="bi bi-arrow-left-right"></i>
+                            <p>Aucune transformation pour ces filtres.</p>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>Opération</th>
+                                        <th>Matière première → Produit</th>
+                                        <th>Consommé</th>
+                                        <th>Généré</th>
+                                        <th>Rendement</th>
+                                        <th>Lieux</th>
+                                        <th>Opérateur</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in transPageItems)
+                                    {
+                                        var fromArt = _articles.FirstOrDefault(a => a.IdArticle == item.FromArticleId);
+                                        var toArt = _articles.FirstOrDefault(a => a.IdArticle == item.ToArticleId);
+                                        var toQty = item.ToQte ?? item.Qte;
+                                        var yieldPct = item.Qte > 0 ? 100m * toQty / item.Qte : 0m;
+                                        var fromLoc = LocLabel(item.FromLocalisationId);
+                                        var toLoc = LocLabel(item.ToLocalisationId);
+                                        <tr @onclick="@(() => OnTransClick(item))">
+                                            <td>
+                                                <span class="aw-table__title">N° @item.TransformationId</span>
+                                                <span class="aw-table__meta">@item.Date.ToString("dd/MM/yyyy")</span>
+                                            </td>
+                                            <td>
+                                                <div class="aw-flow">
+                                                    <span class="aw-flow__from">@(fromArt?.Description ?? item.FromArticleId)</span>
+                                                    <i class="bi bi-arrow-right aw-flow__arrow" aria-hidden="true"></i>
+                                                    <span class="aw-flow__to">@(toArt?.Description ?? item.ToArticleId)</span>
+                                                </div>
+                                                @if (!string.IsNullOrWhiteSpace(item.Comment) && item.Comment != "-")
+                                                {
+                                                    <span class="aw-table__meta">@item.Comment</span>
+                                                }
+                                            </td>
+                                            <td class="aw-table__num">@item.Qte.ToString("N2")</td>
+                                            <td class="aw-table__num">@toQty.ToString("N2")</td>
+                                            <td>
+                                                <span class="aw-badge @(yieldPct >= 100 ? "aw-badge--brand" : "aw-badge--accent")">@yieldPct.ToString("N0") %</span>
+                                            </td>
+                                            <td>
+                                                <span class="aw-table__meta">@fromLoc</span>
+                                                @if (!string.Equals(fromLoc, toLoc, StringComparison.OrdinalIgnoreCase))
+                                                {
+                                                    <span class="aw-table__meta">→ @toLoc</span>
+                                                }
+                                            </td>
+                                            <td><span class="aw-table__meta">@item.UserLogin</span></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <AwPager TotalCount="transFiltered.Count"
+                                 Page="_transPage"
+                                 PageSize="_transPageSize"
+                                 ItemLabel="transformation"
+                                 PageChanged="SetTransPage"
+                                 PageSizeChanged="SetTransPageSize" />
+                    </div>
+                }
+            }
+
+            @* ══════════════════ LOCALISATIONS ══════════════════ *@
+            @if (_tab == 3)
+            {
+                var filtered = FilterByText(_localisations, l => l.DescriptionLocalisation, _settingsSearch);
+                var pageItems = PageOf(filtered, _settingsPage, _settingsPageSize).ToList();
+                <div class="aw-admin__header">
+                    <div>
+                        <h2 class="aw-admin__title">Localisations</h2>
+                        <p class="aw-admin__desc">Magasins, dépôts et lieux de stockage. Les catégories et référentiels se configurent dans Paramètres → Configuration.</p>
+                    </div>
+                    <button type="button" class="aw-btn aw-btn--primary" @onclick="InsertLocalisation"><i class="bi bi-plus-lg"></i> Ajouter</button>
+                </div>
+                <div class="aw-actionbar">
+                    <div class="aw-actionbar__search">
+                        <i class="bi bi-search" aria-hidden="true"></i>
+                        <input type="search" placeholder="Rechercher une localisation…" @bind="_settingsSearch" @bind:event="oninput" @bind:after="OnSettingsSearchChanged" />
+                    </div>
+                </div>
+                <div class="aw-table-region">
+                    <div class="aw-table-wrap">
+                        @if (!pageItems.Any())
+                        {
+                            <div class="aw-empty"><i class="bi bi-geo-alt"></i><p>Aucune localisation.</p></div>
+                        }
+                        else
+                        {
+                            <table class="aw-table">
+                                <thead><tr><th>Libellé</th><th>Nature</th><th style="width:7rem;">Actions</th></tr></thead>
+                                <tbody>
+                                    @foreach (var loc in pageItems)
+                                    {
+                                        <tr>
+                                            <td>
+                                                @if (_editLocalisationId == loc.IdLocalisation)
+                                                {
+                                                    <input class="aw-inline-input" @bind="_editLocalisationText" />
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-table__title">@loc.DescriptionLocalisation</span>
+                                                    <span class="aw-table__meta">ID @loc.IdLocalisation</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (loc.IsDepot)
+                                                {
+                                                    <span class="aw-badge aw-badge--accent">Dépôt</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="aw-badge aw-badge--muted">Magasin</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <div class="aw-actions">
+                                                    @if (_editLocalisationId == loc.IdLocalisation)
+                                                    {
+                                                        <button type="button" class="aw-btn aw-btn--primary aw-btn--sm aw-btn--icon" title="Enregistrer" @onclick="@(() => SaveEditLocalisation(loc))"><i class="bi bi-check-lg"></i></button>
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Annuler" @onclick="CancelEditLocalisation"><i class="bi bi-x-lg"></i></button>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Modifier" @onclick="@(() => StartEditLocalisation(loc))"><i class="bi bi-pencil"></i></button>
+                                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon" title="Supprimer" @onclick="@(() => DeleteLocalisation(loc))"><i class="bi bi-trash"></i></button>
+                                                    }
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                    <AwPager TotalCount="filtered.Count" Page="_settingsPage" PageSize="_settingsPageSize" ItemLabel="localisation"
+                             PageChanged="SetSettingsPage" PageSizeChanged="SetSettingsPageSize" />
+                </div>
+            }
+            </div>
+        </div>
+    </div>
+    }
+}
+
+</ModuleGuard>
+
+@code {
+    static readonly int[] PageSizeChoices = [10, 25, 50, 100];
+
+    /* ── Hub ── */
+    int _tab;
+    bool _loaded;
+    bool _isVendeur;
+    List<int> _currentUserLocalisations = new();
+    string _currentLogin = "";
+
+    /* ── Pagination ── */
+    int _artPage = 1;
+    int _artPageSize = 25;
+    int _approPage = 1;
+    int _approPageSize = 25;
+    int _transPage = 1;
+    int _transPageSize = 25;
+    int _settingsPage = 1;
+    int _settingsPageSize = 25;
+
+    /* ── Permissions ── */
+    bool _useHierarchicalGrants;
+    bool _hasAnyArticlesAccess;
+    bool _canCatalogue;
+    bool _canAppro;
+    bool _canTransformation;
+    bool _canLocalisations;
+    bool _canInventaire;
+    bool _canStockRead;
+    bool _canStockWrite;
+    bool _canStockDelete;
+    bool _canApproRead;
+    bool _canApproWrite;
+    bool _canApproDelete;
+
+    bool ShowStockSubNav =>
+        (_canCatalogue || _canAppro || _canTransformation || _canLocalisations || _canInventaire)
+        && (!_isVendeur || _useHierarchicalGrants);
+
+    string StockPageTitle => _useHierarchicalGrants
+        ? "Articles"
+        : (_isVendeur ? "Catalogue articles" : "Stock");
+
+    string StockPageDescription => _useHierarchicalGrants
+        ? GetStockSectionDescription()
+        : (_isVendeur ? "Articles disponibles en magasin." : GetStockSectionDescription());
+
+    /* ── Données de référence (partagées Catalogue + Paramètres) ── */
+    List<ArticleCategory> _categories = new();
+    List<Localisation> _localisations = new();
+
+    /* ── Catalogue ── */
+    bool _artLoading;
+    string _artSearch = "";
+    string _artStockFilter = "all";
+    int? _artCategoryFilter;
+    List<AwSearchSelect.Option> _stockFilterOptions = new();
+    List<AwSearchSelect.Option> _categoryFilterOptions = new();
+    Dictionary<int, string> _categoryNames = new();
+    List<StockCatalogArticleDto> _articleViews = new();
+    List<StockCatalogArticleDto> _articlesFiltered = new();
+    List<Article> _articles = new();
+    bool _articlesLoaded;
+    List<Stock> _allStocks = new();
+    bool _articleDialogOpen;
+    bool _catalogLoadedOnce;
+    bool _localisationsLoadedOnce;
+
+    /* ── Approvisionnement ── */
+    bool _approLoading;
+    bool _approLoadedOnce;
+    string _approSearch = "";
+    string _approScope = "all";
+    List<ApproListItemDto> _approData = new();
+
+    /* ── Transformation ── */
+    bool _transLoading;
+    bool _transLoadedOnce;
+    string _transSearch = "";
+    string _transScope = "all";
+    List<Transformation> _transData = new();
+
+    /* ── Localisations ── */
+    string _settingsSearch = "";
+
+    int? _editLocalisationId;
+    string _editLocalisationText = "";
+
+    /* ════════════════════════════════════════════════════════════
+       INIT
+       ════════════════════════════════════════════════════════════ */
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            var login = user.FindFirst("login")?.Value
+                ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            var isAdmin = AppFunctions.Normalize(user.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+            _isVendeur = AppFunctions.IsVendeurRole(user.FindFirst(ClaimTypes.Role)?.Value);
+
+            if (!string.IsNullOrEmpty(login))
+            {
+                _currentLogin = login;
+                _currentUserLocalisations = await LocalisationService.GetUserLocalisationIdsAsync(login, isAdmin);
+
+                var perms = await PermissionResolver.GetPermissionsAsync(login);
+                _useHierarchicalGrants = perms.HasHierarchicalGrants;
+
+                if (_useHierarchicalGrants)
+                {
+                    _canCatalogue = PermissionGate.ViewSubTab(perms, "articles.catalogue", () => false);
+                    _canAppro = PermissionGate.ViewSubTab(perms, "articles.approvisionnement", () => false);
+                    _canTransformation = PermissionGate.ViewSubTab(perms, "articles.transformation", () => false);
+                    _canLocalisations = PermissionGate.ViewSubTab(perms, "articles.localisations", () => false);
+                    _canInventaire = PermissionGate.ViewSubTab(perms, "articles.inventaire", () => false);
+
+                    _canStockRead = _canCatalogue;
+                    _canStockWrite = PermissionGate.DoAction(perms, "articles.catalogue.write", () => false)
+                        || PermissionGate.DoAction(perms, "articles.localisations.write", () => false);
+                    _canStockDelete = PermissionGate.DoAction(perms, "articles.catalogue.delete", () => false);
+                    _canApproRead = _canAppro;
+                    _canApproWrite = PermissionGate.DoAction(perms, "articles.approvisionnement.write", () => false);
+                    _canApproDelete = PermissionGate.DoAction(perms, "articles.approvisionnement.delete", () => false);
+
+                    _hasAnyArticlesAccess = _canCatalogue || _canAppro || _canTransformation
+                        || _canLocalisations || _canInventaire;
+
+                    if (PermissionCatalog.ShouldRedirectStockToInventaire(perms.Grants))
+                    {
+                        Navigation.NavigateTo("/stock/inventaire", replace: true);
+                        return;
+                    }
+
+                    SelectInitialTab();
+                    await LoadActiveTabAsync();
+                }
+                else
+                {
+                    _canStockRead    = isAdmin || perms.CanRead(AppFunctions.Stock);
+                    _canStockWrite   = isAdmin || perms.CanWrite(AppFunctions.Stock);
+                    _canStockDelete  = isAdmin || perms.CanDelete(AppFunctions.Stock);
+                    _canApproRead    = isAdmin || perms.CanRead(AppFunctions.Approvisionnement);
+                    _canApproWrite   = isAdmin || perms.CanWrite(AppFunctions.Approvisionnement);
+                    _canApproDelete  = isAdmin || perms.CanDelete(AppFunctions.Approvisionnement);
+
+                    _canCatalogue = _canStockRead;
+                    _canAppro = _canApproRead;
+                    _canTransformation = _canApproWrite;
+                    _canLocalisations = _canStockWrite;
+                    _canInventaire = _canStockWrite;
+                    _hasAnyArticlesAccess = _canStockRead || _canApproRead;
+
+                    if (_isVendeur)
+                    {
+                        _canStockRead = _canCatalogue = true;
+                        _canApproRead = _canApproWrite = _canApproDelete = false;
+                        _canStockWrite = _canStockDelete = false;
+                        _canAppro = _canTransformation = _canLocalisations = _canInventaire = false;
+                        _tab = 0;
+                    }
+
+                    SelectInitialTab();
+                    await LoadActiveTabAsync();
+                }
+            }
+        }
+
+        _loaded = true;
+    }
+
+    void SelectInitialTab()
+    {
+        if (_canCatalogue) { _tab = 0; return; }
+        if (_canAppro) { _tab = 1; return; }
+        if (_canTransformation) { _tab = 2; return; }
+        if (_canLocalisations) { _tab = 3; return; }
+        _tab = 0;
+    }
+
+    bool IsStockTabAllowed(int tab) => tab switch
+    {
+        0 => _canCatalogue,
+        1 => _canAppro,
+        2 => _canTransformation,
+        3 => _canLocalisations,
+        _ => false
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        try
+        {
+            var defaultTab = _tab;
+            var savedTab = await JS.InvokeAsync<int>("tabNavigation.getTab", "stock", defaultTab);
+            if (_useHierarchicalGrants)
+            {
+                if (IsStockTabAllowed(savedTab))
+                    _tab = savedTab;
+                else
+                    SelectInitialTab();
+            }
+            else if (!_isVendeur && IsStockTabAllowed(savedTab))
+            {
+                _tab = savedTab;
+            }
+        }
+        catch { }
+
+        await LoadActiveTabAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    async Task LoadActiveTabAsync()
+    {
+        switch (_tab)
+        {
+            case 0 when _canCatalogue && !_catalogLoadedOnce:
+                await LoadCatalogAsync();
+                break;
+            case 1 when _canAppro && !_approLoadedOnce:
+                await LoadAppros();
+                break;
+            case 2 when _canTransformation && !_transLoadedOnce:
+                await LoadTransformations();
+                break;
+            case 3 when _canLocalisations && !_localisationsLoadedOnce:
+                await EnsureLocalisationsAsync();
+                break;
+        }
+    }
+
+    async Task LoadCatalogAsync()
+    {
+        _artLoading = true;
+        try
+        {
+            var categoriesTask = CatalogueService.GetArticleCategoriesAsync();
+            var localisationsTask = LocalisationService.GetAllLocalisationsAsync();
+            var catalogTask = StockCatalogQuery.GetCatalogAsync(_currentUserLocalisations);
+            await Task.WhenAll(categoriesTask, localisationsTask, catalogTask);
+
+            _categories = await categoriesTask;
+            _categoryNames = _categories.ToDictionary(
+                c => c.IdCategory,
+                c => string.IsNullOrWhiteSpace(c.DescriptionCategory) ? $"Catégorie {c.IdCategory}" : c.DescriptionCategory);
+
+            _localisations = (await localisationsTask).ToList();
+            _localisationsLoadedOnce = true;
+
+            var catalog = await catalogTask;
+            _allStocks = catalog.Stocks;
+            _articleViews = catalog.Articles;
+            ApplyArticleFilters();
+            RebuildFilterOptions();
+            _catalogLoadedOnce = true;
+        }
+        finally
+        {
+            _artLoading = false;
+        }
+    }
+
+    async Task EnsureLocalisationsAsync()
+    {
+        if (_localisationsLoadedOnce)
+            return;
+
+        _localisations = (await LocalisationService.GetAllLocalisationsAsync()).ToList();
+        _localisationsLoadedOnce = true;
+    }
+
+    async Task OnTabChange(int tabIndex)
+    {
+        if (_isVendeur && !_useHierarchicalGrants) return;
+        _tab = tabIndex;
+        try
+        {
+            await JS.InvokeVoidAsync("tabNavigation.saveTab", "stock", tabIndex);
+        }
+        catch { }
+
+        await LoadActiveTabAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    void OnArtSearchChanged(string value)
+    {
+        _artSearch = value ?? "";
+        ApplyArticleFilters();
+    }
+
+    string GetStockSectionDescription() => _tab switch
+    {
+        1 => "Suivi des entrées, réceptions et opérations d'approvisionnement.",
+        2 => "Conversions et transferts entre articles du stock.",
+        3 => "Magasins, dépôts et lieux de stockage.",
+        _ => "Référentiel articles, niveaux de stock et objectifs d'approvisionnement."
+    };
+
+    /* ════════════════════════════════════════════════════════════
+       PAGINATION
+       ════════════════════════════════════════════════════════════ */
+
+    IList<T> PageOf<T>(IList<T> items, int page, int pageSize) =>
+        items.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+    int PageCount(int total, int pageSize) =>
+        total <= 0 ? 1 : (int)Math.Ceiling(total / (double)Math.Max(1, pageSize));
+
+    void SetArtPage(int page) =>
+        _artPage = Math.Clamp(page, 1, PageCount(_articlesFiltered.Count, _artPageSize));
+
+    void SetArtPageSize(int size)
+    {
+        if (!PageSizeChoices.Contains(size)) return;
+        _artPageSize = size;
+        _artPage = 1;
+    }
+
+    void SetApproPage(int page) =>
+        _approPage = Math.Clamp(page, 1, PageCount(GetFilteredAppros().Count, _approPageSize));
+
+    void SetApproPageSize(int size)
+    {
+        if (!PageSizeChoices.Contains(size)) return;
+        _approPageSize = size;
+        _approPage = 1;
+    }
+
+    void SetTransPage(int page) =>
+        _transPage = Math.Clamp(page, 1, PageCount(GetFilteredTransformations().Count, _transPageSize));
+
+    void SetTransPageSize(int size)
+    {
+        if (!PageSizeChoices.Contains(size)) return;
+        _transPageSize = size;
+        _transPage = 1;
+    }
+
+    void SetSettingsPage(int page) =>
+        _settingsPage = Math.Clamp(page, 1, PageCount(GetSettingsFilteredCount(), _settingsPageSize));
+
+    void SetSettingsPageSize(int size)
+    {
+        if (!PageSizeChoices.Contains(size)) return;
+        _settingsPageSize = size;
+        _settingsPage = 1;
+    }
+
+    void OnSettingsSearchChanged() => _settingsPage = 1;
+
+    void CancelAllSettingsEdits() => CancelEditLocalisation();
+
+    int GetSettingsFilteredCount() =>
+        FilterByText(_localisations, l => l.DescriptionLocalisation, _settingsSearch).Count;
+
+    List<T> FilterByText<T>(IEnumerable<T> source, Func<T, string?> selector, string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return source.ToList();
+        var q = query.Trim();
+        return source.Where(x => (selector(x) ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    string LocLabel(int? localisationId)
+    {
+        if (!localisationId.HasValue) return "—";
+        var loc = _localisations.FirstOrDefault(l => l.IdLocalisation == localisationId.Value);
+        return string.IsNullOrWhiteSpace(loc?.DescriptionLocalisation)
+            ? $"#{localisationId}"
+            : loc!.DescriptionLocalisation;
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       CATALOGUE
+       ════════════════════════════════════════════════════════════ */
+
+    void SetArtStockFilter(string filter)
+    {
+        _artStockFilter = filter;
+        _artPage = 1;
+        ApplyArticleFilters();
+    }
+
+    void SetArtCategoryFilter(int? categoryId)
+    {
+        _artCategoryFilter = categoryId;
+        _artPage = 1;
+        ApplyArticleFilters();
+    }
+
+    void OnCategorySelectChanged(ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString();
+        SetArtCategoryFilter(int.TryParse(raw, out var id) ? id : null);
+    }
+
+    void OnStockFilterSelectChanged(ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString();
+        SetArtStockFilter(string.IsNullOrWhiteSpace(raw) ? "all" : raw);
+    }
+
+    Task OnStockFilterValueChanged(string? value)
+    {
+        SetArtStockFilter(string.IsNullOrWhiteSpace(value) ? "all" : value);
+        return Task.CompletedTask;
+    }
+
+    Task OnCategoryFilterValueChanged(string? value)
+    {
+        SetArtCategoryFilter(int.TryParse(value, out var id) ? id : null);
+        return Task.CompletedTask;
+    }
+
+    void RebuildFilterOptions()
+    {
+        var artOk = _articleViews.Count(a => !a.HasRupture && !a.HasLowStock);
+        var artBas = _articleViews.Count(a => a.HasLowStock);
+        var artRupture = _articleViews.Count(a => a.HasRupture);
+        var artBudgetGap = _articleViews.Count(a => a.BudgetRestantQty > 0);
+        _stockFilterOptions = GetStockFilterOptions(artOk, artBas, artRupture, artBudgetGap);
+        _categoryFilterOptions = GetCategoryFilterOptions(GetCatalogueCategories());
+    }
+
+    List<AwSearchSelect.Option> GetStockFilterOptions(int artOk, int artBas, int artRupture, int artBudgetGap)
+    {
+        var list = new List<AwSearchSelect.Option>
+        {
+            new("all", $"État : tous ({_articleViews.Count})"),
+            new("ok", $"OK ({artOk})"),
+            new("low", $"Stock bas ({artBas})"),
+            new("rupture", $"Rupture ({artRupture})")
+        };
+        if (artBudgetGap > 0)
+            list.Add(new("budget", $"Sous objectif ({artBudgetGap})"));
+        return list;
+    }
+
+    List<AwSearchSelect.Option> GetCategoryFilterOptions(List<ArticleCategory> categories)
+    {
+        var list = new List<AwSearchSelect.Option>
+        {
+            new("", "Toutes catégories")
+        };
+        foreach (var cat in categories)
+        {
+            var label = cat.DescriptionCategory ?? $"Catégorie {cat.IdCategory}";
+            list.Add(new(cat.IdCategory.ToString(), $"{label} ({GetCategoryArticleCount(cat.IdCategory)})"));
+        }
+        return list;
+    }
+
+    List<ArticleCategory> GetCatalogueCategories() =>
+        _categories
+            .Where(c => _articleViews.Any(a => a.IdCategory == c.IdCategory))
+            .OrderBy(c => c.DescriptionCategory ?? "")
+            .ToList();
+
+    int GetCategoryArticleCount(int categoryId) =>
+        _articleViews.Count(a => a.IdCategory == categoryId);
+
+    void ApplyArticleFilters()
+    {
+        IEnumerable<StockCatalogArticleDto> query = _articleViews;
+
+        query = _artStockFilter switch
+        {
+            "ok" => query.Where(a => !a.HasRupture && !a.HasLowStock),
+            "low" => query.Where(a => a.HasLowStock),
+            "rupture" => query.Where(a => a.HasRupture),
+            "alert" => query.Where(a => a.HasRupture || a.HasLowStock),
+            "budget" => query.Where(a => a.BudgetRestantQty > 0),
+            _ => query
+        };
+
+        if (_artCategoryFilter.HasValue)
+            query = query.Where(a => a.IdCategory == _artCategoryFilter.Value);
+
+        if (!string.IsNullOrWhiteSpace(_artSearch))
+        {
+            var q = _artSearch.Trim();
+            query = query.Where(a => a.IdArticle.Contains(q, StringComparison.OrdinalIgnoreCase)
+                                  || a.Description.Contains(q, StringComparison.OrdinalIgnoreCase)
+                                  || (a.DescriptionI ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)
+                                  || a.CategoryName.Contains(q, StringComparison.OrdinalIgnoreCase));
+        }
+
+        _articlesFiltered = query
+            .OrderBy(a => a.CategoryName)
+            .ThenBy(a => a.Description)
+            .ToList();
+
+        _artPage = 1;
+    }
+
+    async Task EnsureArticlesLoadedAsync()
+    {
+        if (_articlesLoaded) return;
+        _articles = (await CatalogueService.GetArticlesAsync()).OrderBy(a => a.Description).ToList();
+        _articlesLoaded = true;
+    }
+
+    async Task OnArticleClick(StockCatalogArticleDto item)
+    {
+        try
+        {
+            await ShowArticleDetailDialog(item.IdArticle);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.InnerException?.Message ?? ex.Message, Severity.Error);
+        }
+    }
+
+    async Task ShowArticleDetailDialog(string articleId)
+    {
+        if (_articleDialogOpen)
+            return;
+
+        _articleDialogOpen = true;
+        try
+        {
+            var article = await CatalogueService.GetArticleByIdAsync(articleId);
+            if (article == null)
+            {
+                Snackbar.Add("Article introuvable.", Severity.Warning);
+                return;
+            }
+
+            var articleStocks = _allStocks
+                .Where(s => s.IdArticle == articleId)
+                .Select(s => new StockLocationInfo
+                {
+                    StockId = s.Id,
+                    IdLocalisation = s.IdLocalisation,
+                    LocalisationName = _localisations.FirstOrDefault(l => l.IdLocalisation == s.IdLocalisation)?.DescriptionLocalisation ?? "?",
+                    Qte = s.Qte,
+                    Seuil = s.Seuil,
+                    QteMax = s.QteMax
+                })
+                .OrderBy(s => s.LocalisationName)
+                .ToList();
+
+            var parameters = new DialogParameters
+            {
+                { nameof(ArticleDetailDialog.Article), article },
+                { nameof(ArticleDetailDialog.Stocks), articleStocks },
+                { nameof(ArticleDetailDialog.Localisations), _localisations },
+                { nameof(ArticleDetailDialog.ReadOnly), _isVendeur }
+            };
+            var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+            var dialog = await DialogService.ShowAsync<ArticleDetailDialog>(article.Description ?? article.IdArticle, parameters, options);
+
+            try
+            {
+                var result = await dialog.Result;
+                if (result != null && !result.Canceled)
+                    await RefreshArticleData();
+            }
+            catch (TaskCanceledException)
+            {
+            }
+        }
+        finally
+        {
+            _articleDialogOpen = false;
+        }
+    }
+
+    async Task RefreshArticleData()
+    {
+        var catalog = await StockCatalogQuery.GetCatalogAsync(_currentUserLocalisations);
+        _allStocks = catalog.Stocks;
+        _articleViews = catalog.Articles;
+        if (_articlesLoaded)
+        {
+            _articles = (await CatalogueService.GetArticlesAsync()).OrderBy(a => a.Description).ToList();
+        }
+        ApplyArticleFilters();
+        RebuildFilterOptions();
+        await SafeStateHasChangedAsync();
+    }
+
+    async Task SafeStateHasChangedAsync()
+    {
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    async Task OnDeleteArticle(Article item)
+    {
+        var confirm = await DialogService.ShowMessageBox("Confirmation",
+            $"Supprimer l'article « {item.Description} » ?",
+            yesText: "Supprimer", cancelText: "Annuler");
+        if (confirm != true) return;
+
+        try
+        {
+            await StockService.DeleteArticleSafelyAsync(item.IdArticle);
+            _articles.Remove(item);
+            _articleViews = _articleViews.Where(a => a.IdArticle != item.IdArticle).ToList();
+            ApplyArticleFilters();
+            Snackbar.Add("Article supprimé", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       APPROVISIONNEMENT
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadAppros()
+    {
+        _approLoading = true;
+        _approData = await ApproQuery.GetListAsync(_currentUserLocalisations);
+        _approLoadedOnce = true;
+        _approLoading = false;
+    }
+
+    List<ApproListItemDto> GetFilteredAppros()
+    {
+        IEnumerable<ApproListItemDto> q = _approData;
+        var today = DateTime.Today;
+        q = _approScope switch
+        {
+            "month" => q.Where(a => a.Date.Month == today.Month && a.Date.Year == today.Year),
+            "order" => q.Where(a => a.IsFromCommand),
+            "direct" => q.Where(a => !a.IsFromCommand),
+            _ => q
+        };
+        if (!string.IsNullOrWhiteSpace(_approSearch))
+        {
+            var s = _approSearch.Trim();
+            q = q.Where(a =>
+                a.ArticleName.Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                a.Id.ToString().Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                (a.Reference?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (a.User?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (a.LocalisationLabel?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+        return q.ToList();
+    }
+
+    void SetApproScope(string scope)
+    {
+        _approScope = scope;
+        _approPage = 1;
+    }
+
+    void OnApproSearchChanged() => _approPage = 1;
+
+    void OnApproSearchValueChanged(string value)
+    {
+        _approSearch = value ?? "";
+        OnApproSearchChanged();
+    }
+
+    async Task RefreshApproData()
+    {
+        await LoadAppros();
+        _approPage = Math.Clamp(_approPage, 1, PageCount(GetFilteredAppros().Count, _approPageSize));
+    }
+
+    void OnEditAppro(int approId)
+    {
+        if (NavGate.IsLocked || !NavGate.TryEnter()) return;
+        Navigation.NavigateTo($"/stock/appro/modifier/{approId}");
+    }
+
+    void OnAddAppro()
+    {
+        if (NavGate.IsLocked || !NavGate.TryEnter()) return;
+        Navigation.NavigateTo("/stock/appro/nouveau");
+    }
+
+    bool _approDialogOpen;
+
+    async Task OpenApproDetailAsync(ApproListItemDto item)
+    {
+        if (_approDialogOpen || NavGate.IsLocked) return;
+        _approDialogOpen = true;
+        try
+        {
+            var parameters = new DialogParameters
+            {
+                { nameof(ApproDetailDialog.ApproId), item.Id },
+                { nameof(ApproDetailDialog.CanWrite), _canApproWrite },
+                { nameof(ApproDetailDialog.UserLogin), _currentLogin }
+            };
+            var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true };
+            var dialog = await DialogService.ShowAsync<ApproDetailDialog>($"Réception N° {item.Id}", parameters, options);
+            try
+            {
+                var result = await dialog.Result;
+                if (result is { Canceled: false })
+                    await RefreshApproData();
+            }
+            catch (TaskCanceledException) { }
+        }
+        finally
+        {
+            _approDialogOpen = false;
+        }
+    }
+
+    async Task OnCancelAppro(ApproListItemDto item)
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            item.IsTransfer ? "Annuler le transfert" : "Annuler l'approvisionnement",
+            item.IsTransfer
+                ? $"Annuler le transfert N° {item.Id} ? Les {item.Qte:N0} unités seront réintégrées au magasin source et retirées de la destination."
+                : $"Annuler l'appro N° {item.Id} ? Le stock sera contre-passé et l'opération restera tracée avec le statut « Annulé ».",
+            yesText: item.IsTransfer ? "Annuler le transfert" : "Annuler l'appro", cancelText: "Fermer");
+        if (confirm != true) return;
+
+        try
+        {
+            var login = !string.IsNullOrWhiteSpace(_currentLogin) ? _currentLogin : item.User;
+            if (string.IsNullOrWhiteSpace(login))
+                login = "system";
+
+            await ApproPosting.CancelApproAsync(item.Id, login);
+            await RefreshApproData();
+            Snackbar.Add(item.IsTransfer
+                ? $"Transfert N° {item.Id} annulé — stocks restaurés."
+                : $"Approvisionnement N° {item.Id} annulé — stock corrigé.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    async Task OnDeleteAppro(ApproListItemDto item)
+    {
+        var confirm = await DialogService.ShowMessageBox("Confirmation",
+            $"Supprimer définitivement l'appro N° {item.Id} ? Cette action est irréversible.",
+            yesText: "Supprimer", cancelText: "Fermer");
+        if (confirm != true) return;
+
+        try
+        {
+            await ApproPosting.DeleteApproAsync(item.Id);
+            await RefreshApproData();
+            Snackbar.Add($"Appro N° {item.Id} supprimé.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       TRANSFORMATION
+       ════════════════════════════════════════════════════════════ */
+
+    async Task LoadTransformations()
+    {
+        _transLoading = true;
+        await EnsureArticlesLoadedAsync();
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+
+        var transQuery = ctx.Transformations.AsQueryable();
+
+        if (_currentUserLocalisations.Any())
+        {
+            transQuery = transQuery.Where(t =>
+                (t.FromLocalisationId.HasValue && _currentUserLocalisations.Contains(t.FromLocalisationId.Value)) ||
+                (t.ToLocalisationId.HasValue && _currentUserLocalisations.Contains(t.ToLocalisationId.Value)));
+        }
+
+        _transData = await transQuery.OrderByDescending(t => t.Date).ToListAsync();
+        _transLoadedOnce = true;
+        _transLoading = false;
+    }
+
+    List<Transformation> GetFilteredTransformations()
+    {
+        IEnumerable<Transformation> q = _transData;
+        var today = DateTime.Today;
+        if (_transScope == "month")
+            q = q.Where(t => t.Date.Month == today.Month && t.Date.Year == today.Year);
+
+        if (!string.IsNullOrWhiteSpace(_transSearch))
+        {
+            var s = _transSearch.Trim();
+            q = q.Where(t =>
+            {
+                var fromArt = _articles.FirstOrDefault(a => a.IdArticle == t.FromArticleId)?.Description ?? t.FromArticleId;
+                var toArt = _articles.FirstOrDefault(a => a.IdArticle == t.ToArticleId)?.Description ?? t.ToArticleId;
+                return t.TransformationId.ToString().Contains(s, StringComparison.OrdinalIgnoreCase)
+                    || fromArt.Contains(s, StringComparison.OrdinalIgnoreCase)
+                    || toArt.Contains(s, StringComparison.OrdinalIgnoreCase)
+                    || (t.UserLogin?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || (t.Comment?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false);
+            });
+        }
+
+        return q.ToList();
+    }
+
+    void SetTransScope(string scope)
+    {
+        _transScope = scope;
+        _transPage = 1;
+    }
+
+    void OnTransSearchChanged() => _transPage = 1;
+
+    void OnTransSearchValueChanged(string value)
+    {
+        _transSearch = value ?? "";
+        OnTransSearchChanged();
+    }
+
+    async Task RefreshTransData()
+    {
+        await LoadTransformations();
+        _transPage = Math.Clamp(_transPage, 1, PageCount(GetFilteredTransformations().Count, _transPageSize));
+    }
+
+    void OnTransClick(Transformation item)
+    {
+        OnEditTrans(item);
+    }
+
+    void OnAddTrans()
+    {
+        Navigation.NavigateTo("/stock/transformation/nouveau");
+    }
+
+    void OnEditTrans(Transformation item)
+    {
+        Navigation.NavigateTo($"/stock/transformation/modifier/{item.TransformationId}");
+    }
+
+    async Task OnDeleteTrans(Transformation item)
+    {
+        var confirm = await DialogService.ShowMessageBox("Confirmation",
+            $"Annuler et supprimer la transformation N° {item.TransformationId} ? Le stock sera contre-passé.",
+            yesText: "Supprimer", cancelText: "Fermer");
+        if (confirm != true) return;
+
+        try
+        {
+            await TransformationService.DeleteTransformationAsync(item.TransformationId);
+            _transData.Remove(item);
+            Snackbar.Add("Transformation annulée — stock corrigé.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       LOCALISATIONS — INLINE EDIT
+       ════════════════════════════════════════════════════════════ */
+
+    void StartEditLocalisation(Localisation item)
+    {
+        _editLocalisationId = item.IdLocalisation;
+        _editLocalisationText = item.DescriptionLocalisation ?? "";
+    }
+
+    void CancelEditLocalisation()
+    {
+        _editLocalisationId = null;
+        _editLocalisationText = "";
+    }
+
+    async Task SaveEditLocalisation(Localisation item)
+    {
+        item.DescriptionLocalisation = _editLocalisationText.Trim();
+        await OnUpdateLocalisation(item);
+        CancelEditLocalisation();
+    }
+
+    /* ── LOCALISATION ── */
+
+    async Task InsertLocalisation()
+    {
+        var item = new Localisation { DescriptionLocalisation = "Nouvelle localisation" };
+        await CatalogueService.AddLocalisationAsync(item);
+        _localisations.Add(item);
+        Snackbar.Add("Localisation ajoutée — cliquez sur modifier pour renommer", Severity.Success);
+    }
+
+    async Task OnUpdateLocalisation(Localisation item)
+    {
+        await CatalogueService.UpdateLocalisationAsync(item);
+        Snackbar.Add("Localisation modifiée", Severity.Success);
+    }
+
+    async Task DeleteLocalisation(Localisation item)
+    {
+        if (await Confirmer($"Supprimer « {item.DescriptionLocalisation} » ?"))
+        {
+            await CatalogueService.DeleteLocalisationAsync(item);
+            _localisations.Remove(item);
+            Snackbar.Add("Localisation supprimée", Severity.Success);
+        }
+    }
+
+    /* ── Utilitaire ── */
+    async Task<bool> Confirmer(string message)
+    {
+        var result = await DialogService.ShowMessageBox("Confirmation", message,
+            yesText: "Supprimer", cancelText: "Annuler");
+        return result == true;
+    }
+}

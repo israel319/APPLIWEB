@@ -1,0 +1,192 @@
+@page "/auth/connexion"
+@attribute [AllowAnonymous]
+@layout PublicLayout
+@rendermode PublicRenderMode.Instance
+@using AppPlusPlus.Web.Services
+@inject NavigationManager Navigation
+
+<PageTitle>Se connecter - @PublicBrand.ProductName</PageTitle>
+
+<div class="mk-login-page">
+    <div class="mk-login-layout">
+        <div class="mk-login-top">
+            <a href="/catalogue" class="mk-login-back"><i class="bi bi-arrow-left" aria-hidden="true"></i> Retour &agrave; la boutique</a>
+            <img class="ali-brand-logo"
+                 src="images/brand/malaika-kids-logo.png"
+                 alt="@PublicBrand.ProductName"
+                 width="200"
+                 height="62"
+                 decoding="async"
+                 fetchpriority="high" />
+        </div>
+
+        <div class="landing-auth-card landing-auth-card--login mk-login-card">
+            <h1 class="landing-auth-title">Se connecter</h1>
+            <p class="landing-auth-sub ali-auth-page__lead">Acc&eacute;dez &agrave; votre compte pour commander sur @PublicBrand.ProductName.</p>
+
+            <div class="landing-auth-tabs" role="tablist" aria-label="Type de connexion">
+                <button type="button"
+                        class="landing-auth-tabs__btn @(_isClientMode ? "landing-auth-tabs__btn--active" : "")"
+                        role="tab"
+                        aria-selected="@_isClientMode"
+                        @onclick="@(() => SetMode(ClientMode))">
+                    <i class="bi bi-phone" aria-hidden="true"></i>
+                    Client
+                </button>
+                <button type="button"
+                        class="landing-auth-tabs__btn @(!_isClientMode ? "landing-auth-tabs__btn--active" : "")"
+                        role="tab"
+                        aria-selected="@(!_isClientMode)"
+                        @onclick="@(() => SetMode(StaffMode))">
+                    <i class="bi bi-building" aria-hidden="true"></i>
+                    Personnel
+                </button>
+            </div>
+
+            @if (_isClientMode)
+            {
+                @if (_unknownAccount)
+                {
+                    <div class="alert alert-warning py-2">
+                        Num&eacute;ro inconnu. <a href="@InscriptionUrl">Cr&eacute;ez un compte</a> pour commander.
+                    </div>
+                }
+
+                <form method="post" action="/auth/client/login" class="ali-auth-page__form">
+                    <input type="hidden" name="returnUrl" value="@_clientReturnUrl" />
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="client-contact">Num&eacute;ro de t&eacute;l&eacute;phone</label>
+                        <input id="client-contact"
+                               name="contact"
+                               type="tel"
+                               required
+                               autocomplete="tel"
+                               class="form-control form-control-lg"
+                               placeholder="@PublicBrand.ContactPhone" />
+                    </div>
+
+                    <button type="submit" class="landing-btn landing-btn--primary landing-btn--block landing-btn--solid">
+                        Se connecter
+                    </button>
+                </form>
+
+                <p class="landing-auth-footer text-center mt-3 mb-0">
+                    Pas encore de compte ?
+                    <a href="@InscriptionUrl">Cr&eacute;er un compte</a>
+                </p>
+            }
+            else
+            {
+                @if (_sessionError)
+                {
+                    <div class="alert alert-warning py-2 mb-3">
+                        Session expir&eacute;e ou compte pr&eacute;c&eacute;dent encore actif. R&eacute;essayez de vous connecter.
+                    </div>
+                }
+
+                @if (_staffLoginError)
+                {
+                    <div class="alert alert-danger py-2 mb-3">
+                        Login ou mot de passe invalide.
+                    </div>
+                }
+
+                <form method="post" action="/auth/login" class="ali-auth-page__form">
+                    <input type="hidden" name="returnUrl" value="@_staffReturnUrl" />
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="staff-login">Login</label>
+                        <input id="staff-login"
+                               name="login"
+                               required
+                               autocomplete="username"
+                               class="form-control form-control-lg"
+                               placeholder="Votre identifiant" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="staff-password">Mot de passe</label>
+                        <input id="staff-password"
+                               name="password"
+                               type="password"
+                               required
+                               autocomplete="current-password"
+                               class="form-control form-control-lg"
+                               placeholder="Votre mot de passe" />
+                    </div>
+
+                    <button type="submit" class="landing-btn landing-btn--primary landing-btn--block landing-btn--solid">
+                        Se connecter
+                    </button>
+                </form>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    const string ClientMode = "client";
+    const string StaffMode = "staff";
+
+    string _mode = ClientMode;
+    string _clientReturnUrl = "/client/panier";
+    string _staffReturnUrl = "/dashboard";
+    bool _unknownAccount;
+    bool _staffLoginError;
+    bool _sessionError;
+
+    bool _isClientMode => _mode == ClientMode;
+
+    string InscriptionUrl => $"/client/inscription?returnUrl={Uri.EscapeDataString(_clientReturnUrl)}";
+
+    protected override void OnInitialized()
+    {
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query);
+
+        if (query.TryGetValue("returnUrl", out var errorReturn)
+            && string.Equals(errorReturn.ToString(), "/Error", StringComparison.OrdinalIgnoreCase))
+        {
+            Navigation.NavigateTo("/", replace: true);
+            return;
+        }
+
+        _unknownAccount = query.ContainsKey("error") && !query.ContainsKey("staff");
+        _staffLoginError = query.ContainsKey("staff") && query.ContainsKey("error");
+        _sessionError = query.ContainsKey("session");
+
+        if (query.TryGetValue("mode", out var modeValue))
+        {
+            var mode = modeValue.ToString();
+            if (mode == StaffMode)
+                _mode = StaffMode;
+        }
+        else if (_staffLoginError || _sessionError)
+        {
+            _mode = StaffMode;
+        }
+
+        if (query.TryGetValue("returnUrl", out var returnValue)
+            || query.TryGetValue("ReturnUrl", out returnValue))
+        {
+            var candidate = returnValue.ToString();
+            if (!string.IsNullOrWhiteSpace(candidate) && candidate.StartsWith('/'))
+            {
+                if (string.Equals(candidate, "/Error", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(candidate, "/login", StringComparison.OrdinalIgnoreCase))
+                {
+                    candidate = "/client/panier";
+                }
+
+                _clientReturnUrl = candidate;
+                if (candidate.StartsWith("/dashboard", StringComparison.OrdinalIgnoreCase)
+                    || candidate.StartsWith("/commandes", StringComparison.OrdinalIgnoreCase)
+                    || candidate.StartsWith("/vente", StringComparison.OrdinalIgnoreCase))
+                    _staffReturnUrl = candidate;
+            }
+        }
+    }
+
+    void SetMode(string mode) => _mode = mode;
+}

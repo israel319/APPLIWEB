@@ -1,0 +1,471 @@
+@using AppPlusPlus.Application.Services.Catalogue
+@using AppPlusPlus.Web.Services
+@inject HomeCatalogCoordinator HomeCatalog
+@inject ICatalogueService CatalogueService
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+
+
+<div class="ali-header-wrap @(_mobileMenuOpen ? "ali-header-wrap--menu-open" : "")">
+
+    <div class="ali-topbar d-none d-md-block">
+
+        <div class="ali-container ali-topbar__inner">
+
+            <div class="ali-topbar__left">
+
+                <a href="@ContactHref">Centre d'aide</a>
+
+                <span class="ali-topbar__sep">|</span>
+
+                <a href="@CatalogHref" @onclick="OnCatalogNav" @onclick:preventDefault="true">Acheter sur @PublicBrand.ProductName</a>
+
+            </div>
+
+            <div class="ali-topbar__right">
+
+                <span>@PublicBrand.ContactAddress</span>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+
+    <header class="ali-header">
+
+        <div class="ali-container ali-header__row">
+
+            <a href="/" data-enhance-nav="false" class="ali-logo ali-logo--brand" aria-label="@PublicBrand.ProductName">
+
+                <img class="ali-logo__img"
+                     src="images/brand/malaika-kids-logo.png"
+                     alt="@PublicBrand.ProductName"
+                     width="200"
+                     height="64"
+                     decoding="async"
+                     fetchpriority="high" />
+
+            </a>
+
+
+
+            <form class="ali-search" @onsubmit="OnSearchSubmit" @onsubmit:preventDefault="true">
+
+                <label class="visually-hidden" for="ali-search-input">Rechercher dans le catalogue</label>
+
+                <select class="ali-search__scope" aria-label="Portée" @bind="_searchScope">
+
+                    <option value="products">Produits</option>
+
+                    <option value="all">Tout le catalogue</option>
+
+                </select>
+
+                <input id="ali-search-input"
+
+                       type="search"
+
+                       class="ali-search__input"
+
+                       placeholder="Rechercher un article du catalogue…"
+
+                       @bind="_searchQuery"
+
+                       enterkeyhint="search" />
+
+                <button type="submit" class="ali-search__btn">
+
+                    <i class="bi bi-search" aria-hidden="true"></i>
+
+                    <span class="ali-search__btn-label">Rechercher</span>
+
+                </button>
+
+            </form>
+
+
+
+            <div class="ali-header__tools d-none d-lg-flex">
+
+                @if (IsClient)
+
+                {
+
+                    <a href="/client/compte" class="ali-tool @(ActiveSection == "compte" ? "ali-tool--active" : "")">
+
+                        <i class="bi bi-person" aria-hidden="true"></i>
+
+                        <span>Compte<br /><strong>@ClientDisplayName</strong></span>
+
+                    </a>
+
+                }
+
+                else
+
+                {
+
+                    <a href="/auth/connexion?returnUrl=@Uri.EscapeDataString("/client/panier")" class="ali-tool @(ActiveSection is "connexion" or "inscription" ? "ali-tool--active" : "")">
+
+                        <i class="bi bi-person" aria-hidden="true"></i>
+
+                        <span>Se connecter<br /><strong>Compte</strong></span>
+
+                    </a>
+
+                }
+
+                <a href="/client/panier" class="ali-tool ali-tool--cart @(ActiveSection == "panier" ? "ali-tool--active" : "")">
+
+                    <i class="bi bi-cart3" aria-hidden="true"></i>
+
+                    <span>Panier@(CartQty > 0 ? $" / {CartQty}" : "")</span>
+
+                    @if (CartQty > 0)
+
+                    {
+
+                        <em class="ali-tool__badge">@CartQty</em>
+
+                    }
+
+                </a>
+
+            </div>
+
+
+
+            <button type="button"
+
+                    class="ali-header__menu-btn d-lg-none"
+
+                    aria-expanded="@_mobileMenuOpen"
+
+                    aria-label="Menu"
+
+                    @onclick="ToggleMobileMenu">
+
+                <i class="bi @(_mobileMenuOpen ? "bi-x-lg" : "bi-list")" aria-hidden="true"></i>
+
+            </button>
+
+        </div>
+
+
+
+        <nav class="ali-nav" aria-label="Navigation principale">
+
+            <div class="ali-container ali-nav__inner">
+
+                <div class="ali-cat-btn">
+                    <button type="button" class="ali-cat-btn__trigger" aria-haspopup="true" aria-expanded="false">
+                        <i class="bi bi-list-ul" aria-hidden="true"></i>
+                        <span class="ali-cat-btn__label-full">Toutes les cat&eacute;gories</span>
+                        <span class="ali-cat-btn__label-short">Cat&eacute;gories</span>
+                        <i class="bi bi-chevron-down ali-cat-btn__chev" aria-hidden="true"></i>
+                    </button>
+                    <AliCategoryDropdownMenu Items="_navCategories" Loading="_navCategoriesLoading" OnSelected="GoNavCategoryAsync" />
+                </div>
+
+                <div class="ali-nav__links">
+
+                    <a href="/" data-enhance-nav="false" class="@NavLinkClass("accueil")" @onclick="CloseMobileMenu">Accueil</a>
+
+                    <a href="@CatalogHref" class="@NavLinkClass("catalogue")" @onclick="OnCatalogNav" @onclick:preventDefault="true">Catalogue</a>
+
+                    <div class="ali-nav-cat-btn">
+                        <span class="ali-nav-cat-btn__label" tabindex="0" role="button" aria-haspopup="true">Cat&eacute;gories</span>
+                        <AliCategoryDropdownMenu Items="_navCategories" Loading="_navCategoriesLoading" OnSelected="GoNavCategoryAsync" />
+                    </div>
+
+                    <a href="/client/panier" class="@NavLinkClass("panier")" @onclick="CloseMobileMenu">Panier</a>
+
+                    <a href="@ContactHref" class="@NavLinkClass("contact")" @onclick="CloseMobileMenu">Contact</a>
+
+                </div>
+
+            </div>
+
+        </nav>
+
+    </header>
+
+
+
+    @if (_mobileMenuOpen)
+
+    {
+
+        <div class="ali-drawer-layer d-lg-none" @onclick="CloseMobileMenu"></div>
+
+        <div class="ali-drawer d-lg-none" @onclick:stopPropagation="true">
+
+            <form class="ali-search ali-search--drawer" @onsubmit="OnSearchSubmit" @onsubmit:preventDefault="true">
+
+                <input type="search" class="ali-search__input" placeholder="Rechercher…" @bind="_searchQuery" />
+
+                <button type="submit" class="ali-search__btn">OK</button>
+
+            </form>
+
+            <a href="/" data-enhance-nav="false" class="ali-drawer__link @(ActiveSection == "accueil" ? "is-active" : "")" @onclick="CloseMobileMenu">Accueil</a>
+
+            <a href="@CatalogHref" class="ali-drawer__link" @onclick="OnCatalogNav" @onclick:preventDefault="true">Catalogue</a>
+
+            <a href="@CategoriesHref" class="ali-drawer__link" @onclick="OnBrowseAllCategories" @onclick:preventDefault="true">Toutes les cat&eacute;gories</a>
+
+            <a href="/client/panier" class="ali-drawer__link @(ActiveSection == "panier" ? "is-active" : "")" @onclick="CloseMobileMenu">Panier</a>
+
+            <a href="@ContactHref" class="ali-drawer__link" @onclick="CloseMobileMenu">Contact</a>
+
+            <div class="ali-drawer__account" aria-label="Compte client">
+
+                <p class="ali-drawer__account-title">Mon compte</p>
+
+                @if (IsClient)
+
+                {
+
+                    <p class="ali-drawer__account-name">@ClientDisplayName</p>
+
+                    <a href="/client/compte" class="ali-drawer__btn ali-drawer__btn--primary" @onclick="CloseMobileMenu">Mon compte</a>
+
+                    <a href="/auth/client/logout" class="ali-drawer__btn ali-drawer__btn--ghost" @onclick="CloseMobileMenu">D&eacute;connexion</a>
+
+                }
+
+                else
+
+                {
+
+                    <a href="/auth/connexion?returnUrl=@Uri.EscapeDataString(Navigation.Uri)" class="ali-drawer__btn ali-drawer__btn--primary" @onclick="CloseMobileMenu">Se connecter</a>
+
+                    <a href="/client/inscription" class="ali-drawer__btn ali-drawer__btn--ghost" @onclick="CloseMobileMenu">Créer un compte</a>
+
+                }
+
+            </div>
+
+        </div>
+
+    }
+
+</div>
+
+
+
+@code {
+
+    [Parameter] public int CartQty { get; set; }
+
+    [Parameter] public bool IsClient { get; set; }
+
+    [Parameter] public string ClientDisplayName { get; set; } = "";
+
+    [Parameter] public bool MobileMenuOpen { get; set; }
+
+    [Parameter] public EventCallback<bool> MobileMenuOpenChanged { get; set; }
+
+    [Parameter] public bool IsHomePage { get; set; }
+
+    [Parameter] public string ActiveSection { get; set; } = "";
+
+
+
+    bool _mobileMenuOpen;
+
+    string _searchQuery = "";
+
+    string _searchScope = "products";
+
+    bool _navCategoriesLoading = true;
+
+    List<AliCategoryDropdownMenu.NavCategoryItem> _navCategories = new();
+
+
+
+    string CatalogHref => "/catalogue";
+
+    string CategoriesHref => IsHomePage ? "#categories" : "/#categories";
+
+    string ContactHref => IsHomePage ? "#contact" : "/#contact";
+
+
+
+    protected override void OnParametersSet() => _mobileMenuOpen = MobileMenuOpen;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var bootstrap = await CatalogueService.GetCatalogBootstrapAsync();
+            _navCategories = bootstrap.Categories
+                .Where(c => c.VisibleCatalog && bootstrap.OrderableCategoryIds.Contains(c.IdCategory))
+                .OrderBy(c => c.DescriptionCategory)
+                .Select(c => new AliCategoryDropdownMenu.NavCategoryItem(
+                    c.IdCategory,
+                    FormatCategoryLabel(c.DescriptionCategory, c.IdCategory),
+                    PickCategoryIcon(c.DescriptionCategory)))
+                .ToList();
+        }
+        catch
+        {
+            _navCategories = new();
+        }
+        finally
+        {
+            _navCategoriesLoading = false;
+        }
+    }
+
+
+
+    string NavLinkClass(string section) =>
+
+        ActiveSection == section ? "is-active" : "";
+
+
+
+    async Task OnSearchSubmit()
+
+    {
+
+        await CloseMobileMenu();
+
+        HomeCatalog.RequestSearch(_searchQuery);
+
+        var query = string.IsNullOrWhiteSpace(_searchQuery)
+
+            ? ""
+
+            : $"?q={Uri.EscapeDataString(_searchQuery.Trim())}";
+
+        Navigation.NavigateTo(string.IsNullOrEmpty(query) ? "/catalogue" : $"/catalogue{query}");
+
+    }
+
+
+
+    async Task GoNavCategoryAsync(int categoryId)
+    {
+        await CloseMobileMenu();
+        Navigation.NavigateTo($"/catalogue/c/{categoryId}");
+    }
+
+    async Task OnBrowseAllCategories()
+
+    {
+
+        await CloseMobileMenu();
+
+        if (IsHomePage)
+
+            HomeCatalog.RequestBrowseAll();
+
+        Navigation.NavigateTo("/catalogue");
+
+    }
+
+
+
+    async Task OnCatalogNav()
+
+    {
+
+        await CloseMobileMenu();
+
+        Navigation.NavigateTo("/catalogue");
+
+    }
+
+
+
+    async Task OnCategoriesNav()
+
+    {
+
+        await CloseMobileMenu();
+
+        if (!IsHomePage)
+
+            Navigation.NavigateTo("/#categories");
+
+        await ScrollToAsync("categories");
+
+    }
+
+
+
+    async Task ScrollToAsync(string id)
+
+    {
+
+        try
+
+        {
+
+            await Task.Yield();
+
+            var nav = await JS.InvokeAsync<IJSObjectReference>("import", "./js/public-nav.js");
+
+            await nav.InvokeVoidAsync("scrollToId", id);
+
+        }
+
+        catch
+
+        {
+
+        }
+
+    }
+
+
+
+    async Task ToggleMobileMenu()
+
+    {
+
+        _mobileMenuOpen = !_mobileMenuOpen;
+
+        await MobileMenuOpenChanged.InvokeAsync(_mobileMenuOpen);
+
+    }
+
+
+
+    async Task CloseMobileMenu()
+
+    {
+
+        if (!_mobileMenuOpen) return;
+
+        _mobileMenuOpen = false;
+
+        await MobileMenuOpenChanged.InvokeAsync(false);
+
+    }
+
+    static string FormatCategoryLabel(string? name, int id) =>
+        string.IsNullOrWhiteSpace(name) ? $"Catégorie {id}" : name.Trim();
+
+    static string PickCategoryIcon(string? name)
+    {
+        var n = name?.ToLowerInvariant() ?? "";
+        if (n.Contains("robe") || n.Contains("fille")) return "bi-balloon-heart";
+        if (n.Contains("pant") || n.Contains("jean")) return "bi-columns-gap";
+        if (n.Contains("sweat") || n.Contains("veste")) return "bi-lightning";
+        if (n.Contains("pyjama")) return "bi-moon-stars";
+        if (n.Contains("chauss") || n.Contains("basket")) return "bi-boot";
+        if (n.Contains("sac")) return "bi-bag";
+        if (n.Contains("béb") || n.Contains("bebe")) return "bi-emoji-smile";
+        return "bi-tag";
+    }
+
+}
+
+

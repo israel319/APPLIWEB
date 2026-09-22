@@ -1,0 +1,433 @@
+@page "/commandes/interne/nouveau"
+@page "/commandes/interne/modifier/{CmdId:int}"
+@rendermode InteractiveServer
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using AppPlusPlus.Domain.Common
+@using AppPlusPlus.Application.Services.Administration
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>@AppSettings.AppName — @(_isEdit ? "Modifier la commande" : "Nouvelle commande")</PageTitle>
+
+<div class="aw-page">
+    <div class="aw-form aw-form--wide">
+        <header class="aw-form__head">
+            <div>
+                <p class="aw-form__eyebrow">Commandes</p>
+                <h1 class="aw-form__title">@(_isEdit ? "Modifier la commande" : "Nouvelle commande")</h1>
+            </div>
+            <div class="aw-form__actions">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="OnCancel">
+                    <i class="bi bi-arrow-left"></i> Annuler
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="OnSave">
+                    <i class="bi bi-check-lg"></i> Enregistrer
+                </button>
+            </div>
+        </header>
+        <div class="aw-form__body">
+
+            @* ── Fournisseur ── *@
+            <div class="aw-form__grid">
+                <div class="aw-field aw-form__span-2">
+                    <label class="aw-field__label">Fournisseur</label>
+                    <div class="d-flex gap-2">
+                        <div style="flex:1;">
+                            <SupplierAutocomplete Suppliers="@_suppliers"
+                                                  Value="@_item.SupplierId"
+                                                  ValueChanged="@(v => _item.SupplierId = v)"
+                                                  Placeholder="Rechercher un fournisseur…" />
+                        </div>
+                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--icon" @onclick="@OnCreateSupplier"
+                                title="Créer un fournisseur">
+                            <i class="bi bi-person-plus"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            @* ── Nouveau fournisseur inline ── *@
+            @if (_showNewSupplier)
+            {
+                <div style="margin-top:0.9rem;padding:0.85rem 0.9rem;border:1px solid var(--aw-line);border-radius:8px;background:#f8fafc;">
+                    <div class="aw-dialog__section" style="margin-top:0;">Nouveau fournisseur</div>
+                    <div class="aw-form__grid" style="margin-top:0.5rem;">
+                        <div class="aw-field">
+                            <label class="aw-field__label">Nom *</label>
+                            <input type="text" class="aw-input" @bind="_newSupplierName" placeholder="Nom du fournisseur" />
+                        </div>
+                        <div class="aw-field">
+                            <label class="aw-field__label">Contact</label>
+                            <input type="text" class="aw-input" @bind="_newSupplierContact" placeholder="Téléphone" />
+                        </div>
+                        <div class="aw-field">
+                            <label class="aw-field__label">Email</label>
+                            <input type="text" class="aw-input" @bind="_newSupplierEmail" placeholder="email" />
+                        </div>
+                        <div class="aw-field" style="display:flex;align-items:flex-end;gap:0.35rem;">
+                            <button type="button" class="aw-btn aw-btn--primary aw-btn--icon" @onclick="@OnSaveNewSupplier" title="Enregistrer">
+                                <i class="bi bi-check-lg"></i>
+                            </button>
+                            <button type="button" class="aw-btn aw-btn--ghost aw-btn--icon" @onclick="@(() => _showNewSupplier = false)" title="Annuler">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @* ── Date + Statut ── *@
+            <div class="aw-form__grid" style="margin-top:0.9rem;">
+                <div class="aw-field">
+                    <AwDateField Label="Date commande" @bind-Value="_dateCommande" />
+                </div>
+                <div class="aw-field">
+                    @if (_isEdit)
+                    {
+                        <label class="aw-field__label">Statut</label>
+                        <div>
+                            <span class="aw-badge @StatusCss(_item.Status)">
+                                @StatusLabel(_item.Status)
+                            </span>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <hr style="margin:1rem 0;border:0;border-top:1px solid var(--aw-line);" />
+
+            @* ── Articles commandés ── *@
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="aw-dialog__section" style="margin:0;">Articles commandés (@_lines.Count)</div>
+                <button type="button" class="aw-btn aw-btn--ghost aw-btn--sm" @onclick="@AddLine">
+                    <i class="bi bi-plus-lg"></i> Ajouter un article
+                </button>
+            </div>
+
+            <div class="aw-table-region" style="margin-top:0.55rem;">
+                <div class="aw-table-wrap">
+                    <table class="aw-table">
+                        <thead>
+                            <tr>
+                                <th>Article</th>
+                                <th class="aw-table__num">Stock actuel</th>
+                                <th class="aw-table__num">Qté commandée</th>
+                                @if (_isEdit)
+                                {
+                                    <th class="aw-table__num">Reçu</th>
+                                }
+                                <th style="width:3rem;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var line in _lines)
+                            {
+                                <tr style="cursor:default;">
+                                    <td>
+                                        <ArticleAutocomplete Articles="@_articles"
+                                                             Value="@line.IdArticle"
+                                                             ValueChanged="@(val => OnArticleSelected(line, val))"
+                                                             Placeholder="Rechercher un article…" />
+                                    </td>
+                                    <td class="aw-table__num">
+                                        <span class="aw-badge @((line.StockActuel ?? 0) > 0 ? "aw-badge--brand" : "aw-badge--muted")">
+                                            @((line.StockActuel ?? 0).ToString("N0"))
+                                        </span>
+                                    </td>
+                                    <td class="aw-table__num">
+                                        <MudNumericField @bind-Value="line.QteOrder" T="double?" Min="0"
+                                                         Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    </td>
+                                    @if (_isEdit)
+                                    {
+                                        <td class="aw-table__num">
+                                            <span class="text-success">
+                                                @((line.QteReceived ?? 0).ToString("N0"))
+                                            </span>
+                                        </td>
+                                    }
+                                    <td>
+                                        <button type="button" class="aw-btn aw-btn--ghost aw-btn--icon aw-btn--sm"
+                                                @onclick="@(() => RemoveLine(line))" title="Retirer" style="color:var(--aw-danger);">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public int? CmdId { get; set; }
+
+    bool _isEdit;
+    Cmd _item = new();
+    DateTime? _dateCommande = DateTime.Today;
+
+    List<Supplier> _suppliers = new();
+    List<Article> _articles = new();
+    List<CmdLine> _lines = new();
+
+    bool _showNewSupplier;
+    string? _newSupplierName;
+    string? _newSupplierContact;
+    string? _newSupplierEmail;
+    string _currentLogin = "";
+    string _backRoute = "/commandes";
+    PermissionSnapshot _perms = PermissionSnapshot.Empty;
+
+    void OnCancel() => Navigation.NavigateTo(_backRoute);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+            var isAdmin = AppFunctions.Normalize(authUser.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+            var perms = await PermissionResolver.GetPermissionsAsync(_currentLogin);
+            _perms = perms;
+            _backRoute = perms.HasHierarchicalGrants
+                ? PermissionCatalog.TabHubRoute("commandes", perms.Grants)
+                : "/commandes";
+            if (!PermissionGate.DoAction(perms, "commandes.internes.write",
+                    () => isAdmin || perms.CanWrite(AppFunctions.CommandesInternes)))
+            {
+                Navigation.NavigateTo(perms.HomeRoute());
+                return;
+            }
+        }
+
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+
+        _suppliers = await ctx.Suppliers.OrderBy(s => s.SupplierName).ToListAsync();
+        _articles = await ctx.Articles.OrderBy(a => a.Description).ToListAsync();
+
+        if (CmdId.HasValue)
+        {
+            _isEdit = true;
+            var existing = await ctx.Cmds
+                .Include(c => c.Details)
+                .FirstOrDefaultAsync(c => c.Id == CmdId.Value);
+
+            if (existing != null)
+            {
+                _item = existing;
+                _dateCommande = _item.DateCommande?.ToDateTime(TimeOnly.MinValue);
+
+                _lines = existing.Details.Select(d =>
+                {
+                    var art = _articles.FirstOrDefault(a => a.IdArticle == d.IdArticle);
+                    return new CmdLine
+                    {
+                        ExistingId = d.Id,
+                        IdArticle = d.IdArticle,
+                        QteOrder = d.QteOrder,
+                        QteReceived = d.QteReceive,
+                        StockActuel = art?.Qte
+                    };
+                }).ToList();
+            }
+        }
+        else
+        {
+            _lines.Add(new CmdLine());
+        }
+    }
+
+    private Task<IEnumerable<int?>> SearchSuppliers(string value, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(value))
+            return Task.FromResult(_suppliers.Select(s => (int?)s.SupplierId));
+        return Task.FromResult(_suppliers
+            .Where(s => s.SupplierName != null && s.SupplierName.Contains(value, StringComparison.OrdinalIgnoreCase))
+            .Select(s => (int?)s.SupplierId));
+    }
+
+    private Task<IEnumerable<string>> SearchArticles(string value, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(value))
+            return Task.FromResult(_articles.Select(a => a.IdArticle));
+        return Task.FromResult(_articles
+            .Where(a => a.Description != null && a.Description.Contains(value, StringComparison.OrdinalIgnoreCase))
+            .Select(a => a.IdArticle));
+    }
+
+    void AddLine()
+    {
+        _lines.Add(new CmdLine());
+        StateHasChanged();
+    }
+
+    void RemoveLine(CmdLine line)
+    {
+        _lines.Remove(line);
+        StateHasChanged();
+    }
+
+    void OnCreateSupplier()
+    {
+        _showNewSupplier = true;
+        _newSupplierName = null;
+        _newSupplierContact = null;
+        _newSupplierEmail = null;
+    }
+
+    async Task OnSaveNewSupplier()
+    {
+        if (string.IsNullOrWhiteSpace(_newSupplierName))
+        {
+            Snackbar.Add("Le nom du fournisseur est obligatoire", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+            var supplier = new Supplier
+            {
+                SupplierName = _newSupplierName.Trim(),
+                Contact = _newSupplierContact?.Trim(),
+                Email = _newSupplierEmail?.Trim(),
+                UserLogin = _currentLogin,
+                CreationDate = DateOnly.FromDateTime(DateTime.Today)
+            };
+            ctx.Suppliers.Add(supplier);
+            await ctx.SaveChangesAsync();
+
+            _suppliers = await ctx.Suppliers.OrderBy(s => s.SupplierName).ToListAsync();
+            _item.SupplierId = supplier.SupplierId;
+            _showNewSupplier = false;
+
+            Snackbar.Add($"Fournisseur créé : {supplier.SupplierName}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(msg, Severity.Error);
+        }
+    }
+
+    void OnArticleSelected(CmdLine line, string val)
+    {
+        line.IdArticle = val;
+        if (val is string artId)
+        {
+            var art = _articles.FirstOrDefault(a => a.IdArticle == artId);
+            line.StockActuel = art?.Qte;
+        }
+    }
+
+    async Task OnSave()
+    {
+        var validLines = _lines.Where(l => !string.IsNullOrEmpty(l.IdArticle) && (l.QteOrder ?? 0) > 0).ToList();
+
+        if (!validLines.Any())
+        {
+            Snackbar.Add("Ajoutez au moins un article avec une quantité > 0", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+
+            _item.DateCommande = DateOnly.FromDateTime(_dateCommande ?? DateTime.Today);
+            _item.User = _currentLogin;
+            _item.DateSys = DateTime.Now;
+            _item.Cumputer = Environment.MachineName;
+
+            if (!CmdId.HasValue)
+            {
+                _item.Status = 0;
+                ctx.Cmds.Add(_item);
+            }
+            else
+            {
+                ctx.Cmds.Update(_item);
+
+                var oldDetails = await ctx.CmdDetails
+                    .Where(d => d.IdCmd == CmdId.Value && (d.QteReceive ?? 0) == 0)
+                    .ToListAsync();
+                ctx.CmdDetails.RemoveRange(oldDetails);
+            }
+
+            await ctx.SaveChangesAsync();
+
+            foreach (var line in validLines)
+            {
+                if (line.ExistingId.HasValue && (line.QteReceived ?? 0) > 0)
+                {
+                    var detail = await ctx.CmdDetails.FindAsync(line.ExistingId.Value);
+                    if (detail != null)
+                    {
+                        detail.QteOrder = line.QteOrder;
+                        detail.IdArticle = line.IdArticle;
+                    }
+                }
+                else
+                {
+                    ctx.CmdDetails.Add(new CmdDetail
+                    {
+                        IdCmd = _item.Id,
+                        IdArticle = line.IdArticle,
+                        QteOrder = line.QteOrder,
+                        QteReceive = 0,
+                        DateSys = DateOnly.FromDateTime(DateTime.Today),
+                        User = _currentLogin,
+                        Cumputer = Environment.MachineName
+                    });
+                }
+            }
+
+            await ctx.SaveChangesAsync();
+            Navigation.NavigateTo(_backRoute);
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(msg, Severity.Error);
+        }
+    }
+
+    static string StatusLabel(int? s) => s switch
+    {
+        0 => "Nouvelle",
+        1 => "En cours",
+        2 => "Reçue",
+        3 => "Annulée",
+        _ => "—"
+    };
+
+    static string StatusCss(int? s) => s switch
+    {
+        0 => "aw-badge--muted",
+        1 => "aw-badge--accent",
+        2 => "aw-badge--brand",
+        3 => "aw-badge--danger",
+        _ => "aw-badge--muted"
+    };
+
+    class CmdLine
+    {
+        public int? ExistingId { get; set; }
+        public string? IdArticle { get; set; }
+        public double? QteOrder { get; set; }
+        public double? QteReceived { get; set; }
+        public decimal? StockActuel { get; set; }
+    }
+}

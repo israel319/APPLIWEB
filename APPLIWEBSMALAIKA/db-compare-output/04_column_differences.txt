@@ -1,0 +1,2 @@
+Message 468, niveau 16, état 9, serveur DESKTOP-OL6JEUH, ligne 7
+Impossible de résoudre le conflit de classement entre "French_CI_AS" et "SQL_Latin1_General_CP1_CI_AS" dans l'opération equal to.

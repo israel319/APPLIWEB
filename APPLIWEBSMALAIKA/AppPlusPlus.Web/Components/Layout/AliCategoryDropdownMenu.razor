@@ -1,0 +1,36 @@
+<div class="ali-cat-menu" role="menu">
+    @if (Loading)
+    {
+        <p class="ali-cat-menu__empty">Chargement…</p>
+    }
+    else if (!Items.Any())
+    {
+        <p class="ali-cat-menu__empty">Aucune catégorie</p>
+    }
+    else
+    {
+        @for (var i = 0; i < Items.Count; i++)
+        {
+            var cat = Items[i];
+            var dot = DotColors[i % DotColors.Length];
+            <button type="button"
+                    role="menuitem"
+                    class="ali-cat-menu__link"
+                    style="@($"--mk-cat-dot:{dot}")"
+                    @onclick="() => OnSelected.InvokeAsync(cat.Id)">
+                <span class="ali-cat-menu__dot"><i class="bi @cat.Icon" aria-hidden="true"></i></span>
+                @cat.Label
+            </button>
+        }
+    }
+</div>
+
+@code {
+    static readonly string[] DotColors = ["#FFD3E6", "#FFE2B8", "#CFE4FF", "#C9F2D9"];
+
+    [Parameter] public IReadOnlyList<NavCategoryItem> Items { get; set; } = Array.Empty<NavCategoryItem>();
+    [Parameter] public bool Loading { get; set; }
+    [Parameter] public EventCallback<int> OnSelected { get; set; }
+
+    public sealed record NavCategoryItem(int Id, string Label, string Icon);
+}

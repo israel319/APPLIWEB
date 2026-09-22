@@ -1,0 +1,13 @@
+sch|tbl
+---|---
+dbo|Articles_
+dbo|customers
+dbo|items_shop
+dbo|MaTable
+dbo|T_Cmd_Details_Externe
+dbo|T_Importation2
+dbo|T_Importations
+dbo|T_Providers
+dbo|T_Seuil
+
+(9 lignes affectées)

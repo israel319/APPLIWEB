@@ -1,0 +1,262 @@
+@using MudBlazor
+@inject ICmdService CmdService
+@inject MudBlazor.IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+
+<MudDialog>
+    <DialogContent>
+        @if (_loading)
+        {
+            <div class="aw-dialog">
+                <div class="aw-dialog__body">
+                    <AwSkeleton Variant="table" Rows="4" />
+                </div>
+            </div>
+        }
+        else if (_cmd is null)
+        {
+            <div class="alert alert-warning"><strong>Introuvable</strong> Cette commande n'existe pas.</div>
+        }
+        else
+        {
+            <div class="aw-dialog">
+                <header class="aw-dialog__head">
+                    <div class="aw-dialog__title-wrap">
+                        <i class="bi bi-box-seam" aria-hidden="true"></i>
+                        <h2 class="aw-dialog__title">Commande fournisseur N° @_cmd.Id</h2>
+                    </div>
+                </header>
+                <div class="aw-dialog__body">
+                    <div class="aw-dialog__meta">
+                        <div>
+                            <span class="aw-dialog__meta-label">Fournisseur</span>
+                            <span class="aw-dialog__meta-value">@(_cmd.Supplier?.SupplierName ?? "—")</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Date commande</span>
+                            <span class="aw-dialog__meta-value">@(_cmd.DateCommande?.ToString("dd/MM/yyyy") ?? "—")</span>
+                        </div>
+                        <div>
+                            <span class="aw-dialog__meta-label">Statut</span>
+                            @{
+                                var statusVal = _cmd.Status ?? 0;
+                                var label = statusVal switch
+                                {
+                                    0 => "Nouvelle",
+                                    1 => "En cours",
+                                    2 => "Reçue",
+                                    3 => "Annulée",
+                                    _ => "—"
+                                };
+                            }
+                            <span class="aw-badge @BadgeCss(statusVal)">@label</span>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(_cmd.Description))
+                    {
+                        <div style="margin-bottom:0.9rem;">
+                            <span class="aw-dialog__meta-label">Description</span>
+                            <span class="aw-dialog__meta-value">@_cmd.Description</span>
+                        </div>
+                    }
+
+                    <!-- ── Réception globale ── -->
+                    @if (_totalOrder > 0)
+                    {
+                        <div class="d-flex align-items-center gap-2" style="margin-bottom:0.75rem;">
+                            <span class="fw-semibold">Réception :</span>
+                            <div class="progress" style="flex:1;height:20px;">
+                                <div class="progress-bar @(_pctGlobal >= 100 ? "bg-success" : _pctGlobal > 0 ? "bg-warning" : "")" role="progressbar" style="width:@(_pctGlobal)%"></div>
+                            </div>
+                            <span class="fw-semibold">@_pctGlobal%</span>
+                        </div>
+                    }
+
+                    <div class="aw-dialog__section">Articles</div>
+
+                    <div class="aw-table-region">
+                        <div class="aw-table-wrap">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th>Article</th>
+                                        <th class="aw-table__num">Commandé</th>
+                                        <th class="aw-table__num">Reçu</th>
+                                        <th>Réception</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in _rows)
+                                    {
+                                        var pct = row.QteOrder > 0
+                                            ? Math.Min(100, (int)(row.QteReceived / row.QteOrder * 100))
+                                            : 0;
+                                        <tr style="cursor:default;">
+                                            <td><span class="aw-table__title">@row.ArticleName</span></td>
+                                            <td class="aw-table__num">@row.QteOrder.ToString("N0")</td>
+                                            <td class="aw-table__num">
+                                                <span style="@(row.QteReceived >= row.QteOrder && row.QteOrder > 0 ? "color:var(--aw-brand);font-weight:600;" : "")">
+                                                    @row.QteReceived.ToString("N0")
+                                                </span>
+                                            </td>
+                                            <td>
+                                                @if (row.QteOrder > 0)
+                                                {
+                                                    <div class="d-flex align-items-center gap-1">
+                                                        <div class="progress" style="width:70px;height:16px;">
+                                                            <div class="progress-bar @(pct >= 100 ? "bg-success" : pct > 0 ? "bg-warning" : "")"
+                                                                 role="progressbar" style="width:@(pct)%"></div>
+                                                        </div>
+                                                        <small class="aw-table__meta">@pct%</small>
+                                                    </div>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (_cmd is not null)
+        {
+            <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;justify-content:space-between;">
+                <button type="button" class="aw-btn aw-btn--danger" @onclick="OnDelete">
+                    <i class="bi bi-trash"></i> Supprimer
+                </button>
+                <div style="display:inline-flex;gap:0.45rem;">
+                    @if (_hasRemaining)
+                    {
+                        <button type="button" class="aw-btn aw-btn--primary" @onclick="OnReceptionner">
+                            <i class="bi bi-box-arrow-in-down"></i> Réceptionner
+                        </button>
+                    }
+                    @if (_hasStock)
+                    {
+                        <button type="button" class="aw-btn aw-btn--primary" @onclick="OnApprovisionner">
+                            <i class="bi bi-box-arrow-right"></i> Appro stock
+                        </button>
+                    }
+                    <button type="button" class="aw-btn aw-btn--ghost" @onclick="OnEdit">
+                        <i class="bi bi-pencil"></i> Modifier
+                    </button>
+                    <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                        <i class="bi bi-x-lg"></i> Fermer
+                    </button>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                    <i class="bi bi-x-lg"></i> Fermer
+                </button>
+            </div>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int CmdId { get; set; }
+    [Parameter] public bool HasRemaining { get; set; }
+    [Parameter] public bool HasStock { get; set; }
+
+    bool _loading = true;
+    bool _hasRemaining;
+    bool _hasStock;
+    Cmd? _cmd;
+    List<CmdArticleRow> _rows = new();
+    decimal _totalOrder;
+    int _pctGlobal;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _cmd = await CmdService.GetCmdWithDetailsAsync(CmdId);
+
+        if (_cmd != null)
+        {
+            _totalOrder = _cmd.Details.Sum(d => (decimal)(d.QteOrder ?? 0));
+            var totalReceived = _cmd.Details.Sum(d => (decimal)(d.QteReceive ?? 0));
+            _pctGlobal = _totalOrder > 0 ? Math.Min(100, (int)(totalReceived / _totalOrder * 100)) : 0;
+
+            _rows = _cmd.Details.Select(d => new CmdArticleRow
+            {
+                ArticleName = d.Article?.Description ?? d.IdArticle ?? "—",
+                QteOrder = (decimal)(d.QteOrder ?? 0),
+                QteReceived = (decimal)(d.QteReceive ?? 0)
+            }).ToList();
+        }
+        _hasRemaining = HasRemaining;
+        _hasStock = HasStock;
+        _loading = false;
+    }
+
+    void OnEdit()
+    {
+        MudDialog.Close();
+        Navigation.NavigateTo($"/commandes/interne/modifier/{CmdId}");
+    }
+
+    async Task OnReceptionner()
+    {
+        var parameters = new DialogParameters<ApproFromCmdForm> { { x => x.CmdId, CmdId } };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<ApproFromCmdForm>(
+            $"Réception — Commande N° {CmdId}", parameters, options);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+            MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    async Task OnApprovisionner()
+    {
+        var parameters = new DialogParameters<ApproFromStockForm> { { x => x.SourceCmdId, CmdId } };
+        var options = new MudBlazor.DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, NoHeader = true };
+        var dialog = await DialogService.ShowAsync<ApproFromStockForm>(
+            $"Approvisionner depuis Commande N° {CmdId}", parameters, options);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+            MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    async Task OnDelete()
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Confirmation",
+            $"Supprimer la commande N° {CmdId} ?",
+            yesText: "Supprimer",
+            cancelText: "Annuler");
+        if (confirm == true)
+        {
+            await CmdService.DeleteCmdAsync(CmdId);
+            Snackbar.Add("Commande supprimée", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+    }
+
+    void Cancel() => MudDialog.Close();
+
+    static string BadgeCss(int status) => status switch
+    {
+        0 => "aw-badge--muted",
+        1 => "aw-badge--accent",
+        2 => "aw-badge--brand",
+        3 => "aw-badge--danger",
+        _ => "aw-badge--muted"
+    };
+
+    class CmdArticleRow
+    {
+        public string ArticleName { get; set; } = "";
+        public decimal QteOrder { get; set; }
+        public decimal QteReceived { get; set; }
+    }
+}

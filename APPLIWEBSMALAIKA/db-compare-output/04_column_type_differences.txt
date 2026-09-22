@@ -1,0 +1,9 @@
+sch|tbl|col|test_sys|test_ml|test_p|test_s|test_n|glob_sys|glob_ml|glob_p|glob_s|glob_n
+---|---|---|--------|-------|------|------|------|--------|-------|------|------|------
+dbo|T_Arts|Id_Localisation|56|4|10|0|1|56|4|10|0|0
+dbo|T_Commande_Details|ArticleId|167|100|0|0|1|167|50|0|0|1
+dbo|T_Livraison|ClientId|56|4|10|0|1|167|50|0|0|1
+dbo|T_Livraison_Detail|ArticleId|167|100|0|0|1|167|50|0|0|1
+dbo|T_Transformation|DateSys|61|8|23|3|0|40|3|10|0|0
+
+(5 lignes affectées)

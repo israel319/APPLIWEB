@@ -1,0 +1,479 @@
+@page "/profile"
+@rendermode InteractiveServer
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject ILocalisationService LocalisationService
+@inject IUserCurrencyPreferenceService UserCurrency
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ISnackbar Snackbar
+
+<PageTitle>@AppSettings.AppName — Profil</PageTitle>
+
+@if (_loading)
+{
+    <div class="aw-page">
+        <div class="aw-loading" style="min-height:200px;">
+            <span class="aw-spinner" role="status" aria-hidden="true"></span>
+            <span>Chargement…</span>
+        </div>
+    </div>
+}
+else if (_user == null)
+{
+    <div class="aw-page">
+        <div class="aw-empty" style="min-height:200px;">
+            <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+            <p><strong>Utilisateur non trouvé</strong></p>
+            <p>Veuillez vous reconnecter.</p>
+        </div>
+    </div>
+}
+else
+{
+    <div class="aw-page aw-page--workspace">
+        <div class="aw-workspace aw-settings">
+            <header class="aw-settings__head">
+                <div class="aw-settings__identity">
+                    <h1 class="aw-settings__title">Mon profil</h1>
+                    <p class="aw-settings__desc">@GetSectionDescription()</p>
+                </div>
+            </header>
+
+            <nav class="aw-settings__tabs" aria-label="Sections profil" role="tablist">
+                @foreach (var tab in _tabs)
+                {
+                    <button type="button" role="tab"
+                            aria-selected="@(_section == tab.Key)"
+                            class="aw-settings__tab @(_section == tab.Key ? "aw-settings__tab--active" : "")"
+                            @onclick="@(() => _section = tab.Key)">
+                        <i class="bi @tab.Icon" aria-hidden="true"></i>
+                        <span>@tab.Label</span>
+                    </button>
+                }
+            </nav>
+
+            <div class="aw-settings__body">
+                @if (_section == "informations")
+                {
+                    <section class="aw-settings__section" aria-labelledby="prof-id">
+                        <div class="aw-settings__section-head">
+                            <h2 id="prof-id" class="aw-settings__section-title">Identité</h2>
+                            <p class="aw-settings__section-lead">Aperçu de votre compte et de vos affectations.</p>
+                        </div>
+                        <div class="aw-settings__card">
+                            <div class="aw-settings__row">
+                                <div class="d-flex align-items-center gap-3 flex-wrap" style="width:100%;">
+                                    <MudAvatar Style="width:48px;height:48px;font-size:1rem;" Color="Color.Primary">@_initials</MudAvatar>
+                                    <div class="aw-settings__meta" style="flex:1;min-width:0;">
+                                        <p class="aw-settings__label">@(_user.Name ?? _user.Login)</p>
+                                        <p class="aw-settings__hint">@(_user.Role?.DescriptionRole ?? "Utilisateur")</p>
+                                    </div>
+                                    <div class="d-flex flex-wrap gap-1">
+                                        <span class="aw-badge aw-badge--brand">@(_user.Role?.DescriptionRole ?? "User")</span>
+                                        @if (_user.Activated == true)
+                                        {
+                                            <span class="aw-badge aw-badge--accent">Actif</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="aw-badge aw-badge--muted">Inactif</span>
+                                        }
+                                        @foreach (var loc in _localisations)
+                                        {
+                                            <span class="aw-badge aw-badge--secondary">@loc</span>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="aw-settings__section" aria-labelledby="prof-info">
+                        <div class="aw-settings__section-head">
+                            <h2 id="prof-info" class="aw-settings__section-title">Informations personnelles</h2>
+                            <p class="aw-settings__section-lead">Coordonnées et préférences d'affichage.</p>
+                        </div>
+                        <div class="aw-settings__card" style="padding:1rem 1.1rem;">
+                            <div class="aw-form__grid">
+                                <div class="aw-field">
+                                    <label class="aw-field__label">Login</label>
+                                    <input type="text" class="aw-input" value="@_user.Login" disabled />
+                                </div>
+                                <div class="aw-field">
+                                    <label class="aw-field__label">Nom complet</label>
+                                    <input type="text" class="aw-input" @bind="_profileName" placeholder="Prénom et nom" />
+                                </div>
+                                <div class="aw-field">
+                                    <label class="aw-field__label">Email</label>
+                                    <input type="email" class="aw-input" @bind="_profileEmail" placeholder="email@exemple.com" />
+                                </div>
+                                <div class="aw-field">
+                                    <label class="aw-field__label">Rôle</label>
+                                    <input type="text" class="aw-input" value="@(_user.Role?.DescriptionRole ?? "-")" disabled />
+                                </div>
+                                <div class="aw-field">
+                                    <label class="aw-field__label">Devise préférée</label>
+                                    <AwSearchSelect AriaLabel="Devise préférée" Placeholder="Devise" Searchable="false"
+                                                    Value="@_preferredMoneyId.ToString()" ValueChanged="OnCurrencyChanged"
+                                                    Options="@_currencyOptions" />
+                                    <span class="aw-field__hint">Par défaut à la facturation et pour l'affichage des montants.</span>
+                                </div>
+                                <div class="aw-field">
+                                    <label class="aw-field__label">Statut</label>
+                                    <input type="text" class="aw-input" value="@(_user.Activated == true ? "Actif" : "Inactif")" disabled />
+                                </div>
+                                <div class="aw-field aw-form__span-2">
+                                    <label class="aw-field__label">Localisations assignées</label>
+                                    @if (_localisations.Any())
+                                    {
+                                        <div class="d-flex flex-wrap gap-1" style="min-height:var(--aw-control-h);align-items:center;">
+                                            @foreach (var loc in _localisations)
+                                            {
+                                                <span class="aw-badge aw-badge--accent">@loc</span>
+                                            }
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <input type="text" class="aw-input" value="Non assigné" disabled />
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                }
+                else if (_section == "permissions")
+                {
+                    <section class="aw-settings__section" aria-labelledby="prof-perms">
+                        <div class="aw-settings__section-head">
+                            <h2 id="prof-perms" class="aw-settings__section-title">Mes permissions</h2>
+                            <p class="aw-settings__section-lead">Droits accordés à votre compte (lecture seule).</p>
+                        </div>
+                        <div class="aw-settings__card">
+                            @if (_activities.Any())
+                            {
+                                @foreach (var activity in _activities)
+                                {
+                                    <div class="aw-settings__row">
+                                        <div class="aw-settings__meta">
+                                            <p class="aw-settings__label">@(activity.Activity?.DescriptionActivity ?? "Activité")</p>
+                                            <p class="aw-settings__hint">@(activity.Activity?.Fonction?.DescriptionFonction ?? "")</p>
+                                        </div>
+                                        @if (activity.IsGranted)
+                                        {
+                                            <span class="aw-badge aw-badge--accent">Accordé</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="aw-badge aw-badge--muted">Refusé</span>
+                                        }
+                                    </div>
+                                }
+                            }
+                            else
+                            {
+                                <div class="aw-empty aw-empty--compact">
+                                    <i class="bi bi-key" aria-hidden="true"></i>
+                                    <p>Aucune permission spécifique assignée</p>
+                                </div>
+                            }
+                        </div>
+                    </section>
+                }
+                else if (_section == "securite")
+                {
+                    <section class="aw-settings__section" aria-labelledby="prof-pwd">
+                        <div class="aw-settings__section-head">
+                            <h2 id="prof-pwd" class="aw-settings__section-title">Changer le mot de passe</h2>
+                            <p class="aw-settings__section-lead">Saisissez votre mot de passe actuel puis le nouveau.</p>
+                        </div>
+                        <div class="aw-settings__card" style="padding:1rem 1.1rem;">
+                            <div class="aw-form__grid">
+                                <div class="aw-field aw-form__span-2">
+                                    <label class="aw-field__label">Mot de passe actuel</label>
+                                    <input type="password" class="aw-input" @bind="_currentPassword" placeholder="********" />
+                                </div>
+                                <div class="aw-field">
+                                    <label class="aw-field__label">Nouveau mot de passe</label>
+                                    <input type="password" class="aw-input" @bind="_newPassword" placeholder="********" />
+                                </div>
+                                <div class="aw-field">
+                                    <label class="aw-field__label">Confirmer le mot de passe</label>
+                                    <input type="password" class="aw-input" @bind="_confirmPassword" placeholder="********" />
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                }
+            </div>
+
+            @if (_section == "informations" || _section == "securite")
+            {
+                <footer class="aw-settings__bar">
+                    @if (_section == "informations")
+                    {
+                        <p class="aw-settings__bar-hint">Les modifications ne sont appliquées qu'après enregistrement.</p>
+                        <div class="aw-settings__bar-actions">
+                            <button type="button" class="aw-btn aw-btn--primary" @onclick="OnSaveProfile" disabled="@_saving">
+                                @if (_saving)
+                                {
+                                    <span class="aw-spinner" role="status" aria-hidden="true"></span>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-check-lg"></i>
+                                }
+                                Enregistrer
+                            </button>
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="aw-settings__bar-hint">Le nouveau mot de passe prend effet immédiatement.</p>
+                        <div class="aw-settings__bar-actions">
+                            <button type="button" class="aw-btn aw-btn--primary" @onclick="OnChangePassword" disabled="@_changingPassword">
+                                @if (_changingPassword)
+                                {
+                                    <span class="aw-spinner" role="status" aria-hidden="true"></span>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-lock"></i>
+                                }
+                                Mettre à jour
+                            </button>
+                        </div>
+                    }
+                </footer>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    record ProfileTab(string Key, string Label, string Icon);
+
+    private bool _loading = true;
+    private bool _saving;
+    private bool _changingPassword;
+    private string _section = "informations";
+
+    private User? _user;
+    private List<string> _localisations = new();
+    private List<UserActivity> _activities = new();
+    private string _initials = "";
+
+    // Profile fields
+    private string _profileName = "";
+    private string _profileEmail = "";
+    private int _preferredMoneyId = CurrencyDefaults.MoneyIdCdf;
+
+    // Security fields
+    private string _currentPassword = "";
+    private string _newPassword = "";
+    private string _confirmPassword = "";
+
+    readonly ProfileTab[] _tabs =
+    [
+        new("informations", "Informations", "bi-person"),
+        new("permissions", "Permissions", "bi-key"),
+        new("securite", "Sécurité", "bi-shield-lock"),
+    ];
+
+    readonly List<AwSearchSelect.Option> _currencyOptions =
+    [
+        new(CurrencyDefaults.MoneyIdUsd.ToString(), "Dollars (USD)"),
+        new(CurrencyDefaults.MoneyIdCdf.ToString(), "Francs congolais (FC)")
+    ];
+
+    string GetSectionDescription() => _section switch
+    {
+        "permissions" => "Droits et activités associés à votre compte.",
+        "securite" => "Mot de passe et accès au compte.",
+        _ => "Informations personnelles, devise et localisations."
+    };
+
+    Task OnCurrencyChanged(string? v)
+    {
+        if (int.TryParse(v, out var id))
+            _preferredMoneyId = id;
+        return Task.CompletedTask;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUserData();
+    }
+
+    private async Task LoadUserData()
+    {
+        _loading = true;
+
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var principal = authState.User;
+
+        if (principal.Identity?.IsAuthenticated != true)
+        {
+            _loading = false;
+            return;
+        }
+
+        var login = principal.FindFirst("login")?.Value
+            ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(login))
+        {
+            _loading = false;
+            return;
+        }
+
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+
+        _user = await ctx.Users
+            .Include(u => u.Role)
+            .FirstOrDefaultAsync(u => u.Login.ToLower() == login.ToLower());
+
+        if (_user != null)
+        {
+            // Load user localisations via ILocalisationService (always fetch actual assignments for display)
+            var userLocIds = await LocalisationService.GetUserLocalisationIdsAsync(_user.Login, false);
+            var allLocs = await LocalisationService.GetAllLocalisationsAsync();
+            _localisations = allLocs
+                .Where(l => userLocIds.Contains(l.IdLocalisation))
+                .Select(l => l.DescriptionLocalisation ?? "")
+                .Where(s => !string.IsNullOrEmpty(s))
+                .ToList();
+
+            // Load activities with includes
+            _activities = await ctx.UserActivities
+                .Include(a => a.Activity)
+                    .ThenInclude(act => act!.Fonction)
+                .Where(a => a.UserLogin == _user.Login)
+                .OrderBy(a => a.Activity!.DescriptionActivity)
+                .ToListAsync();
+
+            // Set profile fields
+            _profileName = _user.Name ?? "";
+            _profileEmail = _user.Email ?? "";
+            _preferredMoneyId = _user.PreferredMoneyId ?? CurrencyDefaults.MoneyIdCdf;
+            await UserCurrency.EnsureLoadedAsync();
+
+            // Generate initials
+            _initials = GetInitials(_user.Name ?? _user.Login);
+        }
+
+        _loading = false;
+    }
+
+    private string GetInitials(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "?";
+
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2)
+            return $"{parts[0][0]}{parts[1][0]}".ToUpper();
+
+        return name.Length >= 2 ? name.Substring(0, 2).ToUpper() : name.ToUpper();
+    }
+
+    private async Task OnSaveProfile()
+    {
+        if (_user == null) return;
+
+        _saving = true;
+
+        try
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+            var user = await ctx.Users.FirstOrDefaultAsync(u => u.Login == _user.Login);
+
+            if (user != null)
+            {
+                user.Name = _profileName;
+                user.Email = _profileEmail;
+                user.PreferredMoneyId = _preferredMoneyId;
+                await ctx.SaveChangesAsync();
+
+                _user.Name = _profileName;
+                _user.Email = _profileEmail;
+                _user.PreferredMoneyId = _preferredMoneyId;
+                _initials = GetInitials(_profileName);
+
+                await UserCurrency.SetPreferredMoneyIdAsync(_preferredMoneyId);
+
+                Snackbar.Add("Profil mis à jour avec succès.", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Erreur: {ex.Message}", Severity.Error);
+        }
+
+        _saving = false;
+    }
+
+    private async Task OnChangePassword()
+    {
+        if (_user == null) return;
+
+        if (string.IsNullOrWhiteSpace(_currentPassword))
+        {
+            Snackbar.Add("Veuillez saisir votre mot de passe actuel.", Severity.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_newPassword))
+        {
+            Snackbar.Add("Veuillez saisir un nouveau mot de passe.", Severity.Warning);
+            return;
+        }
+
+        if (_newPassword != _confirmPassword)
+        {
+            Snackbar.Add("Les mots de passe ne correspondent pas.", Severity.Warning);
+            return;
+        }
+
+        if (_newPassword.Length < 4)
+        {
+            Snackbar.Add("Le mot de passe doit contenir au moins 4 caractères.", Severity.Warning);
+            return;
+        }
+
+        _changingPassword = true;
+
+        try
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+            var user = await ctx.Users.FirstOrDefaultAsync(u => u.Login == _user.Login);
+
+            if (user != null)
+            {
+                // Verify current password
+                if (user.Password != _currentPassword)
+                {
+                    Snackbar.Add("Mot de passe actuel incorrect.", Severity.Error);
+                    _changingPassword = false;
+                    return;
+                }
+
+                user.Password = _newPassword;
+                await ctx.SaveChangesAsync();
+
+                _currentPassword = "";
+                _newPassword = "";
+                _confirmPassword = "";
+
+                Snackbar.Add("Mot de passe mis à jour avec succès.", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Erreur: {ex.Message}", Severity.Error);
+        }
+
+        _changingPassword = false;
+    }
+}

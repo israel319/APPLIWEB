@@ -1,0 +1,75 @@
+@using MudBlazor
+
+<MudDialog>
+    <DialogContent>
+        <div class="lov-form-header">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-file-earmark-text text-primary"></i>
+                <h5>Nouveau contrat</h5>
+            </div>
+        </div>
+        <div class="lov-form-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">N° Contrat <span class="text-danger">*</span></label>
+                    <input class="form-control" @bind="Form.ContractNumber" placeholder="CTR-2026-001" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Type <span class="text-danger">*</span></label>
+                    <select class="form-select" @bind="Form.ContractType">
+                        <option value="CDI">CDI</option>
+                        <option value="CDD">CDD</option>
+                        <option value="Stage">Stage</option>
+                        <option value="Interim">Intérim</option>
+                        <option value="Consultant">Consultant</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <AwDateField Label="Date de début" Value="Form.StartDate"
+                                 ValueChanged="@(v => { if (v.HasValue) Form.StartDate = v.Value; })" />
+                </div>
+                <div class="col-md-6">
+                    <AwDateField Label="Date de fin" @bind-Value="Form.EndDate" Placeholder="Optionnel (CDD)" />
+                </div>
+            </div>
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger mt-2 py-2 px-3 small mb-0">@_error</div>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="d-flex gap-2 px-1">
+            <button type="button" class="btn btn-outline-secondary" @onclick="Cancel">
+                <i class="bi bi-x-lg me-1"></i>Annuler
+            </button>
+            <button type="button" class="btn btn-primary" @onclick="Submit">
+                <i class="bi bi-check-lg me-1"></i>Enregistrer
+            </button>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter] public ContractFormData Form { get; set; } = new();
+
+    string _error = "";
+
+    void Cancel() => MudDialog.Cancel();
+
+    void Submit()
+    {
+        if (string.IsNullOrWhiteSpace(Form.ContractNumber)) { _error = "Le numéro de contrat est obligatoire."; return; }
+        MudDialog.Close(DialogResult.Ok(Form));
+    }
+
+    public class ContractFormData
+    {
+        public string    ContractNumber { get; set; } = "";
+        public string    ContractType   { get; set; } = "CDI";
+        public DateTime  StartDate      { get; set; } = DateTime.Today;
+        public DateTime? EndDate        { get; set; }
+    }
+}

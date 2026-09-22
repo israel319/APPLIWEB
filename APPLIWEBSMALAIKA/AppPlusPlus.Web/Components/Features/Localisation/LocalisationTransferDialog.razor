@@ -1,0 +1,258 @@
+@using MudBlazor
+@using AppPlusPlus.Application.Services.Stock
+@using AppPlusPlus.Domain.Common
+@inject IInternalTransferService InternalTransfer
+@inject ILocalisationService LocalisationService
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <div class="aw-dialog">
+            <header class="aw-dialog__head">
+                <div class="aw-dialog__title-wrap">
+                    <i class="bi bi-box-arrow-in-down" aria-hidden="true"></i>
+                    <h2 class="aw-dialog__title">Recevoir des articles</h2>
+                </div>
+            </header>
+            <div class="aw-dialog__body">
+                <p class="aw-field__hint" style="margin-bottom:0.85rem;">
+                    Transfert depuis une autre localisation vers
+                    <strong>@DestLocalisationName</strong> — même article, quantités distinctes par emplacement.
+                </p>
+
+                <div class="aw-form__grid" style="margin-bottom:0.85rem;">
+                    <div class="aw-field">
+                        <label class="aw-field__label">Localisation source *</label>
+                        <MudSelect T="int?" Value="_sourceLocId" ValueChanged="OnSourceChanged"
+                                   Placeholder="Choisir la source" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                            @foreach (var loc in _sourceLocalisations)
+                            {
+                                <MudSelectItem T="int?" Value="@loc.IdLocalisation">@loc.DescriptionLocalisation</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </div>
+                    <div class="aw-field">
+                        <label class="aw-field__label">Commentaire</label>
+                        <input type="text" class="aw-input" @bind="_comment" placeholder="Optionnel" />
+                    </div>
+                </div>
+
+                @if (_loadingLines)
+                {
+                    <div class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                    </div>
+                }
+                else if (!_sourceLocId.HasValue)
+                {
+                    <div class="alert alert-info py-2 small mb-0">Sélectionnez une localisation source.</div>
+                }
+                else if (!_lines.Any())
+                {
+                    <div class="alert alert-warning py-2 small mb-0">
+                        Aucun stock disponible dans cette localisation source.
+                    </div>
+                }
+                else
+                {
+                    <div class="aw-table-region">
+                        <div class="aw-table-wrap" style="max-height:280px;overflow:auto;">
+                            <table class="aw-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:2.5rem;">
+                                            <MudCheckBox T="bool"
+                                                         Value="@AllLinesSelected"
+                                                         ValueChanged="@SetSelectAll"
+                                                         indeterminate="@SomeLinesSelected"
+                                                         Dense="true"
+                                                         title="Tout sélectionner" />
+                                        </th>
+                                        <th>Article</th>
+                                        <th class="aw-table__num">Dispo source</th>
+                                        <th class="aw-table__num">Qté à recevoir</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var line in _lines)
+                                    {
+                                        <tr style="cursor:default;">
+                                            <td>
+                                                <MudCheckBox Value="@line.Selected"
+                                                             ValueChanged="@(v => OnLineSelected(line, v))"
+                                                             T="bool" Dense="true" />
+                                            </td>
+                                            <td>
+                                                <span class="aw-table__title">@line.Description</span>
+                                                <span class="aw-table__meta d-block">@line.ArticleId</span>
+                                            </td>
+                                            <td class="aw-table__num">@line.StockDispo.ToString("N0")</td>
+                                            <td class="aw-table__num">
+                                                <MudNumericField @bind-Value="line.QteTransfer" T="decimal" Min="0"
+                                                                 Max="@line.StockDispo" Variant="Variant.Outlined"
+                                                                 Margin="Margin.Dense" Style="width:100px;" />
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <p class="aw-table__meta" style="margin-top:0.55rem;">
+                        @_lines.Count(l => l.Selected && l.QteTransfer > 0) article(s) sélectionné(s).
+                    </p>
+                }
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;">
+            <button type="button" class="aw-btn aw-btn--ghost" @onclick="@(() => MudDialog.Close())">
+                <i class="bi bi-x-lg"></i> Annuler
+            </button>
+            <button type="button" class="aw-btn aw-btn--primary" @onclick="@OnSave" disabled="@(!CanSave || _saving)">
+                <i class="bi bi-box-arrow-in-down"></i> Transférer
+            </button>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public int DestLocalisationId { get; set; }
+    [Parameter] public string DestLocalisationName { get; set; } = "";
+    [Parameter] public string Login { get; set; } = "";
+
+    List<Localisation> _sourceLocalisations = new();
+    List<TransferLine> _lines = new();
+    int? _sourceLocId;
+    string? _comment;
+    bool _loadingLines;
+    bool _saving;
+
+    bool CanSave => _sourceLocId.HasValue
+        && _lines.Any(l => l.Selected && l.QteTransfer > 0);
+
+    bool AllLinesSelected => _lines.Any() && _lines.All(l => l.Selected);
+    bool SomeLinesSelected => _lines.Any(l => l.Selected) && !AllLinesSelected;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var all = await LocalisationService.GetAllLocalisationsAsync();
+        _sourceLocalisations = all
+            .Where(l => l.IdLocalisation != DestLocalisationId)
+            .ToList();
+
+        var depot = all.FirstOrDefault(l => l.IsDepot && l.IdLocalisation != DestLocalisationId);
+        if (depot != null)
+            _sourceLocId = depot.IdLocalisation;
+
+        if (_sourceLocId.HasValue)
+            await LoadSourceStockAsync();
+    }
+
+    async Task OnSourceChanged(int? locId)
+    {
+        _sourceLocId = locId;
+        await LoadSourceStockAsync();
+    }
+
+    async Task LoadSourceStockAsync()
+    {
+        _lines.Clear();
+        if (!_sourceLocId.HasValue) return;
+
+        _loadingLines = true;
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        var stocks = await ctx.Stocks
+            .Where(s => s.IdLocalisation == _sourceLocId.Value && s.Qte > 0)
+            .Include(s => s.Article)
+            .OrderBy(s => s.Article!.Description)
+            .ToListAsync();
+
+        _lines = stocks.Select(s => new TransferLine
+        {
+            ArticleId = s.IdArticle,
+            Description = s.Article?.Description ?? s.IdArticle,
+            StockDispo = s.Qte,
+            QteTransfer = 0,
+            Selected = false
+        }).ToList();
+
+        _loadingLines = false;
+    }
+
+    void SetSelectAll(bool value)
+    {
+        foreach (var line in _lines)
+        {
+            line.Selected = value;
+            line.QteTransfer = value ? line.StockDispo : 0;
+        }
+    }
+
+    void OnLineSelected(TransferLine line, bool selected)
+    {
+        line.Selected = selected;
+        if (selected && line.QteTransfer <= 0)
+            line.QteTransfer = line.StockDispo;
+        else if (!selected)
+            line.QteTransfer = 0;
+    }
+
+    async Task OnSave()
+    {
+        if (!CanSave || !_sourceLocId.HasValue) return;
+
+        var selected = _lines.Where(l => l.Selected && l.QteTransfer > 0).ToList();
+        _saving = true;
+
+        try
+        {
+            var transferLines = selected
+                .Select(l => new StockTransferLineRequest(
+                    l.ArticleId,
+                    l.QteTransfer,
+                    _sourceLocId.Value,
+                    DestLocalisationId))
+                .ToList();
+
+            var comment = string.IsNullOrWhiteSpace(_comment)
+                ? $"Transfert → {DestLocalisationName}"
+                : _comment!;
+
+            var approId = await InternalTransfer.SaveAsync(new InternalTransferSaveRequest
+            {
+                DestLocalisationId = DestLocalisationId,
+                UserLogin = string.IsNullOrWhiteSpace(Login) ? "system" : Login,
+                Commentaire = comment,
+                Reference = $"Transfert loc #{_sourceLocId} → #{DestLocalisationId}",
+                Lines = transferLines
+            });
+
+            Snackbar.Add(
+                $"Transfert N° {approId} — {transferLines.Count} article(s) vers {DestLocalisationName}.",
+                Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.InnerException?.Message ?? ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    class TransferLine
+    {
+        public string ArticleId { get; set; } = "";
+        public string Description { get; set; } = "";
+        public decimal StockDispo { get; set; }
+        public decimal QteTransfer { get; set; }
+        public bool Selected { get; set; }
+    }
+}

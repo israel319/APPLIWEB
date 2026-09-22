@@ -1,0 +1,27 @@
+@inject NavigationManager Navigation
+
+<nav class="aw-modnav mb-3" aria-label="Services">
+    <a href="/services"
+       class="aw-modnav__item @(IsActive("/services") && !IsFacturation ? "aw-modnav__item--active" : "")">
+        <i class="bi bi-folder2" aria-hidden="true"></i>
+        <span>Missions</span>
+    </a>
+    <a href="/services/facturation"
+       class="aw-modnav__item @(IsFacturation ? "aw-modnav__item--active" : "")">
+        <i class="bi bi-receipt" aria-hidden="true"></i>
+        <span>Factures prestations</span>
+    </a>
+</nav>
+
+@code {
+    bool IsFacturation =>
+        Navigation.Uri.Contains("/services/facturation", StringComparison.OrdinalIgnoreCase);
+
+    bool IsActive(string path)
+    {
+        var uri = new Uri(Navigation.Uri).AbsolutePath.TrimEnd('/');
+        if (path == "/services")
+            return uri == "/services" || uri.StartsWith("/services/projet");
+        return uri.StartsWith(path, StringComparison.OrdinalIgnoreCase);
+    }
+}

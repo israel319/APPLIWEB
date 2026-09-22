@@ -1,0 +1,40 @@
+@namespace AppPlusPlus.Web.Components.Shared
+
+@* Single-date field for forms — same calendar engine as AwDateRange. *@
+<div class="aw-datefield @(FullWidth ? "aw-datefield--full" : null)">
+    @if (!string.IsNullOrWhiteSpace(Label))
+    {
+        <label class="aw-field__label">@Label</label>
+    }
+    <AwDateRange AriaLabel="@(string.IsNullOrWhiteSpace(AriaLabel) ? (Label ?? "Date") : AriaLabel)"
+                 Placeholder="@Placeholder"
+                 SingleDay="true"
+                 ApplyOnSelect="@ApplyOnSelect"
+                 PersistKey="@PersistKey"
+                 Compact="true"
+                 From="Value"
+                 To="Value"
+                 FromChanged="OnFromChanged"
+                 ToChanged="OnToChanged"
+                 Changed="Changed" />
+</div>
+
+@code {
+    [Parameter] public DateTime? Value { get; set; }
+    [Parameter] public EventCallback<DateTime?> ValueChanged { get; set; }
+    [Parameter] public EventCallback Changed { get; set; }
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public string AriaLabel { get; set; } = "";
+    [Parameter] public string? Placeholder { get; set; } = "Choisir une date";
+    [Parameter] public bool ApplyOnSelect { get; set; } = true;
+    [Parameter] public string? PersistKey { get; set; }
+    [Parameter] public bool FullWidth { get; set; } = true;
+
+    async Task OnFromChanged(DateTime? v)
+    {
+        Value = v;
+        await ValueChanged.InvokeAsync(v);
+    }
+
+    Task OnToChanged(DateTime? v) => Task.CompletedTask;
+}

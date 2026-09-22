@@ -1,0 +1,40 @@
+---
+description: ERP architecture — BD source de vérité, DDD, mouvements de stock, services métier uniques
+alwaysApply: true
+---
+
+# Architecture ERP — Single Source of Truth
+
+## Principes non négociables
+
+1. **La base de données est la seule source de vérité.** L'UI affiche ; elle ne calcule jamais de stock, KPI, marge ou bénéfice métier.
+2. **Une règle = un seul endroit** dans `AppPlusPlus.Domain` (calculs purs) ou services Application/Infrastructure (orchestration + persistance).
+3. **Les mouvements (`T_Mouvement_Stock`) sont la vérité.** Toute modification de `T_Stock` passe par `StockMovementService` ou `ApproPostingService` avec mouvement associé.
+4. **Transactions atomiques** sur vente, appro, transfert, paiement, livraison.
+5. **Annulation > suppression.** Préférer contre-passation + `Annule=true` ; suppression physique uniquement après annulation et si la traçabilité le permet.
+6. **Pas de DbContext dans `.razor`** pour écriture métier. Lecture : préférer services de requête (`*QueryService`).
+
+## Couches
+
+| Couche | Rôle |
+|--------|------|
+| `Domain` | Règles pures : `StockDomainRules`, `ApproDomainRules`, `ApproFilters`, `CurrencyFormat` |
+| `Application` | Interfaces + orchestration légère, DTOs |
+| `Infrastructure` | EF, `StockMovementService`, `ApproPostingService`, `*QueryService` |
+| `Web` | Binding UI, appels services, aucun calcul métier |
+
+## Services métier à utiliser
+
+- Stock disponible → `IStockAvailabilityService`
+- Catalogue / agrégats stock → `IStockCatalogQueryService`
+- Liste approvisionnements → `IApproQueryService`
+- Écriture stock → `StockMovementService` / `IApproPostingService` / `IInternalTransferService`
+- KPI dashboard → `IDashboardService` / `IKpiAggregationService`
+- Rapports → `IRapportQueryService` (pas de requêtes EF dans `RapportHub`)
+
+## Interdit dans l'UI
+
+- `ctx.Stocks` / `SaveChanges` pour opérations métier
+- Cache local de stock (`_stockAtLocation`) pour décisions métier
+- Dupliquer `FactStoredTotalToUsd`, marges appro, stock disponible
+- Suppression physique sans contre-passation stock

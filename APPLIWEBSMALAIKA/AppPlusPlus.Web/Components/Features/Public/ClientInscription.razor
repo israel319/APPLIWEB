@@ -1,0 +1,98 @@
+@page "/client/inscription"
+@attribute [AllowAnonymous]
+@layout PublicLayout
+@rendermode PublicRenderMode.Instance
+@inject NavigationManager Navigation
+
+<PageTitle>Inscription client — @PublicBrand.ProductName</PageTitle>
+
+<div class="landing-auth landing-auth--malaika">
+    <div class="ali-container">
+        <div class="ali-shop-sheet ali-auth-sheet">
+    <div class="landing-auth-card">
+        <a href="/#catalogue" class="landing-auth-back"><i class="bi bi-arrow-left me-1"></i>Retour à la boutique</a>
+        <AuthBrandHeader Compact="true" />
+        <h1 class="landing-auth-title">Créer un compte</h1>
+        <p class="landing-auth-sub">Inscrivez-vous avec votre nom et votre numéro de téléphone pour commander.</p>
+
+        @if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <div class="alert alert-danger py-2">@_errorMessage</div>
+        }
+
+        <form method="post" action="/auth/client/register">
+            <input type="hidden" name="returnUrl" value="@_returnUrl" />
+
+            <div class="mb-3">
+                <label class="form-label fw-semibold" for="client-name">Nom complet</label>
+                <input id="client-name"
+                       name="name"
+                       type="text"
+                       required
+                       autocomplete="name"
+                       class="form-control"
+                       placeholder="Votre nom"
+                       maxlength="50" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label fw-semibold" for="client-phone">Téléphone</label>
+                <input id="client-phone"
+                       name="contact"
+                       type="tel"
+                       required
+                       autocomplete="tel"
+                       class="form-control"
+                       placeholder="@PublicBrand.ContactPhone"
+                       maxlength="50" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label fw-semibold" for="client-adress">
+                    Adresse <span class="text-muted fw-normal">(optionnel)</span>
+                </label>
+                <input id="client-adress"
+                       name="adress"
+                       type="text"
+                       autocomplete="street-address"
+                       class="form-control"
+                       placeholder="Votre adresse"
+                       maxlength="50" />
+            </div>
+
+            <button type="submit" class="landing-btn landing-btn--primary">
+                Créer mon compte
+            </button>
+        </form>
+
+        <p class="landing-auth-footer text-center mt-3 mb-0">
+            Déjà inscrit ?
+            <a href="@ConnexionUrl">Se connecter</a>
+        </p>
+    </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    string _returnUrl = "/client/panier";
+    string? _errorMessage;
+
+    string ConnexionUrl => $"/auth/connexion?returnUrl={Uri.EscapeDataString(_returnUrl)}";
+
+    protected override void OnInitialized()
+    {
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query);
+
+        if (query.TryGetValue("error", out var errorValue))
+            _errorMessage = errorValue.ToString();
+
+        if (query.TryGetValue("returnUrl", out var returnValue))
+        {
+            var candidate = returnValue.ToString();
+            if (!string.IsNullOrWhiteSpace(candidate) && candidate.StartsWith('/'))
+                _returnUrl = candidate;
+        }
+    }
+}

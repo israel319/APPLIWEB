@@ -1,0 +1,30 @@
+@page "/catalogue"
+@page "/catalogue/c/{CategoryId:int}"
+@attribute [AllowAnonymous]
+@layout PublicLayout
+@rendermode PublicRenderMode.Instance
+
+<PageTitle>Catalogue - @PublicBrand.ProductName</PageTitle>
+
+<div class="mk-catalog-page">
+    <header class="mk-page-hero mk-page-hero--kids-bg">
+        <div class="mk-wrap mk-page-hero__inner">
+            <div class="mk-page-hero__copy">
+                <span class="mk-page-hero__eyebrow">La boutique @PublicBrand.ProductName</span>
+                <h1>Le catalogue</h1>
+                <p>Retrouvez tous nos v&ecirc;tements, chaussures et accessoires pour les enfants de 0 &agrave; 14 ans.</p>
+            </div>
+            <div class="mk-page-hero__visual" aria-hidden="true"></div>
+        </div>
+    </header>
+    <section class="mk-catalog-section">
+        <div class="mk-wrap">
+            <LandingCatalogSection CategoryId="CategoryId" PreviewMode="false" HasPageHero="true" />
+        </div>
+    </section>
+</div>
+
+@code {
+    [Parameter]
+    public int? CategoryId { get; set; }
+}

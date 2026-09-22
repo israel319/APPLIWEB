@@ -1,0 +1,20 @@
+<div class="landing-auth-brand @(Compact ? "landing-auth-brand--compact" : "")">
+    @if (!Compact)
+    {
+        <img src="appliweb-logo-v2.png"
+             alt="@PublicBrand.ProductName"
+             class="landing-auth-brand__logo"
+             width="120"
+             height="52"
+             decoding="async" />
+    }
+    <div class="landing-auth-brand__text">
+        <strong>@PublicBrand.ProductName</strong>
+        <span>@PublicBrand.Tagline</span>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public bool Compact { get; set; }
+}

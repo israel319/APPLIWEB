@@ -1,0 +1,47 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+build/
+bld/
+TestResults/
+*.vspscc
+*.vssscc
+.build.csettings
+artifacts/
+publish/
+
+## NuGet
+*.nupkg
+**/packages/*
+!**/packages/build/
+project.lock.json
+project.fragment.lock.json
+
+## IDE
+.idea/
+*.swp
+*~
+.vscode/
+*.code-workspace
+
+## OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+## Sensitive config
+**/appsettings.json
+**/appsettings.*.json
+
+## Logs
+**/Logs/
+*.log

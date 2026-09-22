@@ -1,0 +1,407 @@
+@page "/gestion/article/nouveau"
+@page "/gestion/article/modifier/{IdArticle}"
+@rendermode InteractiveServer
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@using AppPlusPlus.Domain.Common
+@using AppPlusPlus.Application.Services.Administration
+@inject ICatalogueService CatalogueService
+@inject ILookupService LookupService
+@inject ILocalisationService LocalisationService
+@inject IStockService StockService
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+@inject ICatalogRefreshService CatalogRefresh
+
+<PageTitle>@AppSettings.AppName — @(_isEdit ? "Modifier article" : "Nouvel article")</PageTitle>
+
+<div class="aw-page">
+    <div class="aw-form">
+        <header class="aw-form__head">
+            <div>
+                <p class="aw-form__eyebrow">Stock</p>
+                <h1 class="aw-form__title">@(_isEdit ? "Modifier article" : "Nouvel article")</h1>
+            </div>
+            <div class="aw-form__actions">
+                <button type="button" class="aw-btn aw-btn--ghost" @onclick="@OnCancel">
+                    <i class="bi bi-arrow-left"></i> Annuler
+                </button>
+                <button type="button" class="aw-btn aw-btn--primary" @onclick="@OnSave">
+                    <i class="bi bi-check-lg"></i> Enregistrer
+                </button>
+            </div>
+        </header>
+        <div class="aw-form__body">
+            <div class="aw-form__grid">
+                <div class="aw-field">
+                    <label class="aw-field__label">Code</label>
+                    <input type="text" class="aw-input" @bind="_article.IdArticle" maxlength="100" readonly="@_isEdit"
+                           placeholder="ART-001" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Description</label>
+                    <input type="text" class="aw-input" @bind="_article.Description" maxlength="50"
+                           placeholder="Nom de l'article" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Prix</label>
+                    <MudNumericField @bind-Value="_article.Price" T="double" Format="N2"
+                                     Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="0.00" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Monnaie</label>
+                    <MudSelect @bind-Value="_article.IdMonais" T="int" Variant="Variant.Outlined"
+                               Margin="Margin.Dense" Dense="true" Placeholder="Choisir">
+                        @foreach (var m in _monnaies)
+                        {
+                            <MudSelectItem T="int" Value="@m.IdMonais">@m.DescriptionMonais</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Seuil alerte</label>
+                    <MudAlert Severity="Severity.Info" Dense="true">Géré par localisation (Stock)</MudAlert>
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Commentaire</label>
+                    <input type="text" class="aw-input" @bind="_article.DescriptionI" maxlength="50"
+                           placeholder="Optionnel" />
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Marque</label>
+                    <MudSelect @bind-Value="_article.IdMarque" T="int" Variant="Variant.Outlined"
+                               Margin="Margin.Dense" Dense="true" Placeholder="Choisir">
+                        @foreach (var m in _marques)
+                        {
+                            <MudSelectItem T="int" Value="@m.IdMarque">@m.DescriptionMarque</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Type</label>
+                    <MudSelect @bind-Value="_article.IdType" T="int" Variant="Variant.Outlined"
+                               Margin="Margin.Dense" Dense="true" Placeholder="Choisir">
+                        @foreach (var t in _types)
+                        {
+                            <MudSelectItem T="int" Value="@t.IdType">@t.DescriptionType</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Catégorie</label>
+                    <MudSelect @bind-Value="_article.IdCategory" T="int" Variant="Variant.Outlined"
+                               Margin="Margin.Dense" Dense="true" Placeholder="Choisir">
+                        @foreach (var c in _categories)
+                        {
+                            <MudSelectItem T="int" Value="@c.IdCategory">@c.DescriptionCategory</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+                <div class="aw-field">
+                    <label class="aw-field__label">Mesure</label>
+                    <MudSelect @bind-Value="_article.IdMesure" T="int" Variant="Variant.Outlined"
+                               Margin="Margin.Dense" Dense="true" Placeholder="Choisir">
+                        @foreach (var m in _mesures)
+                        {
+                            <MudSelectItem T="int" Value="@m.IdMesure">@m.DescriptionMesure</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+            </div>
+
+            <div class="aw-dialog__section" style="margin-top:1.15rem;">Image (optionnelle)</div>
+            <p class="aw-field__hint" style="margin-bottom:0.65rem;">
+                Affichée dans le catalogue de la commande client. PNG, JPG, WEBP — max 2 Mo.
+            </p>
+            <label class="logo-upload-zone @(_imageUploading ? "uploading" : "")" style="max-width:280px;">
+                <InputFile OnChange="@OnImageFileSelected" accept="image/*" style="display:none;" />
+                @if (_imageUploading)
+                {
+                    <span>Chargement…</span>
+                }
+                else if (!string.IsNullOrWhiteSpace(_article.ImageArticle))
+                {
+                    <img src="@_article.ImageArticle" alt="Image article" style="max-height:120px;max-width:240px;object-fit:contain;" />
+                    <span style="font-size:0.72rem;" class="text-muted">Cliquer pour changer</span>
+                }
+                else
+                {
+                    <i class="bi bi-image text-muted" style="font-size:1.8rem;"></i>
+                    <span style="font-size:0.78rem;" class="text-muted">Cliquer pour uploader une image</span>
+                }
+            </label>
+            @if (!string.IsNullOrWhiteSpace(_imageError))
+            {
+                <p class="aw-field__error" style="margin-top:0.35rem;">@_imageError</p>
+            }
+            <div class="aw-field" style="margin-top:0.65rem;max-width:420px;">
+                <input type="text" class="aw-input" @bind="_article.ImageArticle"
+                       placeholder="ou coller une URL https://…" />
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_article.ImageArticle))
+            {
+                <button type="button" class="aw-btn aw-btn--danger aw-btn--sm" style="margin-top:0.5rem;" @onclick="@ClearArticleImage">
+                    <i class="bi bi-trash"></i> Supprimer l'image
+                </button>
+            }
+            <label class="aw-switch-label" style="display:flex;align-items:center;gap:0.55rem;cursor:pointer;margin-top:0.85rem;">
+                <input class="aw-switch" type="checkbox" id="article-visible-catalog" @bind="_visibleInClientCatalog" />
+                <span class="aw-field__label" style="margin:0;">Afficher dans le catalogue client (page d'accueil)</span>
+            </label>
+            @if (!_visibleInClientCatalog)
+            {
+                <p class="aw-field__hint" style="color:var(--aw-danger);margin-top:0.35rem;">Cet article est masqué du catalogue de commande en ligne.</p>
+            }
+
+            <div class="aw-dialog__section" style="margin-top:1.15rem;">Localisations</div>
+            @if (_isEdit)
+            {
+                <div class="d-flex flex-wrap gap-2">
+                    @if (_articleStocks.Any())
+                    {
+                        @foreach (var stock in _articleStocks)
+                        {
+                            var locName = _localisations.FirstOrDefault(l => l.IdLocalisation == stock.IdLocalisation)?.DescriptionLocalisation ?? "?";
+                            <span class="aw-badge aw-badge--brand">@locName (Stock: @stock.Qte)</span>
+                        }
+                    }
+                    else
+                    {
+                        <span class="aw-field__hint">Aucune localisation assignée</span>
+                    }
+                </div>
+                <p class="aw-field__hint" style="margin-top:0.5rem;">Les localisations sont gérées via l'approvisionnement</p>
+            }
+            else
+            {
+                <div class="d-flex flex-wrap gap-4">
+                    @foreach (var loc in _localisations)
+                    {
+                        <MudCheckBox T="bool"
+                                     Value="@IsLocalisationSelected(loc.IdLocalisation)"
+                                     ValueChanged="@((bool val) => OnLocalisationToggle(loc.IdLocalisation, val))"
+                                     Color="Color.Primary" Dense="true"
+                                     Label="@loc.DescriptionLocalisation" />
+                    }
+                </div>
+                <p class="aw-field__hint" style="margin-top:0.5rem;color:#0d9488;">@_selectedLocalisations.Count localisation(s) sélectionnée(s)</p>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string? IdArticle { get; set; }
+
+    bool _isEdit;
+    string _currentLogin = "";
+    string _backRoute = "/stock";
+    PermissionSnapshot _perms = PermissionSnapshot.Empty;
+    Article _article = new();
+    HashSet<int> _selectedLocalisations = new();
+    List<Stock> _articleStocks = new();
+
+    List<ArticleCategory> _categories = new();
+    List<ArticleType> _types = new();
+    List<ArticleMarque> _marques = new();
+    List<Mesure> _mesures = new();
+    List<Money> _monnaies = new();
+    List<Localisation> _localisations = new();
+
+    bool _imageUploading;
+    string? _imageError;
+    bool _visibleInClientCatalog = true;
+
+    bool IsLocalisationSelected(int locId) => _selectedLocalisations.Contains(locId);
+
+    void OnLocalisationToggle(int locId, bool selected)
+    {
+        if (selected)
+            _selectedLocalisations.Add(locId);
+        else
+            _selectedLocalisations.Remove(locId);
+    }
+
+    async Task OnImageFileSelected(InputFileChangeEventArgs e)
+    {
+        _imageError = null;
+        var file = e.File;
+        if (file.Size > 2 * 1024 * 1024)
+        {
+            _imageError = "Le fichier est trop grand (max 2 Mo).";
+            return;
+        }
+        if (!file.ContentType.StartsWith("image/"))
+        {
+            _imageError = "Seuls les fichiers image sont acceptés.";
+            return;
+        }
+        _imageUploading = true;
+        try
+        {
+            using var stream = file.OpenReadStream(maxAllowedSize: 2 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var base64 = Convert.ToBase64String(ms.ToArray());
+            _article.ImageArticle = $"data:{file.ContentType};base64,{base64}";
+            _visibleInClientCatalog = true;
+        }
+        catch (Exception ex)
+        {
+            _imageError = $"Erreur lors du chargement : {ex.Message}";
+        }
+        finally
+        {
+            _imageUploading = false;
+        }
+    }
+
+    void ClearArticleImage()
+    {
+        _article.ImageArticle = null;
+        _imageError = null;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+            var isAdmin = AppFunctions.Normalize(authUser.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+            var perms = await PermissionResolver.GetPermissionsAsync(_currentLogin);
+            _perms = perms;
+            _backRoute = perms.HasHierarchicalGrants
+                ? PermissionCatalog.TabHubRoute("articles", perms.Grants)
+                : "/stock";
+            if (!PermissionGate.DoAction(perms, "articles.catalogue.write",
+                    () => isAdmin || perms.CanWrite(AppFunctions.Stock)))
+            {
+                Navigation.NavigateTo(perms.HomeRoute());
+                return;
+            }
+        }
+
+        _categories = await CatalogueService.GetArticleCategoriesAsync();
+        _types = await CatalogueService.GetArticleTypesAsync();
+        _marques = await CatalogueService.GetArticleMarquesAsync();
+        _mesures = await CatalogueService.GetMesuresAsync();
+        _monnaies = await LookupService.GetMoneysAsync();
+        _localisations = await LocalisationService.GetAllLocalisationsAsync();
+
+        // Pre-select from query param if present
+        var uri = new Uri(Navigation.Uri);
+        var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        if (int.TryParse(query["localisationId"], out var locId))
+        {
+            _selectedLocalisations.Add(locId);
+        }
+
+        if (!string.IsNullOrEmpty(IdArticle))
+        {
+            var existing = await CatalogueService.GetArticleByIdAsync(IdArticle);
+            if (existing != null)
+            {
+                _isEdit = true;
+                _article = existing;
+                _visibleInClientCatalog = _article.Internal != true;
+
+                // Load article stocks from T_Stock
+                _articleStocks = await StockService.GetStocksByArticleAsync(IdArticle);
+            }
+        }
+        else
+        {
+            _article.IdMonais = CurrencyDefaults.MoneyIdUsd;
+        }
+    }
+
+    void OnCancel() => Navigation.NavigateTo(_backRoute);
+
+    async Task OnSave()
+    {
+        if (string.IsNullOrWhiteSpace(_article.IdArticle) || string.IsNullOrWhiteSpace(_article.Description))
+        {
+            Snackbar.Add("Le code et la description sont obligatoires.", Severity.Warning);
+            return;
+        }
+
+        _article.User = _currentLogin;
+        _article.Cumputer = Environment.MachineName;
+        _article.ImageArticle = string.IsNullOrWhiteSpace(_article.ImageArticle) ? null : _article.ImageArticle.Trim();
+        ApplyCatalogVisibility();
+
+        if (_isEdit)
+        {
+            _article.DateEditing = DateOnly.FromDateTime(DateTime.Today);
+            await CatalogueService.UpdateArticleAsync(_article);
+            CatalogRefresh.NotifyChanged();
+            Snackbar.Add($"Article « {_article.Description} » mis à jour.", Severity.Success);
+        }
+        else
+        {
+            if (!_selectedLocalisations.Any())
+            {
+                Snackbar.Add("Veuillez sélectionner au moins une localisation.", Severity.Warning);
+                return;
+            }
+
+            // Check if article code already exists
+            var exists = await CatalogueService.ArticleExistsAsync(_article.IdArticle);
+            if (exists)
+            {
+                Snackbar.Add($"Le code article « {_article.IdArticle} » existe déjà.", Severity.Warning);
+                return;
+            }
+
+            // Check if article description already exists
+            var descExists = await CatalogueService.ArticleDescriptionExistsAsync(_article.Description);
+            if (descExists)
+            {
+                Snackbar.Add($"Un article avec la description « {_article.Description} » existe déjà.", Severity.Warning);
+                return;
+            }
+
+            // Create ONE article (without localisation - managed via Stock table)
+            var newArticle = new Article
+            {
+                IdArticle = _article.IdArticle,
+                Description = _article.Description,
+                DescriptionI = _article.DescriptionI,
+                ImageArticle = string.IsNullOrWhiteSpace(_article.ImageArticle) ? null : _article.ImageArticle.Trim(),
+                IdMarque = _article.IdMarque,
+                IdType = _article.IdType,
+                IdCategory = _article.IdCategory,
+                IdMesure = _article.IdMesure,
+                IdMonais = _article.IdMonais,
+                Price = _article.Price,
+                Qte = 0,
+                Internal = _visibleInClientCatalog ? false : true,
+                DateSys = DateOnly.FromDateTime(DateTime.Today),
+                User = _article.User,
+                Cumputer = _article.Cumputer
+            };
+
+            await CatalogueService.CreateArticleWithStocksAsync(newArticle, _selectedLocalisations.ToList());
+            CatalogRefresh.NotifyChanged();
+            Snackbar.Add($"Article créé et associé à {_selectedLocalisations.Count} localisation(s).", Severity.Success);
+        }
+
+        Navigation.NavigateTo(_backRoute);
+    }
+
+    void ApplyCatalogVisibility()
+    {
+        if (_visibleInClientCatalog || !string.IsNullOrWhiteSpace(_article.ImageArticle))
+            _article.Internal = false;
+        else
+            _article.Internal = true;
+    }
+}

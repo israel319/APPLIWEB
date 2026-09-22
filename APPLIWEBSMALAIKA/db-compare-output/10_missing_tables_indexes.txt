@@ -1,0 +1,31 @@
+name tbl type_desc is_unique is_primary_key cols
+---- --- --------- --------- -------------- ----
+PK__T_Activi__45F4A7911F6EF649 T_Activities CLUSTERED 1 1 ActivityId
+UQ_T_Activities_Code T_Activities NONCLUSTERED 1 0 Code
+UQ_T_Activities_Fonction_Description T_Activities NONCLUSTERED 1 0 FonctionId,Description_Activity
+PK__T_Appro___3214EC07F23B66CD T_Appro_Details CLUSTERED 1 1 Id
+PK_T_Appro T_Appro_Expense CLUSTERED 1 1 Id
+PK_T_AppSettings T_AppSettings CLUSTERED 1 1 Key
+PK_T_Caisse T_Caisse CLUSTERED 1 1 Description,CurrencyId
+PK_T_Customer_Type T_Customer_Type CLUSTERED 1 1 CustomerTypeId
+PK_T_Expense_Source T_Expense_Source CLUSTERED 1 1 Id
+PK__T_Module__3214EC07D33D558D T_ModuleLicenses CLUSTERED 1 1 Id
+UQ__T_Module__EB27D43327457B94 T_ModuleLicenses NONCLUSTERED 1 0 ModuleCode
+PK__T_Mouvem__3214EC077CE39E4F T_Mouvement_Stock CLUSTERED 1 1 Id
+PK__T_Paymen__3214EC07E927F629 T_Payments CLUSTERED 1 1 Id
+PK__T_Permis__EFA6FB2F87576F61 T_Permissions CLUSTERED 1 1 PermissionId
+UQ_Role_Fonction T_Permissions NONCLUSTERED 1 0 RoleId,FonctionId
+PK_T_Profile T_Profile CLUSTERED 1 1 Id
+PK__T_Roles__8AFACE1AED392F76 T_Roles CLUSTERED 1 1 RoleId
+PK_T_Art_Localisations T_Stock CLUSTERED 1 1 Id_Article,Id_Localisation
+UQ_Stock_Article_Loc T_Stock NONCLUSTERED 1 0 Id_Article,Id_Localisation
+PK_T_Supplier T_Supplier CLUSTERED 1 1 SupplierId
+UQ__Supplier T_Supplier NONCLUSTERED 1 0 SupplierName
+PK_T_Supplier_Service T_Supplier_Service CLUSTERED 1 1 ServiceId
+PK__T_User_A__825604833F249DC2 T_User_Activities CLUSTERED 1 1 UserActivityId
+UQ_T_User_Activities_User_Activity T_User_Activities NONCLUSTERED 1 0 UserLogin,ActivityId
+PK_T_User_Caisse T_Users_Caisse CLUSTERED 1 1 User,CaisseId
+PK__T_Versem__3214EC07EB04827E T_Versements CLUSTERED 1 1 Id
+PK_T_YesNo T_YesNo CLUSTERED 1 1 Id
+
+(27 lignes affectées)

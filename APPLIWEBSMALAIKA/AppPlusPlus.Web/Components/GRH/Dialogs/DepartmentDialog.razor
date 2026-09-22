@@ -1,0 +1,86 @@
+@using AppPlusPlus.Domain.Entities.GRH.Organization
+@using MudBlazor
+
+<MudDialog>
+    <DialogContent>
+        <div class="lov-form-header">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-diagram-3 text-primary"></i>
+                <h5>@(IsEdit ? "Modifier le département" : "Nouveau département")</h5>
+            </div>
+        </div>
+        <div class="lov-form-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Code <span class="text-danger">*</span></label>
+                    <input class="form-control" @bind="Form.DepartmentCode" placeholder="DEP001" />
+                </div>
+                <div class="col-md-8">
+                    <label class="form-label fw-semibold">Nom <span class="text-danger">*</span></label>
+                    <input class="form-control" @bind="Form.DepartmentName" placeholder="Nom du département" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label fw-semibold">Société <span class="text-danger">*</span></label>
+                    <select class="form-select" @bind="Form.CompanyId">
+                        <option value="0">— Sélectionner —</option>
+                        @foreach (var c in Companies)
+                        {
+                            <option value="@c.Id">@c.CompanyName</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Budget (TND)</label>
+                    <input type="number" class="form-control" @bind="Form.BudgetAmount" placeholder="0.00" min="0" step="0.01" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Description</label>
+                    <input class="form-control" @bind="Form.Description" placeholder="Description" />
+                </div>
+            </div>
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger mt-2 py-2 px-3 small mb-0">@_error</div>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="d-flex gap-2 px-1">
+        <button type="button" class="btn btn-outline-secondary" @onclick="Cancel">
+            <i class="bi bi-x-lg me-1"></i>Annuler
+        </button>
+        <button type="button" class="btn btn-primary" @onclick="Submit">
+            <i class="bi bi-check-lg me-1"></i>Enregistrer
+        </button>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter] public DepartmentFormData Form { get; set; } = new();
+    [Parameter] public List<Company> Companies { get; set; } = new();
+    [Parameter] public bool IsEdit { get; set; }
+
+    string _error = "";
+
+    void Cancel() => MudDialog.Cancel();
+
+    void Submit()
+    {
+        if (string.IsNullOrWhiteSpace(Form.DepartmentCode))  { _error = "Le code est obligatoire."; return; }
+        if (string.IsNullOrWhiteSpace(Form.DepartmentName))  { _error = "Le nom est obligatoire."; return; }
+        if (Form.CompanyId == 0)                              { _error = "Veuillez sélectionner une société."; return; }
+        MudDialog.Close(DialogResult.Ok(Form));
+    }
+
+    public class DepartmentFormData
+    {
+        public string  DepartmentCode { get; set; } = "";
+        public string  DepartmentName { get; set; } = "";
+        public int     CompanyId      { get; set; }
+        public decimal BudgetAmount   { get; set; }
+        public string? Description    { get; set; }
+    }
+}

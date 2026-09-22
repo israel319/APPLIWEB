@@ -1,0 +1,89 @@
+@namespace AppPlusPlus.Web.Components.Shared
+
+@if (TotalCount > 0)
+{
+    <div class="aw-pager">
+        <div class="aw-pager__meta">
+            <span class="aw-pager__range">@RangeText</span>
+            <label class="aw-pager__size">
+                <span>Par page</span>
+                <select value="@PageSize" @onchange="OnSizeChanged" aria-label="Éléments par page">
+                    @foreach (var size in SizeOptions)
+                    {
+                        <option value="@size">@size</option>
+                    }
+                </select>
+            </label>
+        </div>
+        <div class="aw-pager__actions">
+            <button type="button"
+                    class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon"
+                    disabled="@(Page <= 1)"
+                    title="Première page"
+                    @onclick="@(() => GoTo(1))">
+                <i class="bi bi-chevron-double-left"></i>
+            </button>
+            <button type="button"
+                    class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon"
+                    disabled="@(Page <= 1)"
+                    title="Page précédente"
+                    @onclick="@(() => GoTo(Page - 1))">
+                <i class="bi bi-chevron-left"></i>
+            </button>
+            <span class="aw-pager__pages">Page @Page / @TotalPages</span>
+            <button type="button"
+                    class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon"
+                    disabled="@(Page >= TotalPages)"
+                    title="Page suivante"
+                    @onclick="@(() => GoTo(Page + 1))">
+                <i class="bi bi-chevron-right"></i>
+            </button>
+            <button type="button"
+                    class="aw-btn aw-btn--ghost aw-btn--sm aw-btn--icon"
+                    disabled="@(Page >= TotalPages)"
+                    title="Dernière page"
+                    @onclick="@(() => GoTo(TotalPages))">
+                <i class="bi bi-chevron-double-right"></i>
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    static readonly int[] SizeOptions = [10, 25, 50, 100];
+
+    [Parameter] public int TotalCount { get; set; }
+    [Parameter] public int Page { get; set; } = 1;
+    [Parameter] public int PageSize { get; set; } = 25;
+    [Parameter] public string ItemLabel { get; set; } = "élément";
+    [Parameter] public EventCallback<int> PageChanged { get; set; }
+    [Parameter] public EventCallback<int> PageSizeChanged { get; set; }
+
+    int TotalPages => TotalCount <= 0 ? 1 : (int)Math.Ceiling(TotalCount / (double)Math.Max(1, PageSize));
+
+    string RangeText
+    {
+        get
+        {
+            if (TotalCount <= 0) return $"0 {ItemLabel}";
+            var from = (Page - 1) * PageSize + 1;
+            var to = Math.Min(Page * PageSize, TotalCount);
+            var plural = TotalCount > 1 && !ItemLabel.EndsWith('s') ? "s" : "";
+            return $"{from}–{to} sur {TotalCount} {ItemLabel}{plural}";
+        }
+    }
+
+    async Task GoTo(int page)
+    {
+        page = Math.Clamp(page, 1, TotalPages);
+        if (page == Page) return;
+        await PageChanged.InvokeAsync(page);
+    }
+
+    async Task OnSizeChanged(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var size)) return;
+        if (size == PageSize) return;
+        await PageSizeChanged.InvokeAsync(size);
+    }
+}

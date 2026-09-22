@@ -1,0 +1,71 @@
+@using MudBlazor
+@using AppPlusPlus.Domain.Entities.Fournisseurs
+
+<div class="search-autocomplete-wrap">
+    <MudAutocomplete T="int?"
+                     @bind-Text="_localText"
+                     Value="@Value"
+                     ValueChanged="OnValueChanged"
+                     SearchFunc="@Search"
+                     ToStringFunc="@FormatSupplier"
+                     Placeholder="@Placeholder"
+                     Clearable="true"
+                     CoerceText="true"
+                     ResetValueOnEmptyText="true"
+                     Variant="Variant.Outlined"
+                     Margin="Margin.Dense"
+                     Dense="true"
+                     Class="search-autocomplete"
+                     InputClass="@MudSearchDefaults.InputClass"
+                     PopoverClass="@MudSearchDefaults.PopoverClass"
+                     DropdownSettings="@MudSearchDefaults.Dropdown"
+                     AnchorOrigin="Origin.BottomLeft"
+                     TransformOrigin="Origin.TopLeft"
+                     RelativeWidth="DropdownWidth.Relative"
+                     MaxHeight="200"
+                     MaxItems="12"
+                     MinCharacters="1"
+                     OpenOnFocus="false"
+                     DebounceInterval="80"
+                     Immediate="true" />
+</div>
+
+@code {
+    [Parameter] public int? Value { get; set; }
+    [Parameter] public EventCallback<int?> ValueChanged { get; set; }
+    [Parameter] public List<Supplier> Suppliers { get; set; } = new();
+    [Parameter] public string Placeholder { get; set; } = "Rechercher un fournisseur…";
+
+    string? _localText;
+    int? _syncValue;
+
+    protected override void OnParametersSet()
+    {
+        if (Value != _syncValue)
+        {
+            _syncValue = Value;
+            _localText = Value.HasValue ? FormatSupplier(Value) : null;
+        }
+    }
+
+    async Task OnValueChanged(int? val)
+    {
+        _syncValue = val;
+        _localText = val.HasValue ? FormatSupplier(val) : null;
+        await ValueChanged.InvokeAsync(val);
+    }
+
+    string FormatSupplier(int? id) =>
+        Suppliers.FirstOrDefault(s => s.SupplierId == id)?.SupplierName ?? "";
+
+    Task<IEnumerable<int?>> Search(string? value, CancellationToken _)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return Task.FromResult(Enumerable.Empty<int?>());
+
+        var q = Suppliers.Where(s => s.SupplierName != null
+            && s.SupplierName.Contains(value, StringComparison.OrdinalIgnoreCase));
+
+        return Task.FromResult(q.Select(s => (int?)s.SupplierId).Take(12));
+    }
+}

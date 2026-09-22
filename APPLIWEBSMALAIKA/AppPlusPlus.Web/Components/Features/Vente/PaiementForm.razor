@@ -1,0 +1,110 @@
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@inject IPaymentService PaymentService
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthStateProvider
+
+<MudDialog>
+    <DialogContent>
+        <div class="aw-dialog">
+            <header class="aw-dialog__head">
+                <div class="aw-dialog__title-wrap">
+                    <i class="bi bi-credit-card" aria-hidden="true"></i>
+                    <h2 class="aw-dialog__title">Paiement</h2>
+                </div>
+            </header>
+            <div class="aw-dialog__body">
+                <div class="alert alert-info">
+                    Montant restant à payer : <strong>@CurrencyFormat.Fact(MontantRest, FactIsUsd, FactTaux)</strong>
+                </div>
+
+                <div class="aw-field">
+                    <label class="aw-field__label">Montant du paiement</label>
+                    <MudNumericField @bind-Value="_montant" T="decimal" Min="0.01m" Max="@MontantRest"
+                                     Format="N2" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="0.00" />
+                </div>
+
+                <div class="aw-field" style="margin-top:0.9rem;">
+                    <label class="aw-field__label">Mode de paiement</label>
+                    <MudSelect T="string" @bind-Value="_mode" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                        @foreach (var m in _modes)
+                        {
+                            <MudSelectItem T="string" Value="@m">@m</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+
+                <div class="aw-field" style="margin-top:0.9rem;">
+                    <label class="aw-field__label">Note (optionnel)</label>
+                    <textarea class="aw-input" @bind="_note" rows="2" placeholder="Référence, mode…"></textarea>
+                </div>
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="aw-dialog__footer" style="width:100%;border:none;padding:0.35rem 0.25rem 0.15rem;">
+            <button type="button" class="aw-btn aw-btn--ghost" @onclick="Cancel">
+                <i class="bi bi-x-lg"></i> Annuler
+            </button>
+            <button type="button" class="aw-btn aw-btn--primary" @onclick="@OnPay" disabled="@(_montant <= 0)">
+                <i class="bi bi-credit-card"></i> @(_montant >= MontantRest ? "Payer le solde" : "Paiement partiel")
+            </button>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int CommandeId { get; set; }
+    [Parameter] public int FactId { get; set; }
+    [Parameter] public decimal MontantRest { get; set; }
+    [Parameter] public decimal FactTaux { get; set; }
+    [Parameter] public bool FactIsUsd { get; set; }
+
+    decimal _montant;
+    string _mode = "Espèces";
+    string? _note;
+    string _currentLogin = "";
+    List<string> _modes = new() { "Espèces", "Virement", "Mobile Money", "Chèque", "Autre" };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var authUser = authState.User;
+        if (authUser.Identity?.IsAuthenticated == true)
+        {
+            _currentLogin = authUser.FindFirst("login")?.Value
+                ?? authUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? "";
+        }
+
+        _montant = MontantRest;
+    }
+
+    void Cancel() => MudDialog.Close();
+
+    async Task OnPay()
+    {
+        if (_montant <= 0 || _montant > MontantRest) return;
+
+        try
+        {
+            var note = $"{_mode}" + (string.IsNullOrWhiteSpace(_note) ? "" : $" — {_note}");
+            var result = await PaymentService.RecordPaymentAsync(FactId, CommandeId, _montant, _mode, note, _currentLogin);
+
+            if (!result.Success)
+            {
+                Snackbar.Add(result.Message, Severity.Error);
+                return;
+            }
+
+            Snackbar.Add($"{CurrencyFormat.Fact(_montant, FactIsUsd, FactTaux)} — {_mode}", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.InnerException?.Message ?? ex.Message;
+            Snackbar.Add(msg, Severity.Error);
+        }
+    }
+}

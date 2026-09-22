@@ -1,0 +1,208 @@
+@page "/services/facturation"
+@page "/services/facturation/{FactId:int}"
+@rendermode InteractiveServer
+@using AppPlusPlus.Application.DTOs.Prestations
+@using AppPlusPlus.Application.Services.Prestations
+@using AppPlusPlus.Domain.Common
+@inject IServiceManagementService ServiceManagement
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IPermissionResolver PermissionResolver
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+
+<ModuleGuard ModuleCode="services" ModuleName="Services & Prestations">
+
+@if (FactId.HasValue && FactId.Value > 0)
+{
+    <ServiceFactureDetail FactId="FactId.Value" CanWrite="_canWrite" CanRead="_canRead" OnBack="BackToList" />
+}
+else
+{
+    <PageTitle>@AppSettings.AppName — Facturation prestations</PageTitle>
+
+    @if (!_loaded)
+    {
+        <div class="aw-page">
+            <AwSkeleton Variant="page" Rows="7" />
+        </div>
+    }
+    else if (!_canRead)
+    {
+        <div class="aw-page">
+            <div class="aw-shell" style="max-width:720px;margin:1.5rem auto;">
+                <div class="aw-empty">
+                    <i class="bi bi-lock"></i>
+                    <p><strong>Accès refusé</strong><br />Votre rôle ne possède pas les droits d'accès au module Services.</p>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        var filtered = FilterInvoices().ToList();
+
+        <div class="aw-page aw-page--workspace">
+            <div class="aw-workspace">
+                <header class="aw-object-head">
+                    <div class="aw-object-head__identity">
+                        <p class="aw-object-head__eyebrow">Module services</p>
+                        <h1 class="aw-object-head__title">Facturation prestations</h1>
+                        <p class="aw-object-head__desc">Factures issues des missions — validation et impression hors caisse magasin</p>
+                    </div>
+                    <div class="aw-object-head__actions">
+                        <span class="aw-badge aw-badge--muted">@filtered.Count facture(s)</span>
+                    </div>
+                </header>
+
+                <div class="aw-workspace__body">
+                    <ServicesSubNav />
+
+                    <div class="aw-actionbar">
+                        <div class="aw-actionbar__search">
+                            <i class="bi bi-search" aria-hidden="true"></i>
+                            <input type="search"
+                                   placeholder="Rechercher par n°, client ou mission…"
+                                   aria-label="Rechercher une facture prestation"
+                                   @bind="_search"
+                                   @bind:event="oninput" />
+                        </div>
+                        <div class="aw-actionbar__actions">
+                            <button type="button" class="aw-btn aw-btn--ghost"
+                                    @onclick="@(() => Navigation.NavigateTo("/services"))">
+                                <i class="bi bi-folder2"></i> Missions
+                            </button>
+                        </div>
+                    </div>
+
+                    @if (!_invoices.Any())
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-empty">
+                                <i class="bi bi-receipt"></i>
+                                <p>Aucune facture prestation.<br />Ouvrez une mission, validez les heures, puis créez la facture.</p>
+                                <button type="button" class="aw-btn aw-btn--primary"
+                                        @onclick="@(() => Navigation.NavigateTo("/services"))">
+                                    <i class="bi bi-folder2"></i> Voir les missions
+                                </button>
+                            </div>
+                        </div>
+                    }
+                    else if (!filtered.Any())
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-empty">
+                                <i class="bi bi-search"></i>
+                                <p>Aucune facture pour cette recherche.</p>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="aw-table-region">
+                            <div class="aw-table-wrap">
+                                <table class="aw-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Facture</th>
+                                            <th>Client</th>
+                                            <th>Mission</th>
+                                            <th>Date</th>
+                                            <th>État</th>
+                                            <th class="aw-table__num">Total</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var f in filtered)
+                                        {
+                                            <tr style="cursor:pointer;" @onclick="@(() => OpenInvoice(f.Id))">
+                                                <td>
+                                                    <span class="aw-table__title">FAC-@f.Id</span>
+                                                    <span class="aw-table__meta">N° @f.Id</span>
+                                                </td>
+                                                <td>@f.ClientName</td>
+                                                <td><span class="aw-table__meta">@f.ProjectTitle</span></td>
+                                                <td><span class="aw-table__meta">@f.Date.ToString("dd/MM/yyyy")</span></td>
+                                                <td>
+                                                    <span class="aw-badge @StatusBadgeClass(f.Status)">@StatusLabel(f.Status)</span>
+                                                </td>
+                                                <td class="aw-table__num">@CurrencyFormat.Fact(f.Total, false, 1)</td>
+                                                <td>
+                                                    <i class="bi bi-chevron-right" style="color:var(--aw-muted);" aria-hidden="true"></i>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+}
+
+</ModuleGuard>
+
+@code {
+    [Parameter] public int? FactId { get; set; }
+
+    bool _loaded;
+    bool _canRead;
+    bool _canWrite;
+    string _search = "";
+    List<ServiceInvoiceRowDto> _invoices = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var login = auth.User.FindFirst("login")?.Value
+            ?? auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "";
+        var isAdmin = AppFunctions.Normalize(auth.User.FindFirst(ClaimTypes.Role)?.Value) == "administrateur";
+        var perms = await PermissionResolver.GetPermissionsAsync(login);
+        _canRead = PermissionGate.ViewTab(perms, "services",
+            () => PermissionGate.LegacyRead(perms, AppFunctions.Services, isAdmin));
+        _canWrite = PermissionGate.DoAction(perms, "services.write",
+            () => PermissionGate.LegacyWrite(perms, AppFunctions.Services, isAdmin));
+        _loaded = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !_canRead || FactId.HasValue || _invoicesLoaded)
+            return;
+
+        _invoicesLoaded = true;
+        _invoices = await ServiceManagement.GetServiceInvoicesAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    bool _invoicesLoaded;
+
+    void OpenInvoice(int id) => Navigation.NavigateTo($"/services/facturation/{id}");
+    void BackToList() => Navigation.NavigateTo("/services/facturation");
+
+    IEnumerable<ServiceInvoiceRowDto> FilterInvoices() =>
+        string.IsNullOrWhiteSpace(_search) ? _invoices
+        : _invoices.Where(f => HubFilterHelper.MatchesSearch(_search, f.ClientName, f.ProjectTitle, f.Id.ToString()));
+
+    static string StatusLabel(int s) => s switch
+    {
+        0 => "Brouillon",
+        1 => "Validée",
+        2 => "Payée",
+        3 => "Annulée",
+        _ => "—"
+    };
+
+    static string StatusBadgeClass(int s) => s switch
+    {
+        0 => "aw-badge--accent",
+        1 => "aw-badge--primary",
+        2 => "aw-badge--brand",
+        3 => "aw-badge--danger",
+        _ => "aw-badge--muted"
+    };
+}
